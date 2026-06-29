@@ -29,7 +29,7 @@ class JobExportView(APIView):
     def get(self, request):
         from accounts.models import UserRole
 
-        qs = Job.objects.select_related('client')
+        qs = Job.objects.select_related('client').filter(organization=request.user.organization)
         user = request.user
         if user.role == UserRole.MANAGER:
             qs = qs.filter(created_by=user)
@@ -74,7 +74,7 @@ class JobImportView(APIView):
             client_name = row.get('client_name', '').strip()
             client = None
             if client_name:
-                client = Client.objects.filter(company_name__iexact=client_name, is_deleted=False).first()
+                client = Client.objects.filter(company_name__iexact=client_name, is_deleted=False, organization=request.user.organization).first()
                 if not client:
                     errors.append({"row": i, "error": f"Client '{client_name}' not found. Job will be created without a client."})
 
@@ -92,6 +92,7 @@ class JobImportView(APIView):
                     skills=skills,
                     description=row.get('description', '').strip(),
                     created_by=request.user,
+                    organization=request.user.organization,
                 )
                 created += 1
             except Exception as e:

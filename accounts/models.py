@@ -2,6 +2,14 @@ import uuid
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 
+class Organization(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=200)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
 class UserRole(models.TextChoices):
     ADMIN     = 'admin'
     MANAGER   = 'manager'
@@ -34,6 +42,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_staff    = models.BooleanField(default=False)
     date_joined = models.DateTimeField(auto_now_add=True)
     created_by  = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL)
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='users', null=True, blank=True)
 
     objects = CustomUserManager()
 

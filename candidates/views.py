@@ -17,7 +17,7 @@ class CandidateViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = Candidate.objects.filter(is_deleted=False)
+        qs = Candidate.objects.filter(is_deleted=False, organization=user.organization)
         if user.role == UserRole.ADMIN:
             return qs
         elif user.role == UserRole.MANAGER:
@@ -27,7 +27,7 @@ class CandidateViewSet(viewsets.ModelViewSet):
         return Candidate.objects.none()
 
     def perform_create(self, serializer):
-        candidate = serializer.save(created_by=self.request.user)
+        candidate = serializer.save(created_by=self.request.user, organization=self.request.user.organization)
         log_action(self.request.user, 'created', 'Candidate', candidate.id, f"Created candidate '{candidate.candidate_name}'")
 
     def perform_update(self, serializer):
@@ -126,8 +126,8 @@ class CalendarEventsView(APIView):
             
         user = request.user
         
-        interviews_qs = InterviewSchedule.objects.filter(date__gte=start_date, date__lte=end_date, candidate__is_deleted=False)
-        candidates_qs = Candidate.objects.filter(share_date__gte=start_date, share_date__lte=end_date, is_deleted=False)
+        interviews_qs = InterviewSchedule.objects.filter(date__gte=start_date, date__lte=end_date, candidate__is_deleted=False, organization=user.organization)
+        candidates_qs = Candidate.objects.filter(share_date__gte=start_date, share_date__lte=end_date, is_deleted=False, organization=user.organization)
         
         if user.role == UserRole.MANAGER:
             interviews_qs = interviews_qs.filter(candidate__job__created_by=user)
@@ -205,7 +205,8 @@ class PublicUploadView(APIView):
             resume=resume,
             resume_file_name=resume.name,
             status=CandidateStatus.SCREENING,
-            current_stage=first_stage
+            current_stage=first_stage,
+            organization=job.organization
         )
         
         simulate_resume_submission_notification(candidate.id)

@@ -8,7 +8,8 @@ from common.permissions import IsAdmin
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = AuditLogSerializer
     permission_classes = [IsAdmin]
-    queryset = AuditLog.objects.all()
+    def get_queryset(self):
+        return AuditLog.objects.filter(organization=self.request.user.organization)
 
     @action(detail=False, methods=['get'], url_path='export')
     def export_logs(self, request):

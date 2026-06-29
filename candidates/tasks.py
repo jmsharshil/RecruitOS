@@ -24,6 +24,7 @@ def simulate_interview_reminder(interview_schedule_id):
         for recruiter in candidate.job.assigned_recruiters.all():
             Notification.objects.create(
                 user=recruiter,
+                organization=candidate.organization,
                 title="Interview Reminder",
                 message=f"Interview for {candidate.candidate_name} is in 24 hours.",
                 type='warning',
@@ -40,6 +41,7 @@ def simulate_resume_submission_notification(candidate_id):
         for recruiter in candidate.job.assigned_recruiters.all():
             Notification.objects.create(
                 user=recruiter,
+                organization=candidate.organization,
                 title="New Resume Submitted",
                 message=f"{candidate.candidate_name} submitted a resume for '{candidate.job.title}'.",
                 type='info',

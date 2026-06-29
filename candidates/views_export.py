@@ -33,7 +33,7 @@ class CandidateExportView(APIView):
     def get(self, request):
         from accounts.models import UserRole
 
-        qs = Candidate.objects.filter(is_deleted=False).select_related('job', 'current_stage')
+        qs = Candidate.objects.filter(is_deleted=False, organization=request.user.organization).select_related('job', 'current_stage')
 
         user = request.user
         if user.role == UserRole.MANAGER:
@@ -82,7 +82,7 @@ class CandidateImportView(APIView):
 
         for i, row in enumerate(rows, start=2):  # row 1 = header
             job_title = row.get('job_title', '').strip()
-            job = Job.objects.filter(title__iexact=job_title).first()
+            job = Job.objects.filter(title__iexact=job_title, organization=request.user.organization).first()
             if not job:
                 errors.append({"row": i, "error": f"Job '{job_title}' not found."})
                 skipped += 1
@@ -114,6 +114,7 @@ class CandidateImportView(APIView):
                     feedback=row.get('feedback', '').strip(),
                     status=row.get('status', CandidateStatus.SCREENING),
                     created_by=request.user,
+                    organization=request.user.organization,
                 )
                 created += 1
             except Exception as e:

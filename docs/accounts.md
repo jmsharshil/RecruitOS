@@ -1,9 +1,12 @@
 # Accounts Module Documentation
 
 ## Overview
-Handles authentication, user management (Managers & Recruiters), role-based dashboards, and profile.
+Handles authentication, multi-tenant user management (scoped to `Organization`), role-based dashboards, profile, and organization registration (planned).
 
-**Key Models**: User (with roles: admin, manager, recruiter)
+**Key Models**: 
+- `Organization` (tenant root)
+- `User` (extends AbstractBaseUser, has `organization = ForeignKey(Organization)`, `created_by`, `role`)
+- Uses `BaseModel` inheritance pattern for consistency across system.
 
 ## Flow Diagram - Accounts Module
 
@@ -29,10 +32,17 @@ flowchart TD
 
 ### 1. Login
 - **Endpoint**: `POST /api/v1/auth/login/`
-- **Body**:
+- **Example with seeded data** (use one of the org-scoped accounts):
   ```json
   {
-    "email": "admin@example.com",
+    "email": "admin@techsolutions.com",
+    "password": "admin123"
+  }
+  ```
+  or
+  ```json
+  {
+    "email": "admin@globalcorp.com",
     "password": "admin123"
   }
   ```
@@ -43,13 +53,16 @@ flowchart TD
     "refresh": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
     "user": {
       "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-      "name": "Admin User",
-      "email": "admin@example.com",
+      "name": "Raj Admin",
+      "email": "admin@techsolutions.com",
       "role": "admin",
+      "organization": "Tech Solutions",
       "avatar": null
     }
   }
   ```
+
+**Multi-Tenancy Note**: All users are scoped to an `Organization`. Login returns org context; all subsequent API calls are filtered to the user's organization via custom querysets and middleware.
 
 ### 2. Refresh Token
 - **Endpoint**: `POST /api/v1/auth/token/refresh/`
@@ -90,14 +103,30 @@ flowchart TD
 
 - **List/View**: GET endpoints with role-based filtering.
 
-### 7. Dashboards
-- `GET /api/v1/dashboard/admin/` - Stats on jobs, candidates, clients, recent activity.
-- `GET /api/v1/dashboard/manager/` - My jobs, pipeline, interviews today.
-- `GET /api/v1/dashboard/recruiter/` - Assigned jobs, candidates, interviews.
+### 7. Organization Registration (Planned)
+- **Endpoint**: `POST /api/v1/organizations/register/`
+- **Body**:
+  ```json
+  {
+    "name": "New Company Inc.",
+    "admin_email": "admin@newcompany.com",
+    "admin_name": "Admin User",
+    "admin_password": "securepass123",
+    "industry": "IT Services"
+  }
+  ```
+- **Response**: Creates `Organization` + initial `ADMIN` user, returns tokens.
+- This will bootstrap a new tenant with full isolation.
+
+### 8. Dashboards
+- `GET /api/v1/dashboard/admin/` - Stats on jobs, candidates, clients, recent activity (org-scoped).
+- `GET /api/v1/dashboard/manager/` - My jobs, pipeline, interviews today (org-scoped).
+- `GET /api/v1/dashboard/recruiter/` - Assigned jobs, candidates, interviews (org-scoped).
 
 **Permissions**:
 - Uses custom permissions: IsAdmin, IsManager, IsRecruiter, IsAdminOrManager.
 - All actions logged to Audit module.
+- **Multi-tenancy enforced**: Querysets filtered by `request.user.organization`; middleware ensures org context.
 
 ## Integration Points
 - Used by all other modules for authentication and authorization.

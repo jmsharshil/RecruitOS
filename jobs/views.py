@@ -12,16 +12,17 @@ class JobViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
+        qs = Job.objects.filter(organization=user.organization)
         if user.role == UserRole.ADMIN:
-            return Job.objects.all()
+            return qs
         elif user.role == UserRole.MANAGER:
-            return Job.objects.filter(created_by=user)
+            return qs.filter(created_by=user)
         elif user.role == UserRole.RECRUITER:
-            return Job.objects.filter(assigned_recruiters=user)
+            return qs.filter(assigned_recruiters=user)
         return Job.objects.none()
 
     def perform_create(self, serializer):
-        job = serializer.save(created_by=self.request.user)
+        job = serializer.save(created_by=self.request.user, organization=self.request.user.organization)
         
         # Auto-create default stages
         for stage_data in DEFAULT_STAGES:

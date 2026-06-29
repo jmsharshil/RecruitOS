@@ -8,7 +8,7 @@ from django.db.models import Count, Q
 from django.utils import timezone
 
 from accounts.models import User, UserRole
-from accounts.serializers import UserBriefSerializer, ManagerSerializer, RecruiterSerializer
+from accounts.serializers import UserBriefSerializer, ManagerSerializer, RecruiterSerializer, CustomTokenObtainPairSerializer
 from common.permissions import IsAdmin, IsAdminOrManager, IsManager, IsRecruiter
 from audit.utils import log_action
 from audit.models import AuditLog
@@ -22,13 +22,8 @@ logger = logging.getLogger(__name__)
 # --- Auth Views ---
 
 class LoginView(TokenObtainPairView):
-    def post(self, request, *args, **kwargs):
-        response = super().post(request, *args, **kwargs)
-        if response.status_code == 200:
-            user = self.user
-            serializer = UserBriefSerializer(user)
-            response.data['user'] = serializer.data
-        return response
+    permission_classes = [permissions.AllowAny]
+    serializer_class = CustomTokenObtainPairSerializer
 
 class LogoutView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -74,13 +69,13 @@ class ManagerViewSet(viewsets.ModelViewSet):
     serializer_class = ManagerSerializer
 
     def get_queryset(self):
-        return User.objects.filter(role=UserRole.MANAGER).annotate(
+        return User.objects.filter(role=UserRole.MANAGER, organization=self.request.user.organization).annotate(
             jobs_count=Count('created_jobs', distinct=True),
             recruiters_count=Count('user', filter=Q(user__role=UserRole.RECRUITER), distinct=True)
         )
 
     def perform_create(self, serializer):
-        user = serializer.save(role=UserRole.MANAGER, created_by=self.request.user)
+        user = serializer.save(role=UserRole.MANAGER, created_by=self.request.user, organization=self.request.user.organization)
         if 'password' in self.request.data:
             user.set_password(self.request.data['password'])
             user.save()
@@ -95,13 +90,13 @@ class RecruiterViewSet(viewsets.ModelViewSet):
     serializer_class = RecruiterSerializer
 
     def get_queryset(self):
-        qs = User.objects.filter(role=UserRole.RECRUITER)
+        qs = User.objects.filter(role=UserRole.RECRUITER, organization=self.request.user.organization)
         if self.request.user.role == UserRole.MANAGER:
             qs = qs.filter(created_by=self.request.user)
         return qs
 
     def perform_create(self, serializer):
-        user = serializer.save(role=UserRole.RECRUITER, created_by=self.request.user)
+        user = serializer.save(role=UserRole.RECRUITER, created_by=self.request.user, organization=self.request.user.organization)
         if 'password' in self.request.data:
             user.set_password(self.request.data['password'])
             user.save()
@@ -119,17 +114,18 @@ class AdminDashboardView(APIView):
     def get(self, request):
         now = timezone.now()
         this_month = now.replace(day=1, hour=0, minute=0, second=0)
+        org = request.user.organization
 
-        total_active_jobs = Job.objects.filter(status=JobStatus.OPEN).count()
-        candidates_this_month = Candidate.objects.filter(created_at__gte=this_month, is_deleted=False).count()
-        active_clients = Client.objects.filter(status=ClientStatus.ACTIVE, is_deleted=False).count()
+        total_active_jobs = Job.objects.filter(status=JobStatus.OPEN, organization=org).count()
+        candidates_this_month = Candidate.objects.filter(created_at__gte=this_month, is_deleted=False, organization=org).count()
+        active_clients = Client.objects.filter(status=ClientStatus.ACTIVE, is_deleted=False, organization=org).count()
         
-        recent_jobs = Job.objects.order_by('-created_at')[:5].values(
+        recent_jobs = Job.objects.filter(organization=org).order_by('-created_at')[:5].values(
             'id', 'title', 'client__company_name', 'status', 'created_at'
         )
 
-        top_recruiters = User.objects.filter(role=UserRole.RECRUITER)[:5].values('id', 'name', 'avatar')
-        recent_audit_logs = AuditLogSerializer(AuditLog.objects.order_by('-timestamp')[:5], many=True).data
+        top_recruiters = User.objects.filter(role=UserRole.RECRUITER, organization=org)[:5].values('id', 'name', 'avatar')
+        recent_audit_logs = AuditLogSerializer(AuditLog.objects.filter(organization=org).order_by('-timestamp')[:5], many=True).data
 
         return Response({
             "stats": {

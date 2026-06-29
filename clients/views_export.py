@@ -28,7 +28,7 @@ class ClientExportView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        qs = Client.objects.filter(is_deleted=False)
+        qs = Client.objects.filter(is_deleted=False, organization=request.user.organization)
 
         status_filter = request.query_params.get('status')
         if status_filter:
@@ -65,7 +65,7 @@ class ClientImportView(APIView):
 
         for i, row in enumerate(rows, start=2):
             email = row.get('email', '').strip()
-            if Client.objects.filter(email=email, is_deleted=False).exists():
+            if Client.objects.filter(email=email, is_deleted=False, organization=request.user.organization).exists():
                 errors.append({"row": i, "error": f"Client with email '{email}' already exists."})
                 skipped += 1
                 continue
@@ -86,6 +86,7 @@ class ClientImportView(APIView):
                     payment_period_days=row.get('payment_period_days') or None,
                     replacement_period_days=row.get('replacement_period_days') or None,
                     created_by=request.user,
+                    organization=request.user.organization,
                 )
                 created += 1
             except Exception as e:

@@ -1,22 +1,34 @@
 # Common Module Documentation
 
 ## Overview
-Shared utilities, base models, permissions, and helper functions used across all modules.
+Shared utilities, base models (`BaseModel` with `organization` FK for multi-tenancy), permissions, and helper functions used across all modules.
 
 **Key Components**:
-- BaseModel (with timestamps, soft delete support)
-- Custom Permissions (role-based)
-- Utils for logging, notifications, etc.
+- `BaseModel` (adds `organization`, `created_at`, `updated_at` to all models)
+- Custom Permissions (role-based + org-scoped)
+- Utils for audit logging, notifications, filters
+- Ensures **strict tenant isolation** - no cross-organization data visibility.
 
-## Base Model Flow
+## Base Model (Multi-Tenancy Core)
 
 ```mermaid
 flowchart TD
     A[All Models Inherit from BaseModel] --> B[Automatic Fields]
-    B --> C[created_at, updated_at]
-    C --> D[is_deleted, deleted_at for soft delete]
-    D --> E[created_by User reference in most models]
-    E --> F[Standardized CRUD behavior across modules]
+    B --> C[organization = ForeignKey(Organization, on_delete=CASCADE)]
+    C --> D[created_at, updated_at (auto)]
+    D --> E[Automatic tenant filtering in views/querysets]
+    E --> F[Strict data isolation between organizations]
+```
+
+**Current Implementation** (`common/models.py`):
+```python
+class BaseModel(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        abstract = True
 ```
 
 ## Key Features
@@ -31,36 +43,30 @@ flowchart TD
   ```
 
 ### 2. BaseModel (common/models.py)
-```python
-class BaseModel(models.Model):
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    is_deleted = models.BooleanField(default=False)
-    deleted_at = models.DateTimeField(null=True, blank=True)
-    # ... soft delete methods
-```
-
-Most models (Client, Job, Candidate, etc.) inherit from this.
+All tenant models (Client, Job, Candidate, InterviewSchedule, ClientSubmission, POC, ClientDocument, Stage, AuditLog, Notification) inherit from `BaseModel`, which injects the `organization` FK automatically. Some models (e.g. Candidate, Client) additionally implement soft-delete fields (`is_deleted`, `deleted_at`) for data retention.
 
 ### 3. Utilities
 - `audit.utils.log_action(user, action, target_type, target_id, description)`
 - Notification helpers
 - Permission mixins
 
-## Role-Based Access Control Flow
-1. User logs in with role (from accounts.UserRole)
-2. Request comes with JWT token
-3. Permission classes check request.user.role
-4. Admin: Full access
-5. Manager: Can manage their recruiters, their jobs, all clients
-6. Recruiter: Limited to assigned jobs and their candidates
+## Role-Based + Multi-Tenant Access Control Flow
+1. User logs in with role (from accounts.UserRole) + `organization` context
+2. JWT token includes user info; middleware/permissions attach `request.user.organization`
+3. Permission classes check `request.user.role` **AND** filter all querysets by `organization=request.user.organization`
+4. **Admin**: Full access within their org (create managers, recruiters, clients, jobs)
+5. **Manager**: Manage their recruiters, jobs, candidates, clients within org
+6. **Recruiter**: Limited to jobs they are assigned to + their candidates (org-scoped)
+
+All views inherit from org-aware base views or use `get_queryset()` overrides that enforce `organization=self.request.user.organization`.
 
 ## Shared Components Used in A-Z Process
-- **Login to Dashboard**: Base auth and permissions
-- **Client/Job Creation**: BaseModel timestamps + created_by
-- **Candidate Pipeline**: Soft delete for candidates (instead of removing records)
-- **All Actions**: Routed through audit logging utility
+- **Login to Dashboard**: Base auth, org context, permissions
+- **Client/Job/Candidate Creation**: `BaseModel` automatically injects `organization` + `created_by` + timestamps
+- **Candidate Pipeline**: Status + Stage mapping, org-scoped InterviewSchedule/ClientSubmission
+- **All Actions**: Routed through audit logging utility (also org-scoped)
 - **Error Responses**: Standardized validation error format with `field_errors`
+- **Tenant Isolation**: Queryset filters + permission checks prevent any cross-org data access
 
 ## API Response Patterns (Common)
 **Success**:

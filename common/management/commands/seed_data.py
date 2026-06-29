@@ -5,7 +5,7 @@ from datetime import date, timedelta, time
 from django.utils import timezone
 from django.core.files.base import ContentFile
 
-from accounts.models import User, UserRole
+from accounts.models import User, UserRole, Organization
 from clients.models import Client, POC, POCType, ClientStatus, ClientDocument
 from jobs.models import Job, Stage, HiringFor, JobStatus, DEFAULT_STAGES
 from candidates.models import (
@@ -20,9 +20,10 @@ class Command(BaseCommand):
     help = 'Seeds the database with comprehensive demo data for the Recruitment ATS'
 
     def handle(self, *args, **options):
-        self.stdout.write(self.style.WARNING('Clearing existing demo data...'))
+        self.stdout.write('Clearing existing demo data...')
         
-        # Clear existing demo data to allow re-running the command
+        # Clear existing demo data (including organizations) to allow re-running.
+        # Order matters due to FK relationships with CASCADE.
         Candidate.objects.all().delete()
         InterviewSchedule.objects.all().delete()
         ClientSubmission.objects.all().delete()
@@ -33,56 +34,74 @@ class Command(BaseCommand):
         Client.objects.all().delete()
         Notification.objects.all().delete()
         AuditLog.objects.all().delete()
-        User.objects.filter(email__endswith='@recruitsmart.com').delete()
+        User.objects.all().delete()
+        Organization.objects.all().delete()
         
         self.stdout.write('Seeding fresh demo data...')
         
-        # 1. Create Users
-        admin = User.objects.create_superuser(
-            email='admin@recruitsmart.com',
+        # 1. Create Organizations (multi-tenant isolation)
+        org1 = Organization.objects.create(name="Tech Solutions")
+        org2 = Organization.objects.create(name="Global Corp")
+        
+        # 1b. Create Users scoped to organizations
+        admin1 = User.objects.create_superuser(
+            email='admin@techsolutions.com',
             name='Raj Admin',
             role=UserRole.ADMIN,
-            password='admin123'
+            password='admin123',
+            organization=org1
         )
         manager1 = User.objects.create_user(
-            email='manager@recruitsmart.com',
+            email='manager@techsolutions.com',
             name='Priya Manager',
             role=UserRole.MANAGER,
             password='manager123',
-            created_by=admin
-        )
-        manager2 = User.objects.create_user(
-            email='manager2@recruitsmart.com',
-            name='Vikram Manager',
-            role=UserRole.MANAGER,
-            password='manager123',
-            created_by=admin
+            created_by=admin1,
+            organization=org1
         )
         recruiter1 = User.objects.create_user(
-            email='recruiter@recruitsmart.com',
+            email='recruiter@techsolutions.com',
             name='Arjun Recruiter',
             role=UserRole.RECRUITER,
             password='recruiter123',
-            created_by=manager1
+            created_by=manager1,
+            organization=org1
         )
         recruiter2 = User.objects.create_user(
-            email='recruiter2@recruitsmart.com',
+            email='recruiter2@techsolutions.com',
             name='Meera Recruiter',
             role=UserRole.RECRUITER,
             password='recruiter123',
-            created_by=manager1
+            created_by=manager1,
+            organization=org1
+        )
+        admin2 = User.objects.create_superuser(
+            email='admin@globalcorp.com',
+            name='Anika Admin',
+            role=UserRole.ADMIN,
+            password='admin123',
+            organization=org2
+        )
+        manager2 = User.objects.create_user(
+            email='manager@globalcorp.com',
+            name='Vikram Manager',
+            role=UserRole.MANAGER,
+            password='manager123',
+            created_by=admin2,
+            organization=org2
         )
         recruiter3 = User.objects.create_user(
-            email='recruiter3@recruitsmart.com',
+            email='recruiter@globalcorp.com',
             name='Karan Recruiter',
             role=UserRole.RECRUITER,
             password='recruiter123',
-            created_by=manager2
+            created_by=manager2,
+            organization=org2
         )
         
-        self.stdout.write(self.style.SUCCESS('✓ Created 6 users (1 Admin, 2 Managers, 3 Recruiters)'))
+        self.stdout.write('Created 2 organizations and 7 users (2 Admins, 2 Managers, 3 Recruiters)')
         
-        # 2. Create Clients with all required fields + POCs + Documents
+        # 2. Create Clients with all required fields + POCs + Documents (partitioned across orgs)
         clients_data = [
             {
                 'company_name': 'TCS',
@@ -102,10 +121,11 @@ class Command(BaseCommand):
                 'gst_number': '27AAACT2727Q1Z2',
                 'status': ClientStatus.ACTIVE,
                 'agreement_date': date(2024, 1, 15),
-                'created_by': admin,
+                'created_by': admin1,
                 'payment_period_days': 30,
                 'replacement_period_days': 90,
                 'commercial_decided': True,
+                'organization': org1,
             },
             {
                 'company_name': 'Infosys',
@@ -129,6 +149,7 @@ class Command(BaseCommand):
                 'payment_period_days': 45,
                 'replacement_period_days': 60,
                 'commercial_decided': True,
+                'organization': org1,
             },
             {
                 'company_name': 'Wipro',
@@ -152,6 +173,7 @@ class Command(BaseCommand):
                 'payment_period_days': 30,
                 'replacement_period_days': 90,
                 'commercial_decided': False,
+                'organization': org2,
             },
         ]
         
@@ -160,7 +182,7 @@ class Command(BaseCommand):
             client = Client.objects.create(**data)
             created_clients.append(client)
             
-            # Create POCs
+            # Create POCs (with org from client)
             POC.objects.create(
                 client=client,
                 poc_type=POCType.HIRING,
@@ -168,7 +190,8 @@ class Command(BaseCommand):
                 email=data['email'],
                 designation='Talent Acquisition Head',
                 contact=data['contact'],
-                description='Primary hiring contact for technical roles.'
+                description='Primary hiring contact for technical roles.',
+                organization=client.organization,
             )
             POC.objects.create(
                 client=client,
@@ -177,22 +200,24 @@ class Command(BaseCommand):
                 email=f'finance@{data["company_name"].lower()}.com',
                 designation='Accounts Manager',
                 contact='+91-9876543299',
-                description='Handles invoices and payments.'
+                description='Handles invoices and payments.',
+                organization=client.organization,
             )
             
-            # Create dummy ClientDocument (using ContentFile to avoid real file upload issues)
+            # Create dummy ClientDocument (with org)
             doc_content = b'%PDF-1.4\n% Dummy agreement for demo purposes.'
             doc = ClientDocument(
                 client=client,
-                file_name='commercial_agreement.pdf'
+                file_name='commercial_agreement.pdf',
+                organization=client.organization,
             )
             doc.file.save('commercial_agreement.pdf', ContentFile(doc_content), save=False)
             doc.save()
         
         tcs, infosys, wipro = created_clients
-        self.stdout.write(self.style.SUCCESS('✓ Created 3 clients with POCs and documents'))
+        self.stdout.write('Created 3 clients (2 in Tech Solutions, 1 in Global Corp) with POCs and documents')
         
-        # 3. Create Jobs + Auto Stages
+        # 3. Create Jobs + Auto Stages (partitioned by org, recruiters from same org)
         jobs_data = [
             {
                 'title': 'Senior Python Developer',
@@ -204,6 +229,7 @@ class Command(BaseCommand):
                 'experience': '5-8 years',
                 'location': 'Bengaluru, Remote',
                 'skills': ['Python', 'Django', 'PostgreSQL', 'AWS', 'REST APIs'],
+                'organization': org1,
             },
             {
                 'title': 'React Frontend Engineer',
@@ -215,6 +241,7 @@ class Command(BaseCommand):
                 'experience': '3-6 years',
                 'location': 'Mumbai',
                 'skills': ['React', 'TypeScript', 'JavaScript', 'Tailwind', 'Redux'],
+                'organization': org1,
             },
             {
                 'title': 'DevOps Engineer',
@@ -226,6 +253,7 @@ class Command(BaseCommand):
                 'experience': '4-7 years',
                 'location': 'Pune, Hybrid',
                 'skills': ['AWS', 'Docker', 'Kubernetes', 'Terraform', 'Jenkins'],
+                'organization': org1,
             },
             {
                 'title': 'Data Analyst',
@@ -237,6 +265,7 @@ class Command(BaseCommand):
                 'experience': '2-5 years',
                 'location': 'Pune',
                 'skills': ['SQL', 'Python', 'Tableau', 'Excel', 'PowerBI'],
+                'organization': org1,
             },
             {
                 'title': 'Full Stack Developer (MERN)',
@@ -248,6 +277,7 @@ class Command(BaseCommand):
                 'experience': '4-8 years',
                 'location': 'Bengaluru',
                 'skills': ['MongoDB', 'Express', 'React', 'Node.js', 'TypeScript'],
+                'organization': org2,
             },
             {
                 'title': 'HR Business Partner',
@@ -259,26 +289,34 @@ class Command(BaseCommand):
                 'experience': '7+ years',
                 'location': 'Mumbai',
                 'skills': ['HR Management', 'Recruitment', 'Employee Relations', 'Performance Management'],
+                'organization': org2,
             },
         ]
         
         created_jobs = []
-        recruiters = [recruiter1, recruiter2, recruiter3]
         for idx, data in enumerate(jobs_data):
             job = Job.objects.create(**data)
-            # Assign 1-2 recruiters
-            assign_count = 2 if idx % 3 != 0 else 1
-            job.assigned_recruiters.set(random.sample(recruiters, assign_count))
+            # Assign recruiters from same organization only
+            if job.organization == org1:
+                org_recruiters = [recruiter1, recruiter2]
+            else:
+                org_recruiters = [recruiter3]
+            assign_count = min(2 if idx % 3 != 0 else 1, len(org_recruiters))
+            job.assigned_recruiters.set(random.sample(org_recruiters, assign_count))
             created_jobs.append(job)
             
-            # Create default stages (mimicking perform_create)
+            # Create default stages (with organization)
             for stage_data in DEFAULT_STAGES:
-                Stage.objects.create(job=job, **stage_data)
+                Stage.objects.create(
+                    job=job,
+                    organization=job.organization,
+                    **stage_data
+                )
             
         job1, job2, job3, job4, job5, job6 = created_jobs
-        self.stdout.write(self.style.SUCCESS('✓ Created 6 jobs with stages and recruiter assignments'))
+        self.stdout.write('Created 6 jobs (4 in Tech Solutions, 2 in Global Corp) with stages and recruiter assignments')
         
-        # 4. Create Candidates with varied pipeline states + realistic stage mapping
+        # 4. Create Candidates with varied pipeline states + realistic stage mapping (org partitioned)
         candidate_profiles = [
             ('Rahul Sharma', 'Python Backend Dev', 'TCS', '4.5 years', 'Bangalore', '15.2', '22.5', '60 days', 'Better opportunity'),
             ('Priya Patel', 'React Developer', 'Infosys', '3 years', 'Mumbai', '12.0', '18.0', '30 days', 'Role change'),
@@ -355,7 +393,8 @@ class Command(BaseCommand):
                 current_stage=stage,
                 status=status,
                 resume_file_name=f'{name.lower().replace(" ", "_")}_resume.pdf',
-                created_by=recruiter
+                created_by=recruiter,
+                organization=job.organization
             )
             created_candidates.append(candidate)
             
@@ -367,19 +406,22 @@ class Command(BaseCommand):
                     time=time(random.randint(9,17), random.randint(0, 59)),
                     mode=random.choice(list(InterviewMode)),
                     interviewer_name=random.choice(['Priya Manager', 'Tech Lead Rajesh', 'Arjun Recruiter', 'Client Manager']),
-                    notes='Focus on system design, past projects, and behavioral questions.'
+                    notes='Focus on system design, past projects, and behavioral questions.',
+                    organization=candidate.organization
                 )
             elif status in [CandidateStatus.SENT_TO_CLIENT, CandidateStatus.HIRED, CandidateStatus.REJECTED]:
                 sub_status = {
                     CandidateStatus.HIRED: SubmissionStatus.ACCEPTED,
                     CandidateStatus.REJECTED: SubmissionStatus.REJECTED,
                 }.get(status, SubmissionStatus.REVIEWED)
+                sent_by_user = manager1 if job.organization == org1 else manager2
                 ClientSubmission.objects.create(
                     candidate=candidate,
-                    sent_by=manager1 if i % 2 == 0 else manager2,
+                    sent_by=sent_by_user,
                     status=sub_status,
                     client_feedback='Excellent candidate with strong Python/Django background and good communication skills.' if status == CandidateStatus.HIRED else 'Candidate rejected due to salary expectations.' if status == CandidateStatus.REJECTED else 'Under review by hiring manager.',
-                    client_rating=5 if status == CandidateStatus.HIRED else 2 if status == CandidateStatus.REJECTED else 4
+                    client_rating=5 if status == CandidateStatus.HIRED else 2 if status == CandidateStatus.REJECTED else 4,
+                    organization=candidate.organization
                 )
                 if status == CandidateStatus.HIRED:
                     candidate.feedback = 'Selected by client after final round. Offer extended at 28 LPA with 2 weeks joining.'
@@ -388,18 +430,18 @@ class Command(BaseCommand):
                     candidate.feedback = 'Rejected by client - salary mismatch.'
                     candidate.save()
         
-        self.stdout.write(self.style.SUCCESS(f'✓ Created 15 candidates across all pipeline stages with matching stages, interviews & submissions'))
+        self.stdout.write('Created 15 candidates (partitioned across organizations) across all pipeline stages with matching stages, interviews & submissions')
         
-        # 5. Create Audit Logs for key actions
+        # 5. Create Audit Logs for key actions (with organization)
         audit_entries = [
-            (admin, AuditActionType.CREATED, 'Client', str(tcs.id), f'Created client {tcs.company_name} with CLI-{tcs.client_id}'),
+            (admin1, AuditActionType.CREATED, 'Client', str(tcs.id), f'Created client {tcs.company_name} with CLI-{tcs.client_id}'),
             (manager1, AuditActionType.CREATED, 'Job', str(job1.id), f'Created job {job1.title} and auto-generated 6 stages'),
             (recruiter1, AuditActionType.CREATED, 'Candidate', str(created_candidates[0].id), f'Added new candidate {created_candidates[0].candidate_name}'),
             (manager1, AuditActionType.ASSIGNED, 'Job', str(job1.id), 'Assigned 2 recruiters to Senior Python Developer job'),
             (recruiter1, AuditActionType.UPDATED, 'Candidate', str(created_candidates[1].id), 'Updated status to INTERVIEW_SCHEDULED and created interview record'),
-            (manager2, AuditActionType.SENT, 'Candidate', str(created_candidates[2].id), 'Submitted Amit Kumar to client for review'),
+            (manager2, AuditActionType.SENT, 'Candidate', str(created_candidates[4].id), f'Submitted {created_candidates[4].candidate_name} to client for review'),
             (manager1, AuditActionType.CREATED, 'ClientSubmission', str(created_candidates[3].id), 'Client accepted candidate - moved to HIRED'),
-            (admin, AuditActionType.UPDATED, 'Client', str(wipro.id), 'Updated Wipro commercial terms and status to ON_HOLD'),
+            (admin1, AuditActionType.UPDATED, 'Client', str(wipro.id), 'Updated Wipro commercial terms and status to ON_HOLD'),
             (recruiter2, AuditActionType.DELETED, 'Candidate', 'DEMO-001', 'Soft deleted a duplicate candidate entry (demo)'),
         ]
         
@@ -410,17 +452,18 @@ class Command(BaseCommand):
                 action=action,
                 entity=entity,
                 entity_id=entity_id,
-                details=details
+                details=details,
+                organization=user.organization
             )
         
-        self.stdout.write(self.style.SUCCESS('✓ Created 9 sample audit logs'))
+        self.stdout.write('Created 9 sample audit logs')
         
-        # 6. Create Notifications for different users/roles
+        # 6. Create Notifications for different users/roles (with organization)
         notifications = [
             (manager1, 'New Candidate Added', f'{created_candidates[0].candidate_name} has been added to {job1.title}', NotificationType.SUCCESS, '/api/v1/candidates/'),
             (recruiter1, 'Interview Scheduled', f'Interview with {created_candidates[1].candidate_name} scheduled for tomorrow', NotificationType.INFO, '/api/v1/candidates/interviews/'),
-            (manager2, 'Client Submission Update', f'{created_candidates[2].candidate_name} submitted to {wipro.company_name} - status updated', NotificationType.WARNING, f'/api/v1/jobs/{job3.id}/'),
-            (admin, 'Demo Data Seeded', 'Comprehensive demo data loaded successfully. 6 users, 3 clients, 6 jobs, 15 candidates with full pipeline coverage.', NotificationType.SUCCESS, '/api/v1/dashboard/'),
+            (manager2, 'Client Submission Update', f'{created_candidates[4].candidate_name} submitted to {wipro.company_name} - status updated', NotificationType.WARNING, f'/api/v1/jobs/{job5.id}/'),
+            (admin1, 'Demo Data Seeded', 'Comprehensive demo data loaded successfully for 2 organizations. 7 users, 3 clients, 6 jobs, 15 candidates with full pipeline coverage.', NotificationType.SUCCESS, '/api/v1/dashboard/'),
             (recruiter3, 'New Job Assignment', f'You have been assigned to {job5.title}', NotificationType.INFO, '/api/v1/jobs/'),
             (manager1, 'Candidate Hired', f'Congratulations! {created_candidates[3].candidate_name} was hired by client', NotificationType.SUCCESS, '/api/v1/candidates/?status=hired'),
         ]
@@ -432,16 +475,23 @@ class Command(BaseCommand):
                 message=message,
                 type=ntype,
                 link=link,
-                read=random.choice([True, False])
+                read=random.choice([True, False]),
+                organization=user.organization
             )
         
-        self.stdout.write(self.style.SUCCESS('✓ Created 6 sample notifications'))
+        self.stdout.write('Created 6 sample notifications')
         
-        self.stdout.write(self.style.SUCCESS('\n🎉 Successfully seeded comprehensive demo data!'))
-        self.stdout.write(self.style.SUCCESS('Login credentials:'))
-        self.stdout.write(self.style.SUCCESS('  - Admin: admin@recruitsmart.com / admin123'))
-        self.stdout.write(self.style.SUCCESS('  - Manager: manager@recruitsmart.com / manager123'))
-        self.stdout.write(self.style.SUCCESS('  - Recruiter: recruiter@recruitsmart.com / recruiter123'))
-        self.stdout.write(self.style.SUCCESS('\nThe database now contains realistic data across all modules with proper relationships,'))
-        self.stdout.write(self.style.SUCCESS('pipeline stages, audit trail, and notifications.'))
+        self.stdout.write('\nSuccessfully seeded comprehensive multi-tenant demo data!')
+        self.stdout.write('Login credentials:')
+        self.stdout.write('  Tech Solutions:')
+        self.stdout.write('    - Admin: admin@techsolutions.com / admin123')
+        self.stdout.write('    - Manager: manager@techsolutions.com / manager123')
+        self.stdout.write('    - Recruiter: recruiter@techsolutions.com / recruiter123')
+        self.stdout.write('  Global Corp:')
+        self.stdout.write('    - Admin: admin@globalcorp.com / admin123')
+        self.stdout.write('    - Manager: manager@globalcorp.com / manager123')
+        self.stdout.write('    - Recruiter: recruiter@globalcorp.com / recruiter123')
+        self.stdout.write('\nThe database now contains realistic partitioned data across 2 organizations with full')
+        self.stdout.write('tenant isolation, pipeline stages, audit trail, and notifications.')
+        self.stdout.write('\nNew organizations can be registered via POST /api/v1/organizations/register/')
         self.stdout.write('\nRun "python manage.py runserver" to start the development server.')

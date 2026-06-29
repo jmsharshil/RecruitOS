@@ -9,7 +9,9 @@ from audit.utils import log_action
 class ClientViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAdminOrManager]
     serializer_class = ClientSerializer
-    queryset = Client.objects.filter(is_deleted=False)
+
+    def get_queryset(self):
+        return Client.objects.filter(is_deleted=False, organization=self.request.user.organization)
 
     def get_permissions(self):
         if self.action == 'destroy':
@@ -17,7 +19,7 @@ class ClientViewSet(viewsets.ModelViewSet):
         return super().get_permissions()
 
     def perform_create(self, serializer):
-        client = serializer.save(created_by=self.request.user)
+        client = serializer.save(created_by=self.request.user, organization=self.request.user.organization)
         log_action(self.request.user, 'created', 'Client', client.id, f"Created client '{client.company_name}'")
 
     def perform_update(self, serializer):
