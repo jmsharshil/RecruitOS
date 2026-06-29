@@ -55,6 +55,25 @@ This is a **role-based recruitment/ATS (Applicant Tracking System)** with:
 8. **All actions Audited**
 9. **Logout**
 
+## Demo Data
+
+To quickly populate the system with realistic sample data covering all modules and pipeline stages:
+
+```bash
+python manage.py seed_data
+```
+
+This command:
+- Clears any existing demo records
+- Creates 6 users (Admin: `admin@recruitsmart.com` / password `admin123`; Managers & Recruiters with `manager123`/`recruiter123`)
+- Creates 3 clients (TCS, Infosys, Wipro) with POCs and commercial documents
+- Creates 6 jobs with auto-generated pipeline stages and recruiter assignments
+- Creates 15 candidates distributed across all pipeline stages (Screening → Interview → Client Round → Hired/Rejected)
+- Generates sample Audit Logs and Notifications
+- Uses realistic Indian names, skills, salary ranges, and feedback
+
+**Recommended after fresh `migrate`**: Run the seed command before starting the dev server.
+
 ## Additional Resources
 - Check `config/urls.py` for all API endpoints (prefixed with `/api/v1/`).
 - All APIs use JWT authentication after login.
