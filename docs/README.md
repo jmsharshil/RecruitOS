@@ -30,24 +30,40 @@ This is a **role-based recruitment/ATS (Applicant Tracking System)** with:
 - **Client management with POCs and commercials**
 - **Comprehensive audit trail**
 - **Notification system**
+- **CSV Export & Import** for Candidates, Clients, and Jobs
+
+## Export / Import Quick Reference
+
+| Module | Export Endpoint | Import Endpoint | Import Auth |
+|---|---|---|---|
+| Candidates | `GET /api/v1/candidates/export/` | `POST /api/v1/candidates/import/` | Admin / Manager |
+| Clients | `GET /api/v1/clients/export/` | `POST /api/v1/clients/import/` | Admin only |
+| Jobs | `GET /api/v1/jobs/export/` | `POST /api/v1/jobs/import/` | Admin / Manager |
+
+- All **export** endpoints are accessible to any authenticated user and return a `.csv` file.
+- All **import** endpoints accept a `multipart/form-data` POST with the key `file`.
+- Imports return `201` on full success, `207` on partial success, with a row-level `errors` array.
 
 ## Typical End-to-End Process
 1. **Login** (Accounts)
-2. **Create Client** (Clients)
-3. **Post Job** (Jobs) + assign recruiters
-4. **Source Candidates** (Candidates)
+2. **Create Client** (Clients) — or **Import** from CSV
+3. **Post Job** (Jobs) + assign recruiters — or **Import** from CSV
+4. **Source Candidates** (Candidates) — or **Import** from CSV
 5. **Manage Pipeline** (Interviews → Client Round → Offer → Hire)
 6. **Receive Notifications** at each step
-7. **All actions Audited**
-8. **Logout**
+7. **Export** data at any point for reporting
+8. **All actions Audited**
+9. **Logout**
 
 ## Additional Resources
-- Check `config/urls.py` for all API endpoints (prefixed with `/api/v1/`)
-- All APIs use JWT authentication after login
-- Role-based permissions enforced everywhere
-- Soft deletes used for data integrity
+- Check `config/urls.py` for all API endpoints (prefixed with `/api/v1/`).
+- All APIs use JWT authentication after login.
+- Role-based permissions enforced everywhere.
+- Soft deletes used for data integrity.
+- Export CSV format is directly compatible with the Import endpoint — export, edit, re-import.
 
 **Generated for**: Complete process documentation with APIs, examples, and visual flows.
 
 ---
-*Last Updated: Auto-generated via AI coding assistant*
+*Last Updated: 2026-06-29*
+

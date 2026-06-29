@@ -74,6 +74,44 @@ flowchart TD
 - `GET /api/v1/jobs/{id}/upload-link/`
 - Returns public link for candidates to upload resumes.
 
+### 7. Export Jobs (CSV)
+- **Endpoint**: `GET /api/v1/jobs/export/`
+- **Auth**: Any authenticated role (results are role-scoped).
+- **Query Params**: `status` — filter by job status (e.g. `?status=open`)
+- **Response**: Streams a `jobs_export.csv` file download.
+- **CSV Columns**:
+  ```
+  title, experience, location, hiring_for,
+  client_name, status, skills, description
+  ```
+
+### 8. Import Jobs (CSV)
+- **Endpoint**: `POST /api/v1/jobs/import/`
+- **Auth**: Admin or Manager only.
+- **Body** (multipart/form-data): `file` — a `.csv` file.
+- **Required CSV Columns**: `title`, `experience`, `location`
+- **Notes**:
+  - `client_name` is matched case-insensitively to an existing active client.
+  - `skills` should be a comma-separated string: `"Python, Django, REST API"`.
+  - If `client_name` is provided but not found, the job is still created (without a client) and an error note is included.
+- **Response (201)** — all rows imported:
+  ```json
+  { "created": 3, "skipped": 0, "errors": [] }
+  ```
+- **Response (207)** — partial success:
+  ```json
+  {
+    "created": 2,
+    "skipped": 0,
+    "errors": [
+      { "row": 4, "error": "Client 'Unknown Corp' not found. Job will be created without a client." }
+    ]
+  }
+  ```
+
+> [!TIP]
+> Use the **Export** endpoint to download a correctly formatted template, fill in new rows, and re-upload via **Import**.
+
 ## Steps in Job Lifecycle
 1. **Creation**: Manager/Admin creates job linked to client, assigns recruiters.
 2. **Stage Setup**: Default 6 stages created automatically.
@@ -104,6 +142,7 @@ flowchart TD
 - **Accounts**: Recruiters assigned via M2M
 - **Candidates**: Jobs have many candidates progressing through stages
 - **Notifications**: New job, stage changes, candidate updates
-- **Audit**: All job CRUD and status changes logged with details
+- **Audit**: All job CRUD, status changes, exports and imports logged
 
 **Common Stages**: Screening, HR Round, Technical, Client Round, Offer, Hired.
+

@@ -80,11 +80,54 @@ flowchart TD
   - Creates ClientSubmission record.
   - Updates status to `sent-to-client`.
 
-### 6. Calendar Events
-- `GET /api/v1/candidates/calendar/events/` - For interview scheduling view.
+### 7. Calendar Events
+- `GET /api/v1/candidates/calendar/events/?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD`
+- Returns interview schedules and share dates grouped by date.
 
-### 7. Public Resume Upload
-- `POST /api/v1/candidates/upload/{job_id}/` - Public endpoint for candidates.
+### 8. Public Resume Upload
+- `GET /api/v1/candidates/upload/{job_id}/` — Fetch public job details (no auth required).
+- `POST /api/v1/candidates/upload/{job_id}/` — Public endpoint for candidates to self-submit.
+  - **Body** (multipart/form-data): `name`, `email`, `phone`, `resume` (file)
+
+### 9. Export Candidates (CSV)
+- **Endpoint**: `GET /api/v1/candidates/export/`
+- **Auth**: Any authenticated role.
+- **Query Params**:
+  - `status` — filter by candidate status (e.g. `?status=screening`)
+  - `job_id` — filter by a specific job UUID
+- **Response**: Streams a `candidates_export.csv` file download.
+- **CSV Columns**:
+  ```
+  candidate_name, profile_name, current_company, current_profile,
+  experience, current_location, preferred_location, education,
+  college, contact, email, current_ctc, expected_ctc, notice_period,
+  status, share_date, feedback, job_title
+  ```
+
+### 10. Import Candidates (CSV)
+- **Endpoint**: `POST /api/v1/candidates/import/`
+- **Auth**: Admin or Manager only.
+- **Body** (multipart/form-data): `file` — a `.csv` file.
+- **Required CSV Columns**: `candidate_name`, `email`, `contact`, `job_title`
+- **Duplicate Handling**: Skips rows where a candidate with the same `email` already exists for the same job.
+- **Response (201)** — all rows imported:
+  ```json
+  { "created": 10, "skipped": 0, "errors": [] }
+  ```
+- **Response (207)** — partial success:
+  ```json
+  {
+    "created": 8,
+    "skipped": 2,
+    "errors": [
+      { "row": 3, "error": "Job 'Unknown Job' not found." },
+      { "row": 7, "error": "Candidate with email 'a@b.com' already exists for this job." }
+    ]
+  }
+  ```
+
+> [!TIP]
+> Use the **Export** endpoint to download a correctly formatted template, fill in new rows, and re-upload via **Import**.
 
 ## Pipeline Steps (Detailed)
 1. **Sourcing**: Recruiter adds candidate or candidate uploads via shared link.
@@ -119,7 +162,8 @@ flowchart TD
 - **Jobs**: Candidates belong to a Job with its stages.
 - **Accounts**: Created_by recruiter, interviewers from users.
 - **Notifications**: Interview reminders, status change alerts.
-- **Audit**: Every status update, interview schedule logged.
+- **Audit**: Every status update, interview schedule, export and import logged.
 - **Common**: Uses BaseModel for timestamps, soft deletes.
 
 **Note**: Soft delete (is_deleted flag) used instead of hard delete for compliance.
+
