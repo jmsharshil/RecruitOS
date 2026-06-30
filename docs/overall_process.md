@@ -1,4 +1,4 @@
-# Overall A to Z Process - Recruitment Management System
+# Overall A to Z Process - ATS
 
 ## End-to-End Flow from Login to Final Hiring
 

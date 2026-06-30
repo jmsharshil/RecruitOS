@@ -54,7 +54,7 @@ ROOT_URLCONF = 'config.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -90,6 +90,7 @@ USE_TZ = True
 
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / config('STATIC_ROOT', default='staticfiles')
+STATICFILES_DIRS = [BASE_DIR / 'static']
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / config('MEDIA_ROOT', default='media')
@@ -123,9 +124,20 @@ SIMPLE_JWT = {
 }
 
 SPECTACULAR_SETTINGS = {
-    'TITLE':       'Backend API',
-    'DESCRIPTION': 'Backend API for Recruitment Management System',
-    'VERSION':     '1.0.0',
+    'TITLE': 'RecruitSmart ATS API',
+    'DESCRIPTION': 'Multi-tenant Recruitment / Applicant Tracking System (ATS). Features role-based dashboards (Admin/Manager/Recruiter), client & job management, candidate pipeline with stages, interviews, submissions, audit trail, notifications, and CSV bulk import/export. Strict organization-level data isolation enforced.',
+    'VERSION': '1.0.0',
+    'SWAGGER_UI_SETTINGS': {
+        'docExpansion': 'list',
+        'defaultModelsExpandDepth': -1,
+        'filter': True,
+        'displayRequestDuration': True,
+    },
+    'REDOC_SETTINGS': {
+        'theme': {
+            'primaryColor': '#1e40af',
+        }
+    },
 }
 
 CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://localhost:5173,http://localhost:3000', cast=Csv())

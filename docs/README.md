@@ -1,4 +1,4 @@
-# Documentation Index - Recruitment Management System
+# Documentation Index - ATS
 
 ## Module-wise Documentation
 
@@ -24,7 +24,7 @@ This directory contains comprehensive documentation for the entire system from *
 5. Follow the numbered steps in each document to understand the sequential process.
 
 ## System Overview
-This is a **multi-tenant role-based recruitment/ATS (Applicant Tracking System)** with:
+This is **ATS** - a **multi-tenant role-based recruitment/Applicant Tracking System (ATS)** with:
 - **Multi-Tenancy**: Full data isolation by `Organization`. All core models inherit from `BaseModel` (which adds `organization = ForeignKey(Organization)`). Views, filters, and permissions automatically scope queries to `request.user.organization`.
 - **3 User Roles**: Admin, Manager, Recruiter (scoped per organization)
 - **Multi-stage candidate pipeline** with dynamic stages per job
