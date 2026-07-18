@@ -14,10 +14,25 @@ class UserBriefSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'email', 'phone', 'avatar', 'role', 'organization']
 
 class OrganizationRegisterSerializer(serializers.Serializer):
-    org_name = serializers.CharField(max_length=200)
-    admin_name = serializers.CharField(max_length=150)
-    admin_email = serializers.EmailField()
-    admin_password = serializers.CharField(write_only=True)
+    org_name = serializers.CharField(max_length=200, required=True)
+    admin_name = serializers.CharField(max_length=150, required=True)
+    admin_email = serializers.EmailField(required=True)
+    admin_password = serializers.CharField(write_only=True, required=True, min_length=8)
+
+    def validate_org_name(self, value):
+        if Organization.objects.filter(name=value).exists():
+            raise serializers.ValidationError("An organization with this name already exists.")
+        return value
+
+    def validate_admin_email(self, value):
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("A user with this email already exists.")
+        return value
+
+    def validate_admin_password(self, value):
+        if len(value) < 8:
+            raise serializers.ValidationError("Password must be at least 8 characters long.")
+        return value
 
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 

@@ -8,8 +8,13 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.db.models import Count, Q
 from django.utils import timezone
 
-from accounts.models import User, UserRole
-from accounts.serializers import UserBriefSerializer, UserSerializer, CustomTokenObtainPairSerializer
+from accounts.models import User, UserRole, Organization
+from accounts.serializers import (
+    UserBriefSerializer, 
+    UserSerializer, 
+    CustomTokenObtainPairSerializer,
+    OrganizationRegisterSerializer
+)
 from common.permissions import IsAdmin, IsAdminOrManager, IsManager, IsRecruiter, IsOwnerOrAdmin
 from audit.utils import log_action
 from audit.models import AuditLog
@@ -48,6 +53,83 @@ class ForgotPasswordView(APIView):
         
         logger.info(f"[SIMULATION] Password reset link sent to {email}")
         return Response({"message": "If an account with that email exists, we have sent a password reset link."})
+
+
+class RegisterOrganizationView(APIView):
+    """
+    Register a new organization with an admin user.
+    This is the entry point for new organizations.
+    Endpoint: /api/v1/auth/register/
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = OrganizationRegisterSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                "error": "Validation failed", 
+                "field_errors": serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        org_name = serializer.validated_data['org_name']
+        admin_name = serializer.validated_data['admin_name']
+        admin_email = serializer.validated_data['admin_email']
+        admin_password = serializer.validated_data['admin_password']
+
+        # Check if organization or user already exists
+        if Organization.objects.filter(name=org_name).exists():
+            return Response({
+                "error": "An organization with this name already exists."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if User.objects.filter(email=admin_email).exists():
+            return Response({
+                "error": "A user with this email already exists."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Create organization
+            organization = Organization.objects.create(name=org_name)
+            
+            # Create admin user
+            admin_user = User.objects.create_user(
+                email=admin_email,
+                name=admin_name,
+                role=UserRole.ADMIN,
+                password=admin_password,
+                organization=organization
+            )
+            
+            logger.info(f"New organization created: {org_name} with admin {admin_email}")
+            
+            # Generate tokens
+            refresh = RefreshToken.for_user(admin_user)
+            
+            return Response({
+                "message": "Organization and admin account created successfully",
+                "organization": {
+                    "id": str(organization.id),
+                    "name": organization.name
+                },
+                "user": {
+                    "id": str(admin_user.id),
+                    "name": admin_user.name,
+                    "email": admin_user.email,
+                    "role": admin_user.role,
+                    "organization": organization.name
+                },
+                "tokens": {
+                    "refresh": str(refresh),
+                    "access": str(refresh.access_token)
+                }
+            }, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            logger.error(f"Organization registration failed: {str(e)}")
+            return Response({
+                "error": "Failed to create organization. Please try again."
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 class MeView(APIView):
     permission_classes = [permissions.IsAuthenticated]
