@@ -27,11 +27,12 @@ This directory contains comprehensive documentation for the entire system from *
 This is **ATS** - a **multi-tenant role-based recruitment/Applicant Tracking System (ATS)** with:
 - **Multi-Tenancy**: Full data isolation by `Organization`. All core models inherit from `BaseModel` (which adds `organization = ForeignKey(Organization)`). Views, filters, and permissions automatically scope queries to `request.user.organization`.
 - **3 User Roles**: Admin, Manager, Recruiter (scoped per organization)
-- **Multi-stage candidate pipeline** with dynamic stages per job
-- **Client management** with POCs, commercial terms, documents
-- **Job requisitions** with recruiter assignments and pipeline stages
-- **Comprehensive audit trail** and notification system
-- **CSV Export & Import** for Candidates, Clients, and Jobs (organization-scoped)
+- **Decoupled talent pool + pipeline**: `Candidate` (pool) linked to `Job` via `Application` join model (status, stage, feedback on Application; pure pool has none). Supports RBAC visibility with Q() filters.
+- **Strict AI-powered resume parsing** (anti-hallucination prompts, PDF fallback extractors, org-scoped dedup).
+- **Client management** with POCs, commercial terms, documents.
+- **Job requisitions** with recruiter assignments, auto-stages, public upload links.
+- **Comprehensive audit trail** (`log_action` supports public/system), threaded notifications (Application-first fallback for pool).
+- **CSV Export & Import** for Candidates (pool+linked), Clients, Jobs (organization-scoped).
 
 **Key Models**: `Organization`, `User` (with FK to org), `BaseModel` (in common/models.py) provides automatic tenant FK + timestamps + created_by for all downstream models (Client, Job, Candidate, etc.).
 
@@ -51,11 +52,11 @@ This is **ATS** - a **multi-tenant role-based recruitment/Applicant Tracking Sys
 1. **Login** (Accounts)
 2. **Create Client** (Clients) — or **Import** from CSV
 3. **Post Job** (Jobs) + assign recruiters — or **Import** from CSV
-4. **Source Candidates** (Candidates) — or **Import** from CSV
-5. **Manage Pipeline** (Interviews → Client Round → Offer → Hire)
-6. **Receive Notifications** at each step
-7. **Export** data at any point for reporting
-8. **All actions Audited**
+4. **Source Candidates** to pool or job (CandidatesViewSet/PublicUpload with AI parse) — or **Import** from CSV (supports pool/job_title)
+5. **Manage Pipeline** via Application (Interviews linked to Application → Client Round → Offer → Hire)
+6. **Receive Notifications** (threaded, role-targeted, pool vs job-specific)
+7. **Export** data (role-scoped, includes pool) at any point for reporting
+8. **All actions Audited** (`log_action` with full context)
 9. **Logout**
 
 ## Demo Data & Multi-Tenant Setup

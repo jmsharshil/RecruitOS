@@ -10,7 +10,8 @@ class ClientStatus(models.TextChoices):
 
 class Client(BaseModel):
     id                      = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    client_id               = models.CharField(max_length=20, unique=True, blank=True)  # auto-generated: CLI-0001
+    client_id               = models.CharField(max_length=20, blank=True)  # auto-generated: CLI-0001 (unique per org)
+    #Company Details
     company_name            = models.CharField(max_length=200)
     client_name             = models.CharField(max_length=150)
     email                   = models.EmailField()
@@ -19,25 +20,33 @@ class Client(BaseModel):
     alternative_contact     = models.CharField(max_length=20, blank=True)
     website                 = models.URLField(blank=True)
     linkedin                = models.URLField(blank=True)
+    #Location
     street                  = models.TextField(blank=True)
     city                    = models.CharField(max_length=100)
     state                   = models.CharField(max_length=100)
     country                 = models.CharField(max_length=100)
     postal_code             = models.CharField(max_length=20, blank=True)
+    client_location         = models.CharField(max_length=100,blank=True)
+    #Business Details
     industry                = models.CharField(max_length=100)
     gst_number              = models.CharField(max_length=50, blank=True)
     status                  = models.CharField(max_length=20, choices=ClientStatus.choices, default=ClientStatus.ACTIVE)
+    #Commercials & Agreement
     agreement_date          = models.DateField(null=True, blank=True)
     payment_period_days     = models.PositiveIntegerField(null=True, blank=True)
     replacement_period_days = models.PositiveIntegerField(null=True, blank=True)
     commercial_decided      = models.BooleanField(default=False)
-    created_by              = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
-    is_deleted              = models.BooleanField(default=False)
-    deleted_at              = models.DateTimeField(null=True, blank=True)
+    created_by              = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='created_clients')
+    #Internal Notes
+    notes                   = models.TextField(blank=True)
+
+    class Meta:
+        unique_together = ('organization', 'client_id')
 
     def save(self, *args, **kwargs):
         if not self.client_id:
-            last = Client.objects.order_by('-created_at').first()
+            # Organization-scoped client_id generation
+            last = Client.objects.filter(organization=self.organization).order_by('-created_at').first()
             next_num = (int(last.client_id.split('-')[1]) + 1) if (last and '-' in last.client_id) else 1
             self.client_id = f"CLI-{next_num:04d}"
         super().save(*args, **kwargs)

@@ -1,7 +1,7 @@
 import uuid
 from django.db import models
 from common.models import BaseModel
-from accounts.models import User
+from accounts.models import User, Organization
 
 class NotificationType(models.TextChoices):
     INFO    = 'info'

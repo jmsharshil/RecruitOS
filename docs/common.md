@@ -1,31 +1,39 @@
 # Common Module Documentation
 
 ## Overview
-Shared utilities, base models (`BaseModel` with `organization` FK for multi-tenancy), permissions, and helper functions used across all modules.
+Shared utilities, base models (`BaseModel` with `organization` FK, soft-delete support for multi-tenancy), permissions, CSV utils, and helper functions used across all modules.
 
 **Key Components**:
-- `BaseModel` (adds `organization`, `created_at`, `updated_at` to all models)
+- `BaseModel` (adds `organization`, timestamps, `is_deleted`/`deleted_at` for soft-delete to all models)
 - Custom Permissions (role-based + org-scoped)
-- Utils for audit logging, notifications, filters
-- Ensures **strict tenant isolation** - no cross-organization data visibility.
+- Utils for audit logging, notifications, CSV export/import, AI resume parsing
+- Ensures **strict tenant isolation** - no cross-organization data visibility. All querysets filter by `organization` + `is_deleted=False`.
 
-## Base Model (Multi-Tenancy Core)
+## Base Model (Multi-Tenancy + Soft Delete Core)
 
 ```mermaid
 flowchart TD
     A[All Models Inherit from BaseModel] --> B[Automatic Fields]
-    B --> C[organization = ForeignKey(Organization, on_delete=CASCADE)]
-    C --> D[created_at, updated_at (auto)]
-    D --> E[Automatic tenant filtering in views/querysets]
+    B --> C[organization FK + timestamps]
+    C --> D[is_deleted + deleted_at for soft-delete]
+    D --> E[Automatic tenant + soft-delete filtering in views/querysets (Q filters)]
     E --> F[Strict data isolation between organizations]
 ```
 
 **Current Implementation** (`common/models.py`):
 ```python
 class BaseModel(models.Model):
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, null=True, blank=True)
+    organization = models.ForeignKey(
+        Organization, 
+        on_delete=models.CASCADE, 
+        null=True, 
+        blank=True,
+        related_name='%(class)s_related'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         abstract = True
@@ -43,11 +51,13 @@ class BaseModel(models.Model):
   ```
 
 ### 2. BaseModel (common/models.py)
-All tenant models (Client, Job, Candidate, InterviewSchedule, ClientSubmission, POC, ClientDocument, Stage, AuditLog, Notification) inherit from `BaseModel`, which injects the `organization` FK automatically. Some models (e.g. Candidate, Client) additionally implement soft-delete fields (`is_deleted`, `deleted_at`) for data retention.
+All models (Client, Job, Candidate, Application, InterviewSchedule, ClientSubmission, POC, ClientDocument, Stage, AuditLog, Notification, etc.) inherit from `BaseModel`. This provides `organization` scoping, timestamps, and soft-delete (`is_deleted`, `deleted_at`) support. `perform_destroy` in ViewSets typically sets `is_deleted=True` + `deleted_at` instead of hard delete. Querysets use `is_deleted=False` + org filter (often with Q() for pool visibility).
 
 ### 3. Utilities
-- `audit.utils.log_action(user, action, target_type, target_id, description)`
-- Notification helpers
+- `audit.utils.log_action(user=None, action, target_type, target_id, description, organization=None)` — supports `user=None` for public uploads (defaults user_name='System')
+- `candidates.utils.parse_resume_ai()` — strict anti-hallucination prompt for Azure OpenAI resume parsing (JSON-only, explicit fields only, no fabrication)
+- CSV helpers (`generate_csv_response`, `parse_csv_from_request`)
+- Notification helpers (threaded)
 - Permission mixins
 
 ## Role-Based + Multi-Tenant Access Control Flow
@@ -56,9 +66,9 @@ All tenant models (Client, Job, Candidate, InterviewSchedule, ClientSubmission, 
 3. Permission classes check `request.user.role` **AND** filter all querysets by `organization=request.user.organization`
 4. **Admin**: Full access within their org (create managers, recruiters, clients, jobs)
 5. **Manager**: Manage their recruiters, jobs, candidates, clients within org
-6. **Recruiter**: Limited to jobs they are assigned to + their candidates (org-scoped)
+6. **Recruiter**: Limited to jobs they are assigned to + pool candidates (via `Q(applications__isnull=True) | Q(applications__job__assigned_recruiters=user)` filters, org-scoped)
 
-All views inherit from org-aware base views or use `get_queryset()` overrides that enforce `organization=self.request.user.organization`.
+All views use `get_queryset()` overrides with `Q()` filters for Application-linked candidates vs pure talent-pool, enforcing `organization=self.request.user.organization` + `is_deleted=False`.
 
 ## Shared Components Used in A-Z Process
 - **Login to Dashboard**: Base auth, org context, permissions

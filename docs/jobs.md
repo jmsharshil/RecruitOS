@@ -9,16 +9,16 @@ Manages job requisitions/positions. Linked to clients, assigned to recruiters, w
 
 **Hiring For**: self or client
 
-## Flow Diagram - Job Creation to Pipeline Setup
+## Flow Diagram - Job Creation to Pipeline Setup (with Application)
 
 ```mermaid
 flowchart TD
     A[Client Created] --> B[Create Job<br/>POST /api/v1/jobs/]
     B --> C[Auto-create Default Stages<br/>Screening → Technical → Client Round → Offer → Hired]
     C --> D[Assign Recruiters<br/>Many-to-Many]
-    D --> E[Share Resume Upload Link]
-    E --> F[Recruiters Add Candidates]
-    F --> G[Monitor Pipeline per Stage]
+    D --> E[Share Resume Upload Link (PublicUploadView)]
+    E --> F[Add to Pool (Candidate) or Create Application (job-linked)]
+    F --> G[Monitor Pipeline per Stage (via Application queryset)]
     G --> H[Update Job Status<br/>PATCH /jobs/{id}/status/]
     H --> I[Close Job when positions filled]
     
@@ -139,10 +139,11 @@ flowchart TD
 
 ## Integration Points
 - **Clients**: One-to-Many (Client can have multiple jobs)
-- **Accounts**: Recruiters assigned via M2M
-- **Candidates**: Jobs have many candidates progressing through stages
-- **Notifications**: New job, stage changes, candidate updates
-- **Audit**: All job CRUD, status changes, exports and imports logged
+- **Accounts**: Recruiters assigned via M2M (`assigned_recruiters`)
+- **Candidates**: Jobs link to Candidates **via Application** join model (unique_together on org/candidate/job); supports pure pool candidates with no Application. Querysets use related applications for visibility.
+- **Notifications**: New job, recruiter assignment, resume submissions (to assigned_recruiters or all recruiters for pool), interview reminders.
+- **Audit**: All job CRUD, status changes, exports and imports logged.
+- **Candidates Module**: Application carries status, current_stage (FK to Job's Stages), feedback, share_date, interview/client data.
 
-**Common Stages**: Screening, HR Round, Technical, Client Round, Offer, Hired.
+**Common Stages**: Screening, HR Round, Technical, Client Round, Offer, Hired (auto-created on Job).
 

@@ -5,8 +5,8 @@ from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.utils import timezone
 from django.db.models import Q
-from candidates.models import Candidate, CandidateStatus, ClientSubmission, SubmissionStatus, InterviewSchedule
-from candidates.serializers import CandidateSerializer, InterviewScheduleSerializer
+from candidates.models import Candidate, Application, CandidateStatus, ClientSubmission, SubmissionStatus, InterviewSchedule
+from candidates.serializers import CandidateSerializer, ApplicationSerializer, InterviewScheduleSerializer, ClientSubmissionSerializer
 from jobs.models import Job, Stage
 from accounts.models import UserRole
 from audit.utils import log_action
@@ -17,18 +17,30 @@ class CandidateViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = Candidate.objects.filter(is_deleted=False, organization=user.organization)
+        qs = Candidate.objects.filter(
+            is_deleted=False, 
+            organization=user.organization
+        )
         if user.role == UserRole.ADMIN:
             return qs
         elif user.role == UserRole.MANAGER:
-            return qs.filter(job__created_by=user)
+            return qs.filter(
+                Q(applications__job__created_by=user) | Q(applications__isnull=True)
+            ).distinct()
         elif user.role == UserRole.RECRUITER:
-            return qs.filter(job__assigned_recruiters=user)
-        return Candidate.objects.none()
+            return qs.filter(
+                Q(applications__job__assigned_recruiters=user) | Q(applications__isnull=True)
+            ).distinct()
+        return qs.none()
 
     def perform_create(self, serializer):
-        candidate = serializer.save(created_by=self.request.user, organization=self.request.user.organization)
+        candidate = serializer.save(
+            uploaded_by=self.request.user, 
+            organization=self.request.user.organization
+        )
         log_action(self.request.user, 'created', 'Candidate', candidate.id, f"Created candidate '{candidate.candidate_name}'")
+        # Notify recruiters for pure pool candidates
+        simulate_resume_submission_notification(candidate.id)
 
     def perform_update(self, serializer):
         candidate = serializer.save()
@@ -40,52 +52,6 @@ class CandidateViewSet(viewsets.ModelViewSet):
         instance.save()
         log_action(self.request.user, 'deleted', 'Candidate', instance.id, f"Deleted candidate '{instance.candidate_name}'")
 
-    @action(detail=True, methods=['post'], url_path='move-stage')
-    def move_stage(self, request, pk=None):
-        candidate = self.get_object()
-        stage_id = request.data.get('stage_id')
-        try:
-            stage = Stage.objects.get(id=stage_id, job=candidate.job)
-            candidate.current_stage = stage
-            candidate.save()
-            log_action(request.user, 'updated', 'Candidate', candidate.id, f"Stage moved to {stage.name}")
-            return Response(CandidateSerializer(candidate).data)
-        except Stage.DoesNotExist:
-            return Response({"error": "Stage not found for this job"}, status=400)
-
-    @action(detail=True, methods=['post'], url_path='send-to-client')
-    def send_to_client(self, request, pk=None):
-        candidate = self.get_object()
-        if candidate.job.hiring_for != 'client':
-            return Response({"error": "Job is not hiring for a client"}, status=400)
-        if hasattr(candidate, 'client_submission'):
-            return Response({"error": "Submission already exists"}, status=400)
-            
-        submission = ClientSubmission.objects.create(
-            candidate=candidate,
-            sent_by=request.user,
-            status=SubmissionStatus.PENDING
-        )
-        candidate.status = CandidateStatus.SENT_TO_CLIENT
-        candidate.save()
-        log_action(request.user, 'sent', 'Candidate', candidate.id, f"Sent {candidate.candidate_name} to client")
-        
-        if candidate.job.client and candidate.job.client.email:
-            simulate_client_submission_email(candidate.id, candidate.job.client.email)
-            
-        return Response(CandidateSerializer(candidate).data)
-
-    @action(detail=True, methods=['post'], url_path='schedule-interview')
-    def schedule_interview(self, request, pk=None):
-        candidate = self.get_object()
-        serializer = InterviewScheduleSerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save(candidate=candidate)
-            candidate.status = CandidateStatus.INTERVIEW_SCHEDULED
-            candidate.save()
-            log_action(request.user, 'updated', 'Candidate', candidate.id, f"Scheduled interview for {candidate.candidate_name}")
-            return Response(serializer.data, status=201)
-        return Response(serializer.errors, status=400)
 
     @action(detail=True, methods=['post'], url_path='upload-resume', parser_classes=[MultiPartParser, FormParser])
     def upload_resume(self, request, pk=None):
@@ -99,24 +65,117 @@ class CandidateViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='parse-resume', parser_classes=[MultiPartParser, FormParser])
     def parse_resume(self, request):
-        return Response({
-            "candidate_name": "Amit Sharma",
-            "current_profile": "Senior Software Engineer",
-            "current_company": "Infosys",
-            "experience": "5 years",
-            "education": "B.Tech Computer Science",
-            "college": "NIT Surat",
-            "email": "amit.sharma@email.com",
-            "contact": "+91 9876543210",
-            "current_location": "Bengaluru",
-            "skills": ["Python", "Django", "React"]
-        })
+        if 'resume' not in request.FILES:
+            return Response({"error": "No resume file provided"}, status=400)
+        try:
+            from .utils import parse_resume_task
+            # Pass organization for scoped duplicate detection in shared talent pool
+            parsed_data = parse_resume_task(
+                request.FILES['resume'], 
+                organization=request.user.organization
+            )
+            return Response(parsed_data)
+        except Exception as e:
+            return Response({"error": f"Parse failed: {str(e)}"}, status=500)
 
-    @action(detail=False, methods=['get'], url_path='export')
-    def export_candidates(self, request):
-        return Response({"message": "CSV export not implemented fully yet."})
+
+class ApplicationViewSet(viewsets.ModelViewSet):
+    serializer_class = ApplicationSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = Application.objects.filter(is_deleted=False, organization=user.organization)
+        if user.role == UserRole.ADMIN:
+            return qs
+        elif user.role == UserRole.MANAGER:
+            return qs.filter(job__created_by=user)
+        elif user.role == UserRole.RECRUITER:
+            return qs.filter(job__assigned_recruiters=user)
+        return Application.objects.none()
+
+    def perform_create(self, serializer):
+        application = serializer.save(organization=self.request.user.organization)
+        log_action(
+            self.request.user, 
+            'created', 
+            'Application', 
+            application.id, 
+            f"Assigned candidate '{application.candidate.candidate_name}' to job '{application.job.title}'"
+        )
+        if not application.current_stage:
+            first_stage = application.job.stages.filter(
+                is_deleted=False
+            ).order_by('order').first()
+            if first_stage:
+                application.current_stage = first_stage
+                application.save()
+
+    def perform_update(self, serializer):
+        application = serializer.save()
+        log_action(self.request.user, 'updated', 'Application', application.id, f"Updated application for {application.candidate.candidate_name}")
+
+    def perform_destroy(self, instance):
+        instance.is_deleted = True
+        instance.deleted_at = timezone.now()
+        instance.save()
+        log_action(self.request.user, 'deleted', 'Application', instance.id, f"Deleted application for {instance.candidate.candidate_name}")
+
+    @action(detail=True, methods=['post'], url_path='move-stage')
+    def move_stage(self, request, pk=None):
+        application = self.get_object()
+        stage_id = request.data.get('stage_id')
+        try:
+            stage = Stage.objects.get(id=stage_id, job=application.job)
+            application.current_stage = stage
+            if stage.name.lower() == "hired":
+                application.status = CandidateStatus.HIRED
+            application.save()
+            log_action(request.user, 'updated', 'Application', application.id, f"Stage moved to {stage.name}")
+            return Response(ApplicationSerializer(application).data)
+        except Stage.DoesNotExist:
+            return Response({"error": "Stage not found for this job"}, status=400)
+
+    @action(detail=True, methods=['post'], url_path='send-to-client')
+    def send_to_client(self, request, pk=None):
+        application = self.get_object()
+        if application.job.hiring_for != 'client':
+            return Response({"error": "Job is not hiring for a client"}, status=400)
+        if hasattr(application, 'client_submission'):
+            return Response({"error": "Submission already exists"}, status=400)
+            
+        submission = ClientSubmission.objects.create(
+            application=application,
+            sent_by=request.user,
+            status=SubmissionStatus.PENDING,
+            organization=request.user.organization
+        )
+        application.status = CandidateStatus.SENT_TO_CLIENT
+        application.save()
+        log_action(request.user, 'sent', 'Application', application.id, f"Sent {application.candidate.candidate_name} to client")
+        
+        if application.job.client and application.job.client.email:
+            simulate_client_submission_email(application.id, application.job.client.email)
+            
+        return Response(ApplicationSerializer(application).data)
+
+    @action(detail=True, methods=['post'], url_path='schedule-interview')
+    def schedule_interview(self, request, pk=None):
+        application = self.get_object()
+        serializer = InterviewScheduleSerializer(data=request.data)
+        if serializer.is_valid():
+            schedule = serializer.save(
+                application=application,
+                organization=request.user.organization
+            )
+            application.status = CandidateStatus.INTERVIEW_SCHEDULED
+            application.save()
+            log_action(request.user, 'updated', 'Application', application.id, f"Scheduled interview for {application.candidate.candidate_name}")
+            return Response(InterviewScheduleSerializer(schedule).data, status=201)
+        return Response(serializer.errors, status=400)
 
 class CalendarEventsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
     def get(self, request):
         start_date = request.query_params.get('start_date')
         end_date = request.query_params.get('end_date')
@@ -126,15 +185,27 @@ class CalendarEventsView(APIView):
             
         user = request.user
         
-        interviews_qs = InterviewSchedule.objects.filter(date__gte=start_date, date__lte=end_date, candidate__is_deleted=False, organization=user.organization)
-        candidates_qs = Candidate.objects.filter(share_date__gte=start_date, share_date__lte=end_date, is_deleted=False, organization=user.organization)
+        interviews_qs = InterviewSchedule.objects.filter(
+            is_deleted=False,
+            date__gte=start_date, 
+            date__lte=end_date, 
+            application__is_deleted=False,
+            application__candidate__is_deleted=False, 
+            organization=user.organization
+        )
+        applications_qs = Application.objects.filter(
+            share_date__gte=start_date, 
+            share_date__lte=end_date, 
+            is_deleted=False, 
+            organization=user.organization
+        )
         
         if user.role == UserRole.MANAGER:
-            interviews_qs = interviews_qs.filter(candidate__job__created_by=user)
-            candidates_qs = candidates_qs.filter(job__created_by=user)
+            interviews_qs = interviews_qs.filter(application__job__created_by=user)
+            applications_qs = applications_qs.filter(job__created_by=user)
         elif user.role == UserRole.RECRUITER:
-            interviews_qs = interviews_qs.filter(candidate__job__assigned_recruiters=user)
-            candidates_qs = candidates_qs.filter(job__assigned_recruiters=user)
+            interviews_qs = interviews_qs.filter(application__job__assigned_recruiters=user)
+            applications_qs = applications_qs.filter(job__assigned_recruiters=user)
             
         events_by_date = {}
         
@@ -144,21 +215,21 @@ class CalendarEventsView(APIView):
                 events_by_date[date_str] = []
             events_by_date[date_str].append({
                 "type": "interview",
-                "candidate_name": interview.candidate.candidate_name,
-                "job_title": interview.candidate.job.title,
+                "candidate_name": interview.application.candidate.candidate_name,
+                "job_title": interview.application.job.title,
                 "time": str(interview.time),
                 "mode": interview.mode
             })
             
-        for candidate in candidates_qs:
-            if candidate.share_date:
-                date_str = candidate.share_date.isoformat()
+        for application in applications_qs:
+            if application.share_date:
+                date_str = application.share_date.isoformat()
                 if date_str not in events_by_date:
                     events_by_date[date_str] = []
                 events_by_date[date_str].append({
                     "type": "share_date",
-                    "candidate_name": candidate.candidate_name,
-                    "job_title": candidate.job.title
+                    "candidate_name": application.candidate.candidate_name,
+                    "job_title": application.job.title
                 })
                 
         response_data = [{"date": k, "events": v} for k, v in events_by_date.items()]
@@ -170,7 +241,7 @@ class PublicUploadView(APIView):
 
     def get(self, request, job_id):
         try:
-            job = Job.objects.get(id=job_id)
+            job = Job.objects.get(id=job_id, is_deleted=False)
             return Response({
                 "job_id": str(job.id),
                 "title": job.title,
@@ -182,7 +253,7 @@ class PublicUploadView(APIView):
 
     def post(self, request, job_id):
         try:
-            job = Job.objects.get(id=job_id)
+            job = Job.objects.get(id=job_id, is_deleted=False)
         except Job.DoesNotExist:
             return Response({"error": "Job not found"}, status=404)
             
@@ -194,21 +265,75 @@ class PublicUploadView(APIView):
         if not all([name, email, phone, resume]):
             return Response({"error": "All fields (name, email, phone, resume) are required"}, status=400)
             
-        first_stage = job.stages.first()
-            
+        # Use AI parsing for better data extraction if possible (fallback to form values)
+        try:
+            from .utils import parse_resume_task
+            parsed = parse_resume_task(resume, organization=job.organization)
+            if "error" not in parsed and not parsed.get("duplicate", False):
+                name = parsed.get("candidate_name", name) or name
+                email = parsed.get("email", email) or email
+                phone = parsed.get("contact", phone) or phone
+                current_profile = parsed.get("current_profile", "Not provided")
+                current_company = parsed.get("current_company", "Not provided")
+                experience = parsed.get("experience", "0 years")
+                current_location = parsed.get("current_location", "Not specified")
+                education = parsed.get("education", "")
+                current_ctc = parsed.get("current_ctc", 0)
+                expected_ctc = parsed.get("expected_ctc", 0)
+            else:
+                current_profile = "Not provided"
+                current_company = "Not provided"
+                experience = "0 years"
+                current_location = "Not specified"
+                education = ""
+                current_ctc = 0
+                expected_ctc = 0
+        except Exception:
+            current_profile = "Not provided"
+            current_company = "Not provided"
+            experience = "0 years"
+            current_location = "Not specified"
+            education = ""
+            current_ctc = 0
+            expected_ctc = 0
+
         candidate = Candidate.objects.create(
-            job=job,
             candidate_name=name,
             profile_name=name,
-            email=email,
+            current_profile=current_profile,
+            current_company=current_company,
+            experience=experience,
+            current_location=current_location,
+            education=education,
             contact=phone,
+            email=email,
+            current_ctc=current_ctc,
+            expected_ctc=expected_ctc,
+            notice_period="Not specified",
             resume=resume,
             resume_file_name=resume.name,
+            organization=job.organization,
+            uploaded_by=None
+        )
+        
+        first_stage = job.stages.filter(is_deleted=False).order_by('order').first()
+        
+        application = Application.objects.create(
+            candidate=candidate,
+            job=job,
             status=CandidateStatus.SCREENING,
             current_stage=first_stage,
             organization=job.organization
         )
         
-        simulate_resume_submission_notification(candidate.id)
+        log_action(
+            None,
+            'created',
+            'Candidate',
+            candidate.id,
+            f"Public resume upload for job '{job.title}' by {name}",
+            organization=job.organization
+        )
+        simulate_resume_submission_notification(application.id)
         
         return Response({"message": "Resume submitted successfully! We'll be in touch."})

@@ -7,5 +7,5 @@ class AuditLogAdmin(admin.ModelAdmin):
     list_display = ['timestamp', 'user_name', 'action', 'entity', 'entity_id', 'organization']
     list_filter = ['action', 'entity', 'organization']
     search_fields = ['user_name', 'details', 'entity_id']
-    readonly_fields = ['timestamp', 'created_at']
+    readonly_fields = ['timestamp']
     ordering = ['-timestamp']

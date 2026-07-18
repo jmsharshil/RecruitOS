@@ -22,7 +22,7 @@ class JobBriefSerializer(serializers.ModelSerializer):
         return obj.client.company_name if obj.client else None
 
 class JobSerializer(serializers.ModelSerializer):
-    stages = StageSerializer(many=True, read_only=True)
+    stages = serializers.SerializerMethodField()
     assigned_recruiters = UserBriefSerializer(many=True, read_only=True)
     assigned_recruiter_ids = serializers.PrimaryKeyRelatedField(
         many=True, write_only=True,
@@ -34,8 +34,12 @@ class JobSerializer(serializers.ModelSerializer):
     client_name = serializers.SerializerMethodField()
     created_by = UserBriefSerializer(read_only=True)
 
+    def get_stages(self, obj):
+        stages = obj.stages.filter(is_deleted=False)
+        return StageSerializer(stages, many=True).data
+
     def get_candidate_count(self, obj):
-        return obj.candidates.filter(is_deleted=False).count()
+        return obj.applications.filter(is_deleted=False).count()
 
     def get_client_name(self, obj):
         return obj.client.company_name if obj.client else None
@@ -43,4 +47,4 @@ class JobSerializer(serializers.ModelSerializer):
     class Meta:
         model = Job
         fields = '__all__'
-        read_only_fields = ['id', 'resume_upload_link', 'created_at', 'updated_at', 'created_by']
+        read_only_fields = ['id', 'resume_upload_link', 'created_at', 'updated_at', 'created_by', 'organization', 'is_deleted', 'deleted_at']

@@ -7,7 +7,7 @@ from decouple import config, Csv
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-dummy-key')
-DEBUG = config('DEBUG', default=True, cast=bool)
+DEBUG = config('DEBUG', default=False, cast=bool)
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv())
 
 INSTALLED_APPS = [
@@ -144,3 +144,8 @@ CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://localhost:
 
 FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024   # 10 MB
 DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024   # 10 MB
+
+# OpenAI/Azure settings for AI resume parsing
+OPENAI_API_KEY = config('OPENAI_API_KEY', default='dummy-azure-key')
+AZURE_OPENAI_ENDPOINT = config('AZURE_OPENAI_ENDPOINT', default='https://your-resource.openai.azure.com/')
+OPENAI_API_VERSION = config('OPENAI_API_VERSION', default='2024-10-01')

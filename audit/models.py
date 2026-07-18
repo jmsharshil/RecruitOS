@@ -1,7 +1,6 @@
 import uuid
 from django.db import models
-from common.models import BaseModel
-from accounts.models import User
+from accounts.models import User, Organization
 
 class AuditActionType(models.TextChoices):
     CREATED  = 'created'
@@ -10,8 +9,15 @@ class AuditActionType(models.TextChoices):
     SENT     = 'sent'
     ASSIGNED = 'assigned'
 
-class AuditLog(BaseModel):
-    id        = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+class AuditLog(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(
+        Organization, 
+        on_delete=models.CASCADE, 
+        null=True, 
+        blank=True,
+        related_name='auditlog_related'
+    )
     user      = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     user_name = models.CharField(max_length=150)
     action    = models.CharField(max_length=20, choices=AuditActionType.choices)

@@ -131,16 +131,31 @@ class AdminDashboardView(APIView):
         this_month = now.replace(day=1, hour=0, minute=0, second=0)
         org = request.user.organization
 
-        total_active_jobs = Job.objects.filter(status=JobStatus.OPEN, organization=org).count()
-        candidates_this_month = Candidate.objects.filter(created_at__gte=this_month, is_deleted=False, organization=org).count()
-        active_clients = Client.objects.filter(status=ClientStatus.ACTIVE, is_deleted=False, organization=org).count()
+        total_active_jobs = Job.objects.filter(
+            is_deleted=False, status=JobStatus.OPEN, organization=org
+        ).count()
+        candidates_this_month = Candidate.objects.filter(
+            created_at__gte=this_month, is_deleted=False, organization=org
+        ).count()
+        active_clients = Client.objects.filter(
+            is_deleted=False, status=ClientStatus.ACTIVE, organization=org
+        ).count()
         
-        recent_jobs = Job.objects.filter(organization=org).order_by('-created_at')[:5].values(
+        recent_jobs = Job.objects.filter(
+            is_deleted=False, organization=org
+        ).order_by('-created_at')[:5].values(
             'id', 'title', 'client__company_name', 'status', 'created_at'
         )
 
-        top_recruiters = User.objects.filter(role=UserRole.RECRUITER, organization=org)[:5].values('id', 'name', 'avatar')
-        recent_audit_logs = AuditLogSerializer(AuditLog.objects.filter(organization=org).order_by('-timestamp')[:5], many=True).data
+        top_recruiters = User.objects.filter(
+            role=UserRole.RECRUITER, organization=org
+        )[:5].values('id', 'name', 'avatar')
+        recent_audit_logs = AuditLogSerializer(
+            AuditLog.objects.filter(
+                is_deleted=False, organization=org
+            ).order_by('-timestamp')[:5], 
+            many=True
+        ).data
 
         return Response({
             "stats": {
@@ -158,12 +173,16 @@ class ManagerDashboardView(APIView):
     permission_classes = [IsManager]
 
     def get(self, request):
-        my_jobs = Job.objects.filter(created_by=request.user)
+        my_jobs = Job.objects.filter(is_deleted=False, created_by=request.user)
         my_open_jobs = my_jobs.filter(status=JobStatus.OPEN).count()
-        candidates_in_pipeline = Candidate.objects.filter(job__in=my_jobs, is_deleted=False).exclude(status__in=[CandidateStatus.HIRED, CandidateStatus.REJECTED]).count()
+        candidates_in_pipeline = Candidate.objects.filter(
+            job__in=my_jobs, is_deleted=False
+        ).exclude(status__in=[CandidateStatus.HIRED, CandidateStatus.REJECTED]).count()
         
         today = timezone.localdate()
-        interviews_today = InterviewSchedule.objects.filter(candidate__job__in=my_jobs, date=today).count()
+        interviews_today = InterviewSchedule.objects.filter(
+            is_deleted=False, candidate__job__in=my_jobs, date=today
+        ).count()
         
         return Response({
             "stats": {
@@ -181,12 +200,16 @@ class RecruiterDashboardView(APIView):
     permission_classes = [IsRecruiter]
 
     def get(self, request):
-        assigned_jobs = Job.objects.filter(assigned_recruiters=request.user)
+        assigned_jobs = Job.objects.filter(is_deleted=False, assigned_recruiters=request.user)
         assigned_jobs_count = assigned_jobs.count()
-        total_candidates = Candidate.objects.filter(job__in=assigned_jobs, is_deleted=False).count()
+        total_candidates = Candidate.objects.filter(
+            job__in=assigned_jobs, is_deleted=False
+        ).count()
         
         today = timezone.localdate()
-        interviews_today = InterviewSchedule.objects.filter(candidate__job__in=assigned_jobs, date=today).count()
+        interviews_today = InterviewSchedule.objects.filter(
+            is_deleted=False, candidate__job__in=assigned_jobs, date=today
+        ).count()
         
         return Response({
             "stats": {

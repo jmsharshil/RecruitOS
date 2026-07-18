@@ -1,9 +1,11 @@
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from django.utils import timezone
 from clients.models import Client, POC, ClientDocument
 from clients.serializers import ClientSerializer, POCSerializer, ClientDocumentSerializer
 from common.permissions import IsAdminOrManager, IsAdmin
+from accounts.models import UserRole
 from audit.utils import log_action
 
 class ClientViewSet(viewsets.ModelViewSet):
@@ -11,7 +13,16 @@ class ClientViewSet(viewsets.ModelViewSet):
     serializer_class = ClientSerializer
 
     def get_queryset(self):
-        return Client.objects.filter(is_deleted=False, organization=self.request.user.organization)
+        user = self.request.user
+        qs = Client.objects.filter(is_deleted=False, organization=user.organization)
+        if user.role == UserRole.ADMIN or user.role == UserRole.MANAGER:
+            return qs
+        elif user.role == UserRole.RECRUITER:
+            return qs.filter(
+                jobs__is_deleted=False, 
+                jobs__assigned_recruiters=user
+            ).distinct()
+        return Client.objects.none()
 
     def get_permissions(self):
         if self.action == 'destroy':
@@ -28,6 +39,7 @@ class ClientViewSet(viewsets.ModelViewSet):
 
     def perform_destroy(self, instance):
         instance.is_deleted = True
+        instance.deleted_at = timezone.now()
         instance.save()
         log_action(self.request.user, 'deleted', 'Client', instance.id, f"Deleted client '{instance.company_name}'")
 
@@ -36,7 +48,8 @@ class ClientViewSet(viewsets.ModelViewSet):
         client = self.get_object()
         serializer = POCSerializer(data=request.data)
         if serializer.is_valid():
-            poc = serializer.save(client=client)
+            poc = serializer.save(client=client, organization=client.organization)
+            log_action(self.request.user, 'created', 'POC', poc.id, f"Added POC for client '{client.company_name}'")
             return Response(serializer.data, status=201)
         return Response(serializer.errors, status=400)
 
@@ -44,7 +57,7 @@ class ClientViewSet(viewsets.ModelViewSet):
     def manage_poc(self, request, pk=None, poc_id=None):
         client = self.get_object()
         try:
-            poc = POC.objects.get(id=poc_id, client=client)
+            poc = POC.objects.get(id=poc_id, client=client, is_deleted=False)
         except POC.DoesNotExist:
             return Response(status=404)
 
@@ -52,10 +65,14 @@ class ClientViewSet(viewsets.ModelViewSet):
             serializer = POCSerializer(poc, data=request.data, partial=True)
             if serializer.is_valid():
                 serializer.save()
+                log_action(self.request.user, 'updated', 'POC', poc.id, f"Updated POC for client '{client.company_name}'")
                 return Response(serializer.data)
             return Response(serializer.errors, status=400)
         elif request.method == 'DELETE':
-            poc.delete()
+            poc.is_deleted = True
+            poc.deleted_at = timezone.now()
+            poc.save()
+            log_action(self.request.user, 'deleted', 'POC', poc.id, f"Deleted POC for client '{client.company_name}'")
             return Response(status=204)
 
     @action(detail=True, methods=['post'], url_path='documents')
@@ -63,7 +80,8 @@ class ClientViewSet(viewsets.ModelViewSet):
         client = self.get_object()
         serializer = ClientDocumentSerializer(data=request.data)
         if serializer.is_valid():
-            serializer.save(client=client)
+            doc = serializer.save(client=client, organization=client.organization)
+            log_action(self.request.user, 'created', 'ClientDocument', doc.id, f"Uploaded document for client '{client.company_name}'")
             return Response(serializer.data, status=201)
         return Response(serializer.errors, status=400)
 
@@ -71,8 +89,11 @@ class ClientViewSet(viewsets.ModelViewSet):
     def delete_document(self, request, pk=None, doc_id=None):
         client = self.get_object()
         try:
-            doc = ClientDocument.objects.get(id=doc_id, client=client)
-            doc.delete()
+            doc = ClientDocument.objects.get(id=doc_id, client=client, is_deleted=False)
+            doc.is_deleted = True
+            doc.deleted_at = timezone.now()
+            doc.save()
+            log_action(self.request.user, 'deleted', 'ClientDocument', doc.id, f"Deleted document for client '{client.company_name}'")
             return Response(status=204)
         except ClientDocument.DoesNotExist:
             return Response(status=404)

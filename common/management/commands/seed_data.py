@@ -393,7 +393,7 @@ class Command(BaseCommand):
                 current_stage=stage,
                 status=status,
                 resume_file_name=f'{name.lower().replace(" ", "_")}_resume.pdf',
-                created_by=recruiter,
+                uploaded_by=recruiter,
                 organization=job.organization
             )
             created_candidates.append(candidate)

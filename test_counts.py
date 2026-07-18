@@ -1,11 +1,10 @@
 import os
 import django
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+django.setup()
+
 from django.conf import settings
-
-if not settings.configured:
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
-    django.setup()
-
 from accounts.models import Organization, User
 from clients.models import Client
 from jobs.models import Job

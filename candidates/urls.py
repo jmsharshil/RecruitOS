@@ -1,10 +1,11 @@
 from django.urls import path
 from rest_framework.routers import DefaultRouter
-from candidates.views import CandidateViewSet, CalendarEventsView, PublicUploadView
+from candidates.views import CandidateViewSet, ApplicationViewSet, CalendarEventsView, PublicUploadView
 from candidates.views_export import CandidateExportView, CandidateImportView
 
 router = DefaultRouter()
 router.register(r'', CandidateViewSet, basename='candidate')
+router.register(r'applications', ApplicationViewSet, basename='application')
 
 urlpatterns = [
     path('calendar/events/', CalendarEventsView.as_view(), name='calendar-events'),

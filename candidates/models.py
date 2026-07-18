@@ -26,17 +26,16 @@ class SubmissionStatus(models.TextChoices):
 
 class Candidate(BaseModel):
     id                 = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    job                = models.ForeignKey(Job, related_name='candidates', on_delete=models.CASCADE)
     profile_name       = models.CharField(max_length=200)
     candidate_name     = models.CharField(max_length=150)
-    current_profile    = models.CharField(max_length=200)
-    current_company    = models.CharField(max_length=200)
+    current_profile    = models.CharField(max_length=200,blank=True)
+    current_company    = models.CharField(max_length=200,blank=True)
     experience         = models.CharField(max_length=50)
-    current_location   = models.CharField(max_length=150)
+    current_location   = models.CharField(max_length=150,blank=True)
     preferred_location = models.CharField(max_length=150, blank=True)
     education          = models.CharField(max_length=200, blank=True)
     college            = models.CharField(max_length=200, blank=True)
-    contact            = models.CharField(max_length=20)
+    contact            = models.CharField(max_length=20, blank=True)
     email              = models.EmailField()
     dob                = models.DateField(null=True, blank=True)
     doc                = models.DateField(null=True, blank=True)
@@ -45,30 +44,46 @@ class Candidate(BaseModel):
     offer_in_hand      = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     notice_period      = models.CharField(max_length=50)
     reason_for_change  = models.TextField(blank=True)
-    share_date         = models.DateField(default=date.today)
-    feedback           = models.TextField(blank=True)
-    current_stage      = models.ForeignKey(Stage, null=True, blank=True, on_delete=models.SET_NULL, related_name='candidates')
-    status             = models.CharField(max_length=30, choices=CandidateStatus.choices, default=CandidateStatus.SCREENING)
     resume             = models.FileField(upload_to='resumes/', null=True, blank=True)
     resume_file_name   = models.CharField(max_length=255, blank=True)
-    is_deleted         = models.BooleanField(default=False)
-    deleted_at         = models.DateTimeField(null=True, blank=True)
-    created_by         = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='added_candidates')
+    uploaded_by        = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='added_candidates')
+
+class Application(BaseModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    candidate = models.ForeignKey(Candidate, related_name='applications', on_delete=models.CASCADE)
+    job = models.ForeignKey(Job, related_name='applications', on_delete=models.CASCADE)
+    current_stage = models.ForeignKey(
+        Stage, null=True, blank=True, on_delete=models.SET_NULL, related_name='applications'
+    )
+    status = models.CharField(
+        max_length=30, choices=CandidateStatus.choices, default=CandidateStatus.SCREENING
+    )
+    feedback = models.TextField(blank=True)
+    share_date = models.DateField(default=date.today)
+
+    class Meta:
+        unique_together = ('organization', 'candidate', 'job')
+
 
 class InterviewSchedule(BaseModel):
-    id               = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    candidate        = models.OneToOneField(Candidate, related_name='interview_schedule', on_delete=models.CASCADE)
-    date             = models.DateField()
-    time             = models.TimeField()
-    mode             = models.CharField(max_length=20, choices=InterviewMode.choices)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    application = models.OneToOneField(
+        Application, related_name='interview_schedule', on_delete=models.CASCADE
+    )
+    date = models.DateField()
+    time = models.TimeField()
+    mode = models.CharField(max_length=20, choices=InterviewMode.choices)
     interviewer_name = models.CharField(max_length=150, blank=True)
-    notes            = models.TextField(blank=True)
+    notes = models.TextField(blank=True)
+
 
 class ClientSubmission(BaseModel):
-    id              = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    candidate       = models.OneToOneField(Candidate, related_name='client_submission', on_delete=models.CASCADE)
-    sent_at         = models.DateTimeField(auto_now_add=True)
-    sent_by         = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
-    status          = models.CharField(max_length=20, choices=SubmissionStatus.choices, default=SubmissionStatus.PENDING)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    application = models.OneToOneField(
+        Application, related_name='client_submission', on_delete=models.CASCADE
+    )
+    sent_at = models.DateTimeField(auto_now_add=True)
+    sent_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='sent_submissions')
+    status = models.CharField(max_length=20, choices=SubmissionStatus.choices, default=SubmissionStatus.PENDING)
     client_feedback = models.TextField(blank=True)
-    client_rating   = models.PositiveSmallIntegerField(null=True, blank=True)  # 1-5
+    client_rating = models.PositiveSmallIntegerField(null=True, blank=True)  # 1-5

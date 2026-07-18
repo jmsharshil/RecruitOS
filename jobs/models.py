@@ -13,32 +13,66 @@ class JobStatus(models.TextChoices):
     CLOSED  = 'closed'
     ON_HOLD = 'on-hold'
 
+class JobTypes(models.TextChoices):
+    PERMANENT = 'permanent'
+    CONTRACTUAL  = 'contractual'
+
+class JobModes(models.TextChoices):
+    REMOTE     = 'remote'
+    HYBRID     = 'hybrid'
+    OFFICE     = 'office'
+
+class Priority(models.TextChoices):
+    HIGH  = 'high'
+    LOW   =  'low'
+    MEDIUM = 'medium'
+
 class Job(BaseModel):
     id                  = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     title               = models.CharField(max_length=200)
     description         = models.TextField()
-    skills              = models.JSONField(default=list)          # ["Python", "Django", ...]
-    experience          = models.CharField(max_length=50)         # "2-4 years"
+    code                = models.CharField(max_length=20, blank=True)  # auto-generated: JOB-000001 (unique per org)
+    skills              = models.JSONField(default=list, blank=True)
+    education           = models.CharField(max_length=200, blank=True)
+    min_experience      = models.PositiveIntegerField(default=0)
+    max_experience      = models.PositiveIntegerField(default=0)
     location            = models.CharField(max_length=150)
+    openings            = models.PositiveIntegerField(default=1)
+    priority            = models.CharField(max_length=10, choices=Priority.choices, default=Priority.MEDIUM)
+    budget              = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    job_mode            = models.CharField(max_length=20, choices=JobModes.choices, default=JobModes.OFFICE)
+    job_type            = models.CharField(max_length=20, choices=JobTypes.choices, default=JobTypes.PERMANENT)
     hiring_for          = models.CharField(max_length=10, choices=HiringFor.choices, default=HiringFor.SELF)
     client              = models.ForeignKey(Client, null=True, blank=True, on_delete=models.SET_NULL, related_name='jobs')
     status              = models.CharField(max_length=20, choices=JobStatus.choices, default=JobStatus.OPEN)
     assigned_recruiters = models.ManyToManyField(User, related_name='assigned_jobs', blank=True, limit_choices_to={'role': 'recruiter'})
+    target_closing_date = models.DateField(null=True, blank=True)
+    notice_period_preference = models.CharField(max_length=50, blank=True)
+    skill_criteria      = models.DecimalField(max_length=5, decimal_places=2, default=70, max_digits=3)
     resume_upload_link  = models.CharField(max_length=500, blank=True)
     created_by          = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='created_jobs')
 
+    class Meta:
+        unique_together = ('organization', 'code')
+
     def save(self, *args, **kwargs):
+        if not self.code:
+            # Organization-scoped code generation
+            last = Job.objects.filter(organization=self.organization).order_by('-created_at').first()
+            next_num = (int(last.code.split('-')[1]) + 1) if (last and '-' in last.code) else 1
+            self.code = f"JOB-{next_num:06d}"
         if not self.resume_upload_link:
             # We use a dummy link for now, in a real app this would use the frontend URL from settings
             self.resume_upload_link = f"https://frontend.app/upload/{self.id}"
         super().save(*args, **kwargs)
 
 class Stage(BaseModel):
-    id    = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    job   = models.ForeignKey(Job, related_name='stages', on_delete=models.CASCADE)
-    name  = models.CharField(max_length=100)
-    order = models.PositiveIntegerField(default=0)
-    color = models.CharField(max_length=20, default='indigo')
+    id         = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    job        = models.ForeignKey(Job, related_name='stages', on_delete=models.CASCADE)
+    name       = models.CharField(max_length=100)
+    order      = models.PositiveIntegerField(default=0)
+    color      = models.CharField(max_length=20, default='indigo')
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='created_stages')
 
     class Meta:
         ordering = ['order']
