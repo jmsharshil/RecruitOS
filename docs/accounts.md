@@ -1,17 +1,18 @@
 # Accounts Module Documentation
 
 ## Overview
-Handles authentication, multi-tenant user management (scoped to `Organization`), role-based dashboards, profile, and organization registration (planned).
+Handles authentication, multi-tenant user management (scoped to `Organization`), role-based dashboards, profile, and organization registration.
 
 **Key Models**: 
-- `Organization` (tenant root)
+- `Organization` (tenant root with UUID PK)
 - `User` (extends AbstractBaseUser, has `organization = ForeignKey(Organization)`, `created_by`, `role`)
-- Uses `BaseModel` inheritance pattern for consistency across system.
+- Uses custom manager and UUID PKs for consistency.
 
 ## Flow Diagram - Accounts Module
 
 ```mermaid
 flowchart TD
+    R[Register Organization<br/>POST /auth/register/] --> A[Login]
     A[Login] --> B{Valid Credentials?}
     B -->|Yes| C[Return JWT Tokens + User Info]
     B -->|No| D[Error 401]
@@ -114,20 +115,39 @@ flowchart TD
   - **Other actions**: GET/PUT/DELETE `/api/v1/users/{id}/` supported with same permissions.
   - Role-based queryset filtering and audit logging applied automatically.
 
-### 7. Organization Registration (Planned)
-- **Endpoint**: `POST /api/v1/organizations/register/`
+### 7. Organization Registration
+- **Endpoint**: `POST /api/v1/auth/register/`
 - **Body**:
   ```json
   {
-    "name": "New Company Inc.",
-    "admin_email": "admin@newcompany.com",
+    "org_name": "New Company Inc.",
     "admin_name": "Admin User",
-    "admin_password": "securepass123",
-    "industry": "IT Services"
+    "admin_email": "admin@newcompany.com",
+    "admin_password": "securepass123"
   }
   ```
-- **Response**: Creates `Organization` + initial `ADMIN` user, returns tokens.
-- This will bootstrap a new tenant with full isolation.
+- **Success Response (201)**: Creates `Organization` + initial `ADMIN` user atomically, returns JWT tokens.
+  ```json
+  {
+    "message": "Organization and admin account created successfully",
+    "organization": {
+      "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "name": "New Company Inc."
+    },
+    "user": {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "Admin User",
+      "email": "admin@newcompany.com",
+      "role": "admin",
+      "organization": "New Company Inc."
+    },
+    "tokens": {
+      "refresh": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+      "access": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+    }
+  }
+  ```
+- Duplicate checks (in serializer + view) prevent re-registration for same org name or admin email. This bootstraps a new tenant with full isolation. Subsequent managers/recruiters created via the `/api/v1/users/` endpoint.
 
 ### 8. Dashboards
 - `GET /api/v1/dashboard/admin/` - Stats on jobs, candidates, clients, recent activity (org-scoped).
