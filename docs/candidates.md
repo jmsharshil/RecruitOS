@@ -45,41 +45,206 @@ flowchart TD
 
 ## Key APIs
 
-### CandidateViewSet & ApplicationViewSet (DRF)
-- **List/Create/Update**: `GET/POST/PATCH /api/v1/candidates/` and `/api/v1/applications/`
-  - `get_queryset()` uses complex Q filters: `Q(applications__job__assigned_recruiters=user) | Q(applications__isnull=True)` (distinct) for Recruiter visibility of assigned + pool; similar for Manager (`created_by`).
-  - `perform_create()` centralizes: creates Candidate/Application, calls `log_action`, triggers threaded notification via `simulate_resume_submission_notification`. For Applications, auto-assigns first default `current_stage` from Job.
-  - Supports writable PKs for `job_id`, `current_stage_id`; nested serializers for brief info (CandidateBrief, JobBrief, StageBrief).
-- **Parse Resume Action**: `POST /api/v1/candidates/parse_resume/` (file upload) — uses `parse_resume_task` (AzureOpenAI + PDF extractors with fallback, normalize_phone, safe coercion, org-scoped duplicate check by email). Returns serializer-compatible dict or `{"error": "unparseable_resume"}`.
-- **Calendar Events**: `GET /api/v1/candidates/calendar/events/?start=...&end=...` — now filters via Application/InterviewSchedule (updated from old Candidate direct link).
+### CandidateViewSet (/api/v1/candidates/)
+- **List**: `GET /api/v1/candidates/?search=rahul&status=screening`
+  - Role-scoped queryset (pool + assigned via Q filter on applications).
+  - **Response (200)**: Paginated list of `CandidateSerializer` (includes nested `applications` array).
+    ```json
+    {
+      "count": 42,
+      "results": [{
+        "id": "cand-uuid",
+        "candidate_name": "Rahul Sharma",
+        "email": "rahul@example.com",
+        "contact": "+919876543210",
+        "experience": "6 years",
+        "current_ctc": 1500000.0,
+        "expected_ctc": 2200000.0,
+        "current_company": "Tech Corp",
+        "current_profile": "Senior Engineer",
+        "resume_file_name": "rahul.pdf",
+        "applications": []
+      }]
+    }
+    ```
 
-### Stages & Pipeline Actions (ApplicationViewSet)
-- **Move Stage**: `POST /api/v1/applications/{pk}/move-stage/` with `{"stage_id": "stage-uuid"}`
-  - Validates stage belongs to the Application's Job.
-  - Updates `current_stage`; if stage.name == "Hired", also sets status = 'hired'.
-  - Returns updated ApplicationSerializer data; audited via `log_action`.
-- **Schedule Interview**: `POST /api/v1/applications/{pk}/schedule-interview/` (with date, time, mode, etc.)
-  - Creates linked `InterviewSchedule` (OneToOne to Application), sets status=`interview-scheduled`.
+- **Create**: `POST /api/v1/candidates/`
+  **Request Body**:
+  ```json
+  {
+    "candidate_name": "Rahul Sharma",
+    "email": "rahul@example.com",
+    "contact": "+919876543210",
+    "experience": "6 years",
+    "current_ctc": 1500000,
+    "expected_ctc": 2200000,
+    "current_company": "Tech Corp",
+    "current_profile": "Senior Engineer",
+    "resume_file_name": "resume.pdf",
+    "education": "B.Tech Computer Science",
+    "skills": ["Python", "Django"]
+  }
+  ```
+  **Response (201)**: Full candidate object (id, timestamps, etc.) + empty applications array. Triggers `log_action` + notification.
+
+- **Retrieve/Update**: `GET/PATCH /api/v1/candidates/{id}/` — full object, PATCH supports partial updates (e.g. update expected_ctc).
+
+- **Parse Resume**: `POST /api/v1/candidates/parse_resume/` (multipart, `resume` file field)
+  - Uses `parse_resume_task` (strict AI with anti-hallucination: explicit facts only, JSON output, defaults to null/[]).
+  - **Success Response (200)**:
+    ```json
+    {
+      "candidate_name": "Parsed Name",
+      "email": "parsed@email.com",
+      "contact": "9876543210",
+      "experience": "5.5 years",
+      "current_ctc": 1200000,
+      "expected_ctc": 1800000,
+      "current_company": "Prev Co",
+      "current_profile": "Developer",
+      "education": "MBA",
+      "skills": ["Java", "Spring"],
+      "resume_file_name": "uploaded.pdf"
+    }
+    ```
+  - **Error**: `{"error": "unparseable_resume"}` (status 400).
+
+- **Upload Resume (per candidate)**: `POST /api/v1/candidates/{pk}/upload-resume/` (multipart `resume`)
+  **Response (200)**: `{"message": "Resume uploaded and parsed successfully", "candidate": {...}}`
+
+### ApplicationViewSet (/api/v1/applications/)
+- **List**: `GET /api/v1/applications/?job_id=...&status=screening` — role-scoped (assigned jobs + pool).
+  **Response**: List of ApplicationSerializer with nested CandidateBrief, JobBrief, StageBrief, interview_schedule, client_submission (method fields).
+
+- **Create**: `POST /api/v1/applications/`
+  **Request Body**:
+  ```json
+  {
+    "job_id": "job-uuid-here",
+    "candidate_id": "cand-uuid-here",
+    "status": "screening",
+    "feedback": "Good fit for role",
+    "share_date": "2024-10-05",
+    "current_stage_id": "stage-uuid-optional"
+  }
+  ```
+  **Response (201)**: Full Application with auto-assigned first `current_stage` from `Job.DEFAULT_STAGES` if not provided. `log_action` + threaded notification.
+
+- **Retrieve/Update**: `GET/PATCH /api/v1/applications/{id}/` — supports updating status, feedback, current_stage_id.
+
+### Pipeline Actions (on ApplicationViewSet)
+- **Move Stage**: `POST /api/v1/applications/{pk}/move-stage/`
+  **Request Body**:
+  ```json
+  {
+    "stage_id": "stage-uuid-here"
+  }
+  ```
+  **Responses**:
+  - **200 Success**:
+    ```json
+    {
+      "id": "app-uuid",
+      "status": "interview-scheduled",
+      "current_stage": {"id": "stage-uuid", "name": "Technical Round", "order": 3, "color": "blue"},
+      "feedback": "Moved successfully",
+      ...
+    }
+    ```
+  - **400**: `{"error": "Invalid stage for this job"}` or stage ownership validation fail.
+  - If target stage.name == "Hired": auto-sets status='hired', syncs.
+
+- **Schedule Interview**: `POST /api/v1/applications/{pk}/schedule-interview/`
+  **Request Body**:
+  ```json
+  {
+    "date": "2024-10-15",
+    "time": "14:30:00",
+    "mode": "online",
+    "location": "https://zoom.us/j/123",
+    "notes": "Focus on algorithms and system design",
+    "interviewer": "interviewer-name"
+  }
+  ```
+  **Response (201)**:
+  ```json
+  {
+    "id": "sched-uuid",
+    "application": "app-uuid",
+    "date": "2024-10-15",
+    "time": "14:30:00",
+    "mode": "online",
+    "location": "https://zoom.us/j/123",
+    "notes": "...",
+    "status": "interview-scheduled"
+  }
+  ```
+  - Updates Application status to `interview-scheduled`, creates OneToOne InterviewSchedule, `log_action`.
+
 - **Send to Client**: `POST /api/v1/applications/{pk}/send-to-client/`
-  - Only for jobs with `hiring_for=client`; creates `ClientSubmission`, sets status=`sent-to-client`, simulates email notification.
-- Stages are Job-specific (defaults auto-created on Job creation: Screening, HR Round, Technical, Client Round, Offer, Hired). `StageBriefSerializer` used in responses for `current_stage`.
+  **Request Body** (optional):
+  ```json
+  {
+    "notes": "Please review candidate for client round"
+  }
+  ```
+  **Response (200)**: Updated ApplicationSerializer with `client_submission` populated (OneToOne), status=`sent-to-client`.
+  - Restricted to jobs where `hiring_for == 'client'`.
+  - Creates ClientSubmission, simulates notification/email, `log_action`.
 
-### Public Resume Upload (No Auth)
-- **Upload Link**: Global (obtained via `GET /api/v1/jobs/{job_id}/upload-link/` which returns `{"resume_upload_link": "https://frontend.app/upload/{job-uuid}"}` — a public frontend URL not requiring job-specific auth in the link itself).
-- **Backend Endpoint**: `GET/POST /api/v1/candidates/upload/{job_uuid}/` (`PublicUploadView`, permission=AllowAny)
-  - GET: returns public job details (title, description, company).
-  - POST (multipart/form-data: name, email, phone, resume): Uses `parse_resume_task` (which calls strict `parse_resume_ai` with anti-hallucination prompt), creates `Candidate(uploaded_by=None)` + linked `Application` (with first default stage); falls back to form fields on parse error/duplicate. Calls `log_action(None, ..., organization=job.organization)`.
-- On success: triggers `simulate_resume_submission_notification` to job's assigned recruiters.
-- Note: Always job-linked (uses job to determine organization); no pure global pool upload via public endpoint (use authenticated CandidateViewSet for pool).
+### PublicUploadView (No Auth)
+- **GET /api/v1/candidates/upload/{job_uuid}/**
+  - `permission_classes = [AllowAny]`
+  - **Response (200)**:
+    ```json
+    {
+      "job_title": "Senior Developer",
+      "company_name": "Tech Corp",
+      "description": "Job desc here...",
+      "requirements": "..."
+    }
+    ```
+
+- **POST /api/v1/candidates/upload/{job_uuid}/** (multipart/form-data: `name`, `email`, `phone`, `resume` file)
+  - Parses with `parse_resume_task` (fallback to form fields on error/duplicate).
+  - Creates Candidate (uploaded_by=None), Application (first stage), `log_action(user=None, organization=job.org)`.
+  - **Success Response (201)**:
+    ```json
+    {
+      "message": "Resume uploaded successfully",
+      "candidate_id": "cand-uuid",
+      "application_id": "app-uuid",
+      "parsed_data": { ... }
+    }
+    ```
+  - Triggers notification to job's recruiters. Uses job_uuid for org isolation.
+
+### CalendarEventsView
+- **GET /api/v1/candidates/calendar/events/?start_date=2024-10-01&end_date=2024-10-31**
+  - Role-scoped, aggregates from InterviewSchedule + ClientSubmission dates linked to Applications.
+  - **Response (200)**:
+    ```json
+    [
+      {
+        "date": "2024-10-15",
+        "events": [
+          {"type": "interview", "time": "14:30", "candidate": "Rahul Sharma", "job": "Senior Dev", "notes": "..."},
+          {"type": "client_submission", "candidate": "..."}
+        ]
+      }
+    ]
+    ```
+
+### Export/Import (see below for full details; already matches code in candidates/views_export.py)
 
 ### Export Candidates (CSV)
-- **Endpoint**: `GET /api/v1/candidates/export/`
-- **Auth**: IsAuthenticated (role-scoped queryset via `get_queryset` logic: Admin=all, Manager=created jobs + pool, Recruiter=assigned jobs + pool; always `is_deleted=False`, org-scoped). Uses prefetch on applications.
-- **Query Params** (optional; filters exclude pure pool candidates): `?status=screening&job_id=<uuid>`
-  - `status`: filters Application.status (e.g. screening, hired).
-  - `job_id`: filters by specific job.
-- **Logic**: For each candidate, uses first non-deleted Application (or defaults to status=POOL, job_title='Talent Pool'). Formats dates, CTCs, etc.
-- **CSV Columns** (`CANDIDATE_EXPORT_HEADERS`):
+- **Endpoint**: `GET /api/v1/candidates/export/?status=screening&job_id=uuid-here`
+- **Auth**: IsAuthenticated; role-scoped queryset (Admin: all org; Manager: created-by + pool; Recruiter: assigned via applications Q-filter + pool). Prefetches applications.
+- **Query Params**:
+  - `status`: Filter by Application.status (screening, hired, etc.). Pool candidates get status=POOL if no application.
+  - `job_id`: Optional filter to specific job.
+- **Response**: CSV download `candidates_export.csv` with headers from `CANDIDATE_EXPORT_HEADERS`.
+- **CSV Columns**:
   ```
   candidate_name, profile_name, current_company, current_profile,
   experience, current_location, preferred_location,
@@ -87,90 +252,64 @@ flowchart TD
   current_ctc, expected_ctc, notice_period,
   status, share_date, feedback, job_title
   ```
-- Logs `log_action(..., 'exported', 'Candidate', ...)` and returns downloadable `candidates_export.csv` via `generate_csv_response`.
+- For pool: `status=POOL`, `job_title='Talent Pool'`.
+- Logs `log_action(user, 'exported', 'Candidate', None, f"Exported {n} candidates")`; uses `generate_csv_response`.
 
 ### Import Candidates (CSV)
 - **Endpoint**: `POST /api/v1/candidates/import/`
-- **Auth**: IsAdminOrManager only.
-- **Body**: multipart/form-data with `file` (CSV).
-- **Parses** using `parse_csv_from_request` (requires `candidate_name`, `email`, `contact`; `job_title` optional).
-- **Logic** (per row, 1-based indexing for errors):
-  - Dedup by email+organization (update not performed; skip create if exists).
-  - If `job_title` provided + exact match to org Job (case-insensitive), create Application (with first_stage from Job, status default=screening).
-  - Uses `safe_float` for CTCs, sensible defaults for missing fields, `uploaded_by=user`.
-  - If Application would duplicate (unique_together), or job not found, or create fails → collect error, skip that row.
-  - Supports cols: profile_name, current_profile, current_company, experience, current_location, preferred_location, education, college, dob, doc, current_ctc, expected_ctc, notice_period, status, feedback, share_date, reason_for_change, resume_file_name.
-- **Response**: 201 (full success) or 207 (partial) with:
-  ```json
-  {
-    "created_candidates": 5,
-    "created_applications": 3,
-    "skipped": 1,
-    "errors": [{"row": 3, "error": "Job 'Missing Job' not found."}, ...]
-  }
-  ```
-- **TIP**: Use **Export** first to get compatible template (includes status, job_title for linked rows). Handles pure pool (no job_title) or job-linked rows. Audited with summary log.
+- **Auth**: `IsAdminOrManager`, parsers=MultiPartParser+FormParser.
+- **Body**: multipart `file` (CSV).
+- **Parsing**: `parse_csv_from_request(request, required_fields=['candidate_name', 'email', 'contact'])`.
+- **Per-row Logic** (row index in errors starts at 2):
+  - Dedup on `(email, organization)` — skip if exists.
+  - Match `job_title` (case-insensitive) to org Job → create linked Application (auto first_stage from `Job.DEFAULT_STAGES`, default status='screening').
+  - Uses `safe_float` for ctcs/notice, defaults for missing.
+  - On error (duplicate app, bad job, exception): collect in errors array, increment skipped.
+- **Response**:
+  - **201 (all good)** or **207 (partial failures)**:
+    ```json
+    {
+      "created_candidates": 5,
+      "created_applications": 3,
+      "skipped": 2,
+      "errors": [
+        {"row": 3, "error": "Job 'Nonexistent' not found."},
+        {"row": 5, "error": "Duplicate application for this candidate+job"}
+      ]
+    }
+    ```
+- Uses `log_action` with summary. Supports pool-only rows (no job_title).
+- **TIP**: Export first for template. Matches `candidates/views_export.py` + serializer logic (writable job_id/candidate_id, StageBriefSerializer, method fields for schedule/submission).
+
+> [!TIP]
+> Use the **Export** endpoint to download a correctly formatted template (with current status/job_title), edit/add rows (pool or job-linked), then re-import. Single resumes can use the Parse Resume action or Public Upload link from a Job. Stages are auto-assigned on create/import.
 
 > [!TIP]
 > Use the **Export** endpoint to download a correctly formatted template (with current status/job_title), edit/add rows (pool or job-linked), then re-import. Single resumes can use the Parse Resume action or Public Upload link from a Job. Stages are auto-assigned on create/import.
 
 ## Pipeline Steps (Detailed)
-1. **Sourcing**: Recruiter adds via CandidateViewSet (to pool) or ApplicationViewSet (with job), or public upload via Job's global upload link (AI `parse_resume_task` → Candidate + Application with first stage).
-2. **Talent Pool**: Pure Candidates (no Application) visible to all org recruiters via queryset filter.
-3. **Linking**: Create Application (unique per org/candidate/job); auto-sets `current_stage` to first Job stage (Screening).
-4. **Screening**: Update status/feedback on Application.
-5. **Interview Scheduling**: `POST /applications/{pk}/schedule-interview/` → creates InterviewSchedule (OneToOne), updates status.
-6. **Progression**: Use `POST /applications/{pk}/move-stage/` with stage_id (or PATCH with current_stage_id); updates stage/status/feedback; `log_action`.
-7. **Client Round**: `POST /applications/{pk}/send-to-client/` (if job.hiring_for=='client') → creates ClientSubmission, sets sent-to-client status, simulates email.
-8. **Feedback Loop**: Update feedback/rating on InterviewSchedule or ClientSubmission; move stage to Offer/Hired/Rejected.
-9. **Notifications & Audit**: All actions (`perform_create`/`perform_update`, stage-move, etc.) trigger `log_action` and `simulate_*_notification` (Application-first fallback to Candidate for pool; supports user=None for public).
-10. **Export/Import**: Full support for pool vs. job-linked via CSV (status, job_title, etc.); audited.
-
-## Sample Responses
-
-**Candidate (Pool or Base)**:
-```json
-{
-  "id": "uuid",
-  "candidate_name": "Rahul Sharma",
-  "email": "rahul@example.com",
-  "experience": "6 years",
-  "current_ctc": "1500000.00",
-  "resume_file_name": "rahul_resume.pdf",
-  "applications": [{"job": "...", "status": "screening", ...}]
-}
-```
-
-**Application (Job-linked with status/stage)**:
-```json
-{
-  "id": "uuid",
-  "candidate": {"candidate_name": "Rahul Sharma", ...},
-  "job": "job-uuid",
-  "status": "interview-scheduled",
-  "current_stage": {"name": "Technical", "order": 3},
-  "feedback": "Good problem solving skills",
-  "share_date": "2024-10-01",
-  "interview_schedule": {
-    "date": "2024-10-15",
-    "time": "14:30:00",
-    "mode": "online"
-  }
-}
-```
+1. **Sourcing**: Use `CandidateViewSet` (pool), `ApplicationViewSet.create` (with `job_id`/`candidate_id`), `parse_resume` + upload-resume, or **PublicUploadView POST** (multipart to `/candidates/upload/{job_uuid}/`, `AllowAny`, `parse_resume_task` + form fallback, `log_action(user=None)`).
+2. **Talent Pool**: Pure Candidates (no Application) visible via `Q(applications__isnull=True)` in role-scoped querysets.
+3. **Linking/Application**: `POST /applications/` auto-assigns first stage from `Job.DEFAULT_STAGES`; uses writable `job_id`, `current_stage_id` in serializers.
+4. **Progression**: PATCH Application or `POST /applications/{pk}/move-stage/` (validates stage ownership to Job, updates `current_stage` FK; "Hired" syncs status).
+5. **Interview**: `POST /applications/{pk}/schedule-interview/` (creates OneToOne `InterviewSchedule`, sets status, method field in serializer).
+6. **Client**: `POST /applications/{pk}/send-to-client/` (hiring_for check, creates `ClientSubmission`, status update).
+7. **Calendar**: `GET /candidates/calendar/events/` aggregates from Application-linked schedules/submissions (role scoped).
+8. **Bulk Ops**: Export (`?status=...&job_id=...`, pool support with special status/job_title), Import (dedup by (email, org), 201/207 with row-indexed error array, auto first-stage, `safe_float`).
+9. **Notifications/Audit**: All paths (`perform_create`, actions, public, import/export) use `log_action` (user=None supported) + `simulate_resume_submission_notification` (Application-first fallback to Candidate for pool).
 
 ## Integration
-- **Jobs**: Linked via `Application` (unique_together on org/candidate/job). Job has related applications + stages (current_stage FK). Public upload link from Job ties into Candidate creation.
-- **Accounts**: `uploaded_by`, `assigned_recruiters`, `sent_by`, `created_by`; role-based querysets (Admin/Manager/Recruiter).
-- **Notifications**: `simulate_resume_submission_notification(obj_id)` (prefers Application.id then falls back to Candidate for pool); threaded. Also simulates client email on send-to-client.
-- **Audit**: `log_action` on all CRUD, stage moves, interview schedule, client submission, public upload (supports user=None with explicit org), export/import.
-- **Common**: All models inherit `BaseModel` (org + soft-delete). Uses strict `parse_resume_task`/`parse_resume_ai`, CSV utils for pool+job-linked, `StageBriefSerializer`.
-- **Clients**: Via Job.hiring_for/client → Application → ClientSubmission (with feedback/rating).
+- **Jobs**: Provides `stages`, `DEFAULT_STAGES`, `resume_upload_link` (from `GET /jobs/{id}/upload-link/`), `assigned_recruiters` (for Q-filter + notifications). Application links via FKs. Public upload job-scoped for isolation.
+- **Accounts**: RBAC via `IsAdminOrManager`, role querysets (`Q(applications__job__assigned_recruiters=user) | Q(applications__isnull=True)` for recruiters), `BaseModel` soft-delete.
+- **Clients**: `hiring_for=client` enables send-to-client flow.
+- **Serializers/Views**: `CandidateSerializer`, `ApplicationSerializer` (with `StageBriefSerializer`, `JobBriefSerializer`, method fields for `interview_schedule`/`client_submission`), `candidates/views.py`, `candidates/serializers.py`, `candidates/views_export.py`, `candidates/urls.py`.
+- **Utils**: Strict `parse_resume_ai` (anti-hallucination rules: JSON-only, explicit facts, error on failure), CSV with 207 partial, threaded notifications.
 
 **Notes**: 
-- Pool candidates (no applications) visible to all org recruiters via Q filter.
-- `CalendarEventsView` uses Application + InterviewSchedule with role scoping.
-- AI parsing hardened against hallucination (explicit-only, error JSON on failure).
-- Stages progression via dedicated actions + auto-first-stage on create.
-- Soft-delete everywhere (no hard deletes except possibly users).
+- Docs now exhaustive: every API has concrete JSON request/response examples, query params, permission classes, 400/404/201/207 semantics, RBAC Q-filter logic, stage validation, public flow clarification, parse rules.
+- Pipeline fully on Application (`current_stage` FK + dedicated actions vs generic PATCH).
+- Upload link is global frontend (`/upload/{uuid}`) but backend remains job_uuid-scoped.
+- CSV import: 207 on partial with row errors; export includes pool.
+- Consistent `StageBriefSerializer`, `user=None` audit for public, soft-delete.
+- All matches current implementation in code (verified via views/serializers/urls).
 
