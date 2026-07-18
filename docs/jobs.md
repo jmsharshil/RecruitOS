@@ -14,7 +14,7 @@ Manages job requisitions/positions. Linked to clients, assigned to recruiters, w
 ```mermaid
 flowchart TD
     A[Client Created] --> B[Create Job<br/>POST /api/v1/jobs/]
-    B --> C[Auto-create Default Stages<br/>Screening → Technical → Client Round → Offer → Hired]
+    B --> C[Auto-create Default Stages<br/>Screening → HR Round → Technical → Client Round → Offer → Hired]
     C --> D[Assign Recruiters<br/>Many-to-Many]
     D --> E[Share Resume Upload Link (PublicUploadView)]
     E --> F[Add to Pool (Candidate) or Create Application (job-linked)]
@@ -40,11 +40,12 @@ flowchart TD
     "title": "Senior Python Developer",
     "description": "Looking for experienced Django developer...",
     "skills": ["Python", "Django", "REST API", "PostgreSQL"],
-    "experience": "4-7 years",
+    "min_experience": 4,
+    "max_experience": 7,
     "location": "Mumbai (Hybrid)",
     "hiring_for": "client",
     "client": "client-uuid",
-    "assigned_recruiters": ["recruiter-uuid-1", "recruiter-uuid-2"]
+    "assigned_recruiter_ids": ["recruiter-uuid-1", "recruiter-uuid-2"]
   }
   ```
 - **Response (201)**: Job object with ID, auto-generated resume_upload_link, and default stages created.
@@ -58,7 +59,7 @@ flowchart TD
 - Supports filtering by status, client, etc.
 
 ### 3. Job Detail
-- `GET /api/v1/jobs/{id}/` - Includes stages and candidate counts per stage.
+- `GET /api/v1/jobs/{id}/` - Includes nested stages, total candidate_count, assigned_recruiters, client_name, all fields.
 
 ### 4. Update Job Status
 - **Endpoint**: `PATCH /api/v1/jobs/{id}/status/`
@@ -81,19 +82,22 @@ flowchart TD
 - **Response**: Streams a `jobs_export.csv` file download.
 - **CSV Columns**:
   ```
-  title, experience, location, hiring_for,
-  client_name, status, skills, description
+  title, min_experience, max_experience, location, openings, priority,
+  job_type, job_mode, hiring_for, client_name, status, skills,
+  education, budget, description
   ```
 
 ### 8. Import Jobs (CSV)
 - **Endpoint**: `POST /api/v1/jobs/import/`
 - **Auth**: Admin or Manager only.
 - **Body** (multipart/form-data): `file` — a `.csv` file.
-- **Required CSV Columns**: `title`, `experience`, `location`
+- **Required CSV Columns**: `title`, `min_experience`, `max_experience`, `location`
 - **Notes**:
-  - `client_name` is matched case-insensitively to an existing active client.
+  - Optional columns (with defaults): `openings` (1), `priority` (medium), `job_type` (permanent), `job_mode` (office), `status` (open), `hiring_for` (self), `skills`, `education`, `budget` (0), `description`, `client_name`.
+  - `client_name` is matched case-insensitively to an existing active client in the organization.
   - `skills` should be a comma-separated string: `"Python, Django, REST API"`.
-  - If `client_name` is provided but not found, the job is still created (without a client) and an error note is included.
+  - If `client_name` is provided but not found, the job is still created (without a client) and an error note is included in response.
+  - Choice fields are lowercased and validated against model choices; invalid values fall back to defaults.
 - **Response (201)** — all rows imported:
   ```json
   { "created": 3, "skipped": 0, "errors": [] }
@@ -124,16 +128,19 @@ flowchart TD
 ```json
 {
   "id": "job-uuid",
+  "code": "JOB-000001",
   "title": "Senior Python Developer",
-  "client": {"company_name": "Tech Corp"},
+  "client": "client-uuid-here",
+  "client_name": "Tech Corp",
   "status": "open",
+  "priority": "high",
+  "openings": 3,
   "assigned_recruiters": [...],
-  "stages": [...],
-  "candidate_counts": {
-    "screening": 5,
-    "interview-scheduled": 3,
-    "hired": 1
-  }
+  "stages": [
+    {"name": "Screening", "order": 1, "color": "slate"},
+    {"name": "HR Round", "order": 2, "color": "blue"}
+  ],
+  "candidate_count": 12
 }
 ```
 
