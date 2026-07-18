@@ -7,6 +7,8 @@ Core module for managing candidate pipeline from sourcing to hiring. Tracks stat
 
 **Candidate Statuses**: screening, interview-scheduled, sent-to-client, hired, rejected, on-hold
 
+**Additional Fields**: `dob` (date of birth), `doc` (date of confirmation/joining), `uploaded_by` (references User with related_name='added_candidates')
+
 ## End-to-End Candidate Flow Diagram
 
 ```mermaid
@@ -45,6 +47,8 @@ flowchart TD
     "current_location": "Bangalore",
     "contact": "9876543210",
     "email": "rahul@example.com",
+    "dob": "1995-03-15",
+    "doc": "2025-01-01",
     "current_ctc": 1500000,
     "expected_ctc": 2200000,
     "notice_period": "30 days",
@@ -100,7 +104,7 @@ flowchart TD
   ```
   candidate_name, profile_name, current_company, current_profile,
   experience, current_location, preferred_location, education,
-  college, contact, email, current_ctc, expected_ctc, notice_period,
+  college, contact, email, dob, doc, current_ctc, expected_ctc, notice_period,
   status, share_date, feedback, job_title
   ```
 

@@ -1,15 +1,16 @@
 import logging
-from rest_framework import status, permissions, viewsets
+from rest_framework import status, permissions, viewsets, serializers
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.exceptions import PermissionDenied
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.db.models import Count, Q
 from django.utils import timezone
 
 from accounts.models import User, UserRole
-from accounts.serializers import UserBriefSerializer, ManagerSerializer, RecruiterSerializer, CustomTokenObtainPairSerializer
-from common.permissions import IsAdmin, IsAdminOrManager, IsManager, IsRecruiter
+from accounts.serializers import UserBriefSerializer, UserSerializer, CustomTokenObtainPairSerializer
+from common.permissions import IsAdmin, IsAdminOrManager, IsManager, IsRecruiter, IsOwnerOrAdmin
 from audit.utils import log_action
 from audit.models import AuditLog
 from audit.serializers import AuditLogSerializer
@@ -64,46 +65,60 @@ class MeView(APIView):
 
 # --- User Management Views ---
 
-class ManagerViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAdmin]
-    serializer_class = ManagerSerializer
+class UserViewSet(viewsets.ModelViewSet):
+    """
+    Singular API to create/list both Managers and Recruiters.
+    - Admins can create managers and recruiters.
+    - Managers can only create recruiters.
+    - Use 'role' field in POST body: 'manager' or 'recruiter'.
+    - Endpoint: /api/v1/users/
+    """
+    permission_classes = [IsAdminOrManager, IsOwnerOrAdmin]
+    serializer_class = UserSerializer
 
     def get_queryset(self):
-        return User.objects.filter(role=UserRole.MANAGER, organization=self.request.user.organization).annotate(
+        qs = User.objects.filter(
+            role__in=[UserRole.MANAGER, UserRole.RECRUITER],
+            organization=self.request.user.organization
+        ).select_related('created_by')
+
+        # Always annotate counts for consistency with serializer (0 for recruiters)
+        qs = qs.annotate(
             jobs_count=Count('created_jobs', distinct=True),
-            recruiters_count=Count('user', filter=Q(user__role=UserRole.RECRUITER), distinct=True)
+            recruiters_count=Count(
+                'created_users', 
+                filter=Q(created_users__role=UserRole.RECRUITER), 
+                distinct=True
+            )
         )
 
-    def perform_create(self, serializer):
-        user = serializer.save(role=UserRole.MANAGER, created_by=self.request.user, organization=self.request.user.organization)
-        if 'password' in self.request.data:
-            user.set_password(self.request.data['password'])
-            user.save()
-        log_action(self.request.user, 'created', 'User', user.id, f"Created manager '{user.name}'")
-
-    def perform_destroy(self, instance):
-        log_action(self.request.user, 'deleted', 'User', instance.id, f"Deleted manager '{instance.name}'")
-        instance.delete()
-
-class RecruiterViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAdminOrManager]
-    serializer_class = RecruiterSerializer
-
-    def get_queryset(self):
-        qs = User.objects.filter(role=UserRole.RECRUITER, organization=self.request.user.organization)
         if self.request.user.role == UserRole.MANAGER:
-            qs = qs.filter(created_by=self.request.user)
+            # Managers only see their own recruiters
+            qs = qs.filter(role=UserRole.RECRUITER, created_by=self.request.user)
         return qs
 
     def perform_create(self, serializer):
-        user = serializer.save(role=UserRole.RECRUITER, created_by=self.request.user, organization=self.request.user.organization)
+        role = serializer.validated_data.get('role')
+        if role == UserRole.MANAGER.value and self.request.user.role != UserRole.ADMIN.value:
+            raise PermissionDenied("Only administrators can create manager accounts.")
+        
+        user = serializer.save(
+            created_by=self.request.user, 
+            organization=self.request.user.organization
+        )
         if 'password' in self.request.data:
             user.set_password(self.request.data['password'])
             user.save()
-        log_action(self.request.user, 'created', 'User', user.id, f"Created recruiter '{user.name}'")
+        log_action(self.request.user, 'created', 'User', user.id, f"Created {role} '{user.name}'")
 
     def perform_destroy(self, instance):
-        log_action(self.request.user, 'deleted', 'User', instance.id, f"Deleted recruiter '{instance.name}'")
+        log_action(
+            self.request.user, 
+            'deleted', 
+            'User', 
+            instance.id, 
+            f"Deleted {instance.role} '{instance.name}'"
+        )
         instance.delete()
 
 # --- Dashboard Views ---

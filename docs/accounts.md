@@ -16,7 +16,7 @@ flowchart TD
     B -->|Yes| C[Return JWT Tokens + User Info]
     B -->|No| D[Error 401]
     C --> E[Access Dashboard based on Role]
-    E --> F[User Management<br/>(Admin creates Managers, Managers create Recruiters)]
+    E --> F[User Management<br/>(Singular /users/ API - role in payload)]
     F --> G[Profile Management<br/>GET/PATCH /auth/me/]
     G --> H[Logout]
     
@@ -86,22 +86,33 @@ flowchart TD
 - **PATCH**: Update name, phone, avatar.
 
 ### 6. User Management
-- **Create Manager**: `POST /api/v1/managers/`
-  - **Body**:
+- **Singular User API**: `POST /api/v1/users/` (replaces separate managers/recruiters endpoints)
+  - **Body** (include `role`):
     ```json
     {
+      "role": "manager",
       "name": "Manager Name",
       "email": "manager@example.com",
       "phone": "9876543210",
       "password": "pass123"
     }
     ```
-  - Requires Admin role.
-
-- **Create Recruiter**: `POST /api/v1/recruiters/`
-  - Similar body, requires Admin or Manager.
-
-- **List/View**: GET endpoints with role-based filtering.
+    or for recruiter:
+    ```json
+    {
+      "role": "recruiter",
+      "name": "Recruiter Name",
+      "email": "recruiter@example.com",
+      "phone": "9876543210",
+      "password": "pass123"
+    }
+    ```
+  - **Permissions**: 
+    - Admin can create both `manager` and `recruiter`.
+    - Manager can only create `recruiter`.
+  - **List**: `GET /api/v1/users/` - Returns managers (for admins with stats) or recruiters (role-filtered for managers).
+  - **Other actions**: GET/PUT/DELETE `/api/v1/users/{id}/` supported with same permissions.
+  - Role-based queryset filtering and audit logging applied automatically.
 
 ### 7. Organization Registration (Planned)
 - **Endpoint**: `POST /api/v1/organizations/register/`

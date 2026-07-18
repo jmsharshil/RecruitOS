@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from accounts.models import User, Organization
+from accounts.models import User, Organization, UserRole
 
 class OrganizationSerializer(serializers.ModelSerializer):
     class Meta:
@@ -11,7 +11,7 @@ class UserBriefSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = User
-        fields = ['id', 'name', 'email', 'avatar', 'role', 'organization']
+        fields = ['id', 'name', 'email', 'phone', 'avatar', 'role', 'organization']
 
 class OrganizationRegisterSerializer(serializers.Serializer):
     org_name = serializers.CharField(max_length=200)
@@ -27,17 +27,24 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         data['user'] = UserBriefSerializer(self.user).data
         return data
 
-class ManagerSerializer(serializers.ModelSerializer):
-    jobs_count = serializers.IntegerField(read_only=True)
-    recruiters_count = serializers.IntegerField(read_only=True)
+class UserSerializer(serializers.ModelSerializer):
+    jobs_count = serializers.IntegerField(read_only=True, required=False)
+    recruiters_count = serializers.IntegerField(read_only=True, required=False)
+    role = serializers.ChoiceField(
+        choices=UserRole.choices,
+        required=True,
+        error_messages={
+            'invalid_choice': "Role must be either 'manager' or 'recruiter'."
+        }
+    )
 
     class Meta:
         model = User
-        fields = ['id', 'name', 'email', 'phone', 'avatar', 'date_joined', 'role', 'jobs_count', 'recruiters_count']
-        read_only_fields = ['id', 'date_joined', 'jobs_count', 'recruiters_count']
+        fields = ['id', 'name', 'email', 'phone', 'avatar', 'date_joined', 'role', 
+                 'jobs_count', 'recruiters_count', 'created_by']
+        read_only_fields = ['id', 'date_joined', 'created_by', 'jobs_count', 'recruiters_count']
 
-class RecruiterSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = User
-        fields = ['id', 'name', 'email', 'phone', 'avatar', 'date_joined', 'role', 'created_by']
-        read_only_fields = ['id', 'date_joined', 'created_by']
+    def validate_role(self, value):
+        if value not in [UserRole.MANAGER.value, UserRole.RECRUITER.value]:
+            raise serializers.ValidationError("Role must be manager or recruiter.")
+        return value
