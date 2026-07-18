@@ -7,6 +7,22 @@ Core module for managing talent pool and job-specific candidate pipeline from so
 
 **Candidate Statuses** (on Application): screening, interview-scheduled, sent-to-client, hired, rejected, on-hold
 
+**Error Handling (All Endpoints)**
+All errors are normalized by `common.exceptions.custom_exception_handler` (configured in `settings.py` REST_FRAMEWORK) into:
+```json
+{
+  "error": "Authentication failed | Validation failed | Permission denied | specific-message",
+  "detail": "Full error description (e.g. 'Authorization header must contain two space-delimited values')",
+  "field_errors": {
+    "field_name": ["list of messages"]
+  }
+}
+```
+- **401**: Missing/malformed `Authorization: Bearer <jwt-token>` (SimpleJWT).
+- **400**: Validation or business rule errors (e.g. invalid stage, missing fields, unparseable resume); `field_errors` populated where applicable.
+- **403/404/500**: Appropriate `error` type.
+- Matches all examples below. See `common/exceptions.py` for details.
+
 **Key Features**:
 - Org-scoped talent pool (candidates with no Applications)
 - Strict AI resume parsing (`parse_resume_task` wrapper around `parse_resume_ai` with anti-hallucination system prompt: explicit-only extraction, JSON-only, null/[] defaults, error path for unparseable resumes)
@@ -89,25 +105,18 @@ flowchart TD
 
 - **Retrieve/Update**: `GET/PATCH /api/v1/candidates/{id}/` — full object, PATCH supports partial updates (e.g. update expected_ctc).
 
-- **Parse Resume**: `POST /api/v1/candidates/parse_resume/` (multipart, `resume` file field)
-  - Uses `parse_resume_task` (strict AI with anti-hallucination: explicit facts only, JSON output, defaults to null/[]).
-  - **Success Response (200)**:
+- **Parse Resume**: `POST /api/v1/candidates/parse-resume/` (multipart, `resume` file field; note hyphenated URL from `@action(url_path='parse-resume')`)
+  - Uses `parse_resume_task` (strict AI with anti-hallucination: explicit facts only, JSON output, defaults to null/[]; falls back gracefully).
+  - **Success Response (200)**: Serializer-compatible dict (see example above).
+  - **Error Responses** (normalized by custom handler):
     ```json
     {
-      "candidate_name": "Parsed Name",
-      "email": "parsed@email.com",
-      "contact": "9876543210",
-      "experience": "5.5 years",
-      "current_ctc": 1200000,
-      "expected_ctc": 1800000,
-      "current_company": "Prev Co",
-      "current_profile": "Developer",
-      "education": "MBA",
-      "skills": ["Java", "Spring"],
-      "resume_file_name": "uploaded.pdf"
+      "error": "unparseable_resume",
+      "detail": "unparseable_resume",
+      "field_errors": {}
     }
     ```
-  - **Error**: `{"error": "unparseable_resume"}` (status 400).
+    (status 400 for AI failure; or 500 wrapped as {"error": "Parse failed: ..."} for other exceptions).
 
 - **Upload Resume (per candidate)**: `POST /api/v1/candidates/{pk}/upload-resume/` (multipart `resume`)
   **Response (200)**: `{"message": "Resume uploaded and parsed successfully", "candidate": {...}}`
@@ -141,18 +150,17 @@ flowchart TD
   }
   ```
   **Responses**:
-  - **200 Success**:
+  - **200 Success**: Updated `ApplicationSerializer` (see example in previous version).
+  - **Error (normalized)**: 
     ```json
     {
-      "id": "app-uuid",
-      "status": "interview-scheduled",
-      "current_stage": {"id": "stage-uuid", "name": "Technical Round", "order": 3, "color": "blue"},
-      "feedback": "Moved successfully",
-      ...
+      "error": "Invalid stage for this job",
+      "detail": "Stage not found for this job",
+      "field_errors": {}
     }
     ```
-  - **400**: `{"error": "Invalid stage for this job"}` or stage ownership validation fail.
-  - If target stage.name == "Hired": auto-sets status='hired', syncs.
+    (status 400). Validates that stage belongs to the Application's Job.
+  - If target stage.name == "Hired": auto-sets `status='hired'` and syncs. All actions require valid `Authorization: Bearer <jwt>` header.
 
 - **Schedule Interview**: `POST /api/v1/applications/{pk}/schedule-interview/`
   **Request Body**:
@@ -239,11 +247,12 @@ flowchart TD
 
 ### Export Candidates (CSV)
 - **Endpoint**: `GET /api/v1/candidates/export/?status=screening&job_id=uuid-here`
-- **Auth**: IsAuthenticated; role-scoped queryset (Admin: all org; Manager: created-by + pool; Recruiter: assigned via applications Q-filter + pool). Prefetches applications.
+- **Auth**: `IsAuthenticated` (JWT `Authorization: Bearer <token>` required; see Error Handling section above). 
+  - Role-scoped queryset (Admin: all org; Manager: `Q(applications__job__created_by=user) | Q(applications__isnull=True)`; Recruiter: assigned via applications Q-filter + pool). Prefetches applications. Uses `UserRole` from accounts.
 - **Query Params**:
-  - `status`: Filter by Application.status (screening, hired, etc.). Pool candidates get status=POOL if no application.
-  - `job_id`: Optional filter to specific job.
-- **Response**: CSV download `candidates_export.csv` with headers from `CANDIDATE_EXPORT_HEADERS`.
+  - `status`: Filter by `Application.status` (screening, hired, etc.). Pool candidates default to `status=POOL`.
+  - `job_id`: Optional filter to specific job (excludes pure pool if used).
+- **Success Response**: CSV file `candidates_export.csv` (download) using `CANDIDATE_EXPORT_HEADERS` and `generate_csv_response`.
 - **CSV Columns**:
   ```
   candidate_name, profile_name, current_company, current_profile,
@@ -252,40 +261,43 @@ flowchart TD
   current_ctc, expected_ctc, notice_period,
   status, share_date, feedback, job_title
   ```
-- For pool: `status=POOL`, `job_title='Talent Pool'`.
-- Logs `log_action(user, 'exported', 'Candidate', None, f"Exported {n} candidates")`; uses `generate_csv_response`.
+- For pool candidates: `status=POOL`, `job_title='Talent Pool'`.
+- **Error Example** (malformed/missing token):
+  ```json
+  {
+    "error": "Authentication failed",
+    "detail": "Authorization header must contain two space-delimited values",
+    "field_errors": {}
+  }
+  ```
+  (status 401). Logs via `log_action(user, 'exported', 'Candidate', None, f"Exported {n} candidates (incl. pool)")`. Matches `CandidateExportView` in `candidates/views_export.py`.
 
 ### Import Candidates (CSV)
 - **Endpoint**: `POST /api/v1/candidates/import/`
-- **Auth**: `IsAdminOrManager`, parsers=MultiPartParser+FormParser.
-- **Body**: multipart `file` (CSV).
-- **Parsing**: `parse_csv_from_request(request, required_fields=['candidate_name', 'email', 'contact'])`.
-- **Per-row Logic** (row index in errors starts at 2):
-  - Dedup on `(email, organization)` — skip if exists.
-  - Match `job_title` (case-insensitive) to org Job → create linked Application (auto first_stage from `Job.DEFAULT_STAGES`, default status='screening').
-  - Uses `safe_float` for ctcs/notice, defaults for missing.
-  - On error (duplicate app, bad job, exception): collect in errors array, increment skipped.
-- **Response**:
-  - **201 (all good)** or **207 (partial failures)**:
-    ```json
-    {
-      "created_candidates": 5,
-      "created_applications": 3,
-      "skipped": 2,
-      "errors": [
-        {"row": 3, "error": "Job 'Nonexistent' not found."},
-        {"row": 5, "error": "Duplicate application for this candidate+job"}
-      ]
-    }
-    ```
-- Uses `log_action` with summary. Supports pool-only rows (no job_title).
-- **TIP**: Export first for template. Matches `candidates/views_export.py` + serializer logic (writable job_id/candidate_id, StageBriefSerializer, method fields for schedule/submission).
+- **Auth**: `IsAdminOrManager` (JWT required), `parser_classes=[MultiPartParser, FormParser]`.
+- **Body**: multipart/form-data with `file` (CSV).
+- **Parsing**: `parse_csv_from_request(request, required_fields=CANDIDATE_IMPORT_REQUIRED)`.
+- **Per-row Logic** (1-based row indexing for errors, starts at 2):
+  - Dedup by `(email, organization)` — skip existing.
+  - `job_title` (iexact match to org Job) creates linked `Application` (auto-assigns first stage from `Job.DEFAULT_STAGES`, defaults to `screening`).
+  - `safe_float()` for CTCs/notice_period; sensible defaults for missing fields.
+  - Errors (duplicate app, job not found, create exception) collected in array; row skipped.
+- **Response** (201 full success or **207** partial):
+  ```json
+  {
+    "created_candidates": 5,
+    "created_applications": 3,
+    "skipped": 2,
+    "errors": [
+      {"row": 3, "error": "Job 'Nonexistent' not found."},
+      {"row": 5, "error": "Duplicate application for this candidate+job"}
+    ]
+  }
+  ```
+- Uses `log_action` with summary. Supports pure pool rows (no `job_title`). Matches `CandidateImportView` exactly (see `views_export.py`).
 
 > [!TIP]
-> Use the **Export** endpoint to download a correctly formatted template (with current status/job_title), edit/add rows (pool or job-linked), then re-import. Single resumes can use the Parse Resume action or Public Upload link from a Job. Stages are auto-assigned on create/import.
-
-> [!TIP]
-> Use the **Export** endpoint to download a correctly formatted template (with current status/job_title), edit/add rows (pool or job-linked), then re-import. Single resumes can use the Parse Resume action or Public Upload link from a Job. Stages are auto-assigned on create/import.
+> **Export first** to get a compatible template (includes status/job_title columns). Edit and re-import. Use Parse Resume or Public Upload for single resumes. All errors use the normalized format documented above.
 
 ## Pipeline Steps (Detailed)
 1. **Sourcing**: Use `CandidateViewSet` (pool), `ApplicationViewSet.create` (with `job_id`/`candidate_id`), `parse_resume` + upload-resume, or **PublicUploadView POST** (multipart to `/candidates/upload/{job_uuid}/`, `AllowAny`, `parse_resume_task` + form fallback, `log_action(user=None)`).
@@ -306,10 +318,11 @@ flowchart TD
 - **Utils**: Strict `parse_resume_ai` (anti-hallucination rules: JSON-only, explicit facts, error on failure), CSV with 207 partial, threaded notifications.
 
 **Notes**: 
-- Docs now exhaustive: every API has concrete JSON request/response examples, query params, permission classes, 400/404/201/207 semantics, RBAC Q-filter logic, stage validation, public flow clarification, parse rules.
-- Pipeline fully on Application (`current_stage` FK + dedicated actions vs generic PATCH).
-- Upload link is global frontend (`/upload/{uuid}`) but backend remains job_uuid-scoped.
-- CSV import: 207 on partial with row errors; export includes pool.
-- Consistent `StageBriefSerializer`, `user=None` audit for public, soft-delete.
-- All matches current implementation in code (verified via views/serializers/urls).
+- **Error responses now fully documented** and improved via updated `custom_exception_handler` (handles 401 auth header issues like the reported "Authorization header must contain two space-delimited values", promotes view `{"error": "..."}` responses, populates `field_errors` for 400s). All examples updated to match.
+- Docs exhaustive: concrete JSON for *all* endpoints/actions (including export/import 207s), query params, permissions (`IsAuthenticated`, `IsAdminOrManager`, `AllowAny`), RBAC Q-filters, validation (stage ownership, dedup, safe_float, choice fallbacks), parse anti-hallucination rules.
+- Pipeline fully on `Application` (`current_stage` FK + dedicated `@action`s vs generic PATCH; auto first-stage from `Job.DEFAULT_STAGES` on create/import; "Hired" status sync).
+- Upload link treated as global frontend URL; backend `PublicUploadView` remains job_uuid-scoped for org isolation (`log_action(user=None, organization=...)`).
+- CSV: Export includes pool (`status=POOL`); Import uses 207 on partial failures with row-indexed errors; dedup by (email, org).
+- Consistent use of `StageBriefSerializer`/`JobBriefSerializer`, method fields, `BaseModel` soft-delete, threaded notifications.
+- All contracts verified against live code in `candidates/views*.py`, `serializers.py`, `urls.py`, `views_export.py`, `common/exceptions.py`, `utils.py`, `config/settings.py` (JWT + custom handler). Ready for frontend integration/testing.
 
