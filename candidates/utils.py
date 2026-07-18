@@ -4,15 +4,32 @@ import os
 import pdfplumber
 import docx2txt
 from pathlib import Path
-from openai import AzureOpenAI
 from django.conf import settings
 from .models import Candidate
 
-client = AzureOpenAI(
-    api_key=settings.OPENAI_API_KEY,
-    azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
-    api_version=settings.OPENAI_API_VERSION,
-)
+
+def get_openai_client():
+    """Lazy initialization of AzureOpenAI client to avoid import-time errors
+    and allow management commands to run without OpenAI configuration.
+    """
+    if not settings.OPENAI_API_KEY or settings.OPENAI_API_KEY.startswith('dummy'):
+        raise RuntimeError(
+            "OpenAI API key not configured. Please set OPENAI_API_KEY, "
+            "AZURE_OPENAI_ENDPOINT, and OPENAI_API_VERSION in your .env file."
+        )
+
+    # Import here to avoid top-level import issues during Django checks
+    from openai import AzureOpenAI
+    import httpx
+
+    # Create client with explicit httpx client to avoid proxies compatibility issues
+    http_client = httpx.Client(timeout=60.0)
+    return AzureOpenAI(
+        api_key=settings.OPENAI_API_KEY,
+        azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+        api_version=settings.OPENAI_API_VERSION,
+        http_client=http_client,
+    )
 
 try:
     import fitz  # PyMuPDF
@@ -175,6 +192,8 @@ def parse_resume_ai(file_input):
     Return **VALID JSON ONLY**. No markdown formatting, no code fences, no explanation, no comments — just the raw JSON object.
     """
 
+        # Get client lazily (only when actually parsing resumes)
+        client = get_openai_client()
         res = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
