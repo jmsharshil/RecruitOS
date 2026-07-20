@@ -1,7 +1,11 @@
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import ValidationError
+
+from decimal import Decimal
+from django.db import transaction
+from accounts.models import UserRole
 
 from jobs.models import Job, Stage, JobStatus, HiringFor, Priority, JobTypes, JobModes, DEFAULT_STAGES
 from clients.models import Client
@@ -22,22 +26,22 @@ JOB_IMPORT_REQUIRED = [
 
 class JobExportView(APIView):
     """
-    GET /api/v1/jobs/export/
-    Download visible jobs (role-scoped) as CSV. Supports ?status=open filter.
+    GET /api/v1/jobs/export/?status=open
+    Download role-scoped jobs as CSV (ADMIN= all org jobs; MANAGER=created_by=self).
+    Uses IsAdminOrManager (blocks recruiters). Matches CandidateExportView QS + UserRole.
+    Supports optional ?status= filter. Logs export action. See docs/jobs.md.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdminOrManager]
 
     def get(self, request):
-        from accounts.models import UserRole
-
         qs = Job.objects.select_related('client').filter(
             is_deleted=False, organization=request.user.organization
         )
         user = request.user
         if user.role == UserRole.MANAGER:
             qs = qs.filter(created_by=user)
-        elif user.role == UserRole.RECRUITER:
-            qs = qs.filter(assigned_recruiters=user)
+        # ADMIN sees all org jobs; RECRUITER blocked by IsAdminOrManager
+        # Note: Matches FDD RBAC; aligned with CandidateExportView QS pattern
 
         status_filter = request.query_params.get('status')
         if status_filter:
@@ -61,8 +65,12 @@ class JobExportView(APIView):
 class JobImportView(APIView):
     """
     POST /api/v1/jobs/import/
-    Upload CSV to bulk-create jobs (Admin/Manager only).
-    See docs/jobs.md for column details and optional fields.
+    Upload CSV to bulk-create jobs (Admin/Manager only). Supports partial success (207).
+    Required columns: title, min_experience, max_experience, location.
+    Optional: client_name (iexact lookup with warning), skills (comma sep), status/priority/job_type/job_mode/hiring_for (with fallback to defaults),
+    budget (Decimal), education, description, openings.
+    Dedup by title (org-scoped). Auto-creates DEFAULT_STAGES. Row errors 1-based (start=2).
+    See docs/jobs.md for full contract.
     """
     permission_classes = [IsAdminOrManager]
     parser_classes = [MultiPartParser, FormParser]
@@ -70,11 +78,37 @@ class JobImportView(APIView):
     def post(self, request):
         headers, rows, error = parse_csv_from_request(request, required_fields=JOB_IMPORT_REQUIRED)
         if error:
-            return Response({"error": error}, status=400)
+            raise ValidationError({"error": error})
 
         created, skipped, errors = 0, 0, []
 
-        for i, row in enumerate(rows, start=2):
+        # Helper for safe choice lookup (case-insensitive on value or label)
+        def _get_choice(val, choices, default):
+            if not val:
+                return default
+            v = str(val).strip().lower()
+            for c_val, c_disp in choices:
+                if v in (c_val.lower(), str(c_disp).lower()):
+                    return c_val
+            return default
+
+        for i, row in enumerate(rows, start=2):  # row 1 = header
+            title = row.get('title', '').strip()
+            if not title:
+                errors.append({"row": i, "error": "Missing required title"})
+                skipped += 1
+                continue
+
+            # Dedup check (org + title) - improves on model implicit uniqueness
+            if Job.objects.filter(
+                title__iexact=title,
+                organization=request.user.organization,
+                is_deleted=False
+            ).exists():
+                errors.append({"row": i, "error": f"Job with title '{title}' already exists."})
+                skipped += 1
+                continue
+
             client_name = row.get('client_name', '').strip()
             client = None
             if client_name:
@@ -93,60 +127,60 @@ class JobImportView(APIView):
                 min_exp = int(row.get('min_experience', 0) or 0)
                 max_exp = int(row.get('max_experience', 0) or 0)
                 openings = int(row.get('openings', 1) or 1)
-                budget = float(row.get('budget', 0) or 0)
+                # Use Decimal for budget (model field)
+                budget_raw = row.get('budget', '0')
+                try:
+                    budget = Decimal(str(budget_raw).replace(',', ''))
+                except:
+                    budget = Decimal('0')
 
-                status_val = row.get('status', '').strip().lower()
-                status = status_val if status_val in [c[0] for c in JobStatus.choices] else JobStatus.OPEN.value
-
-                hiring_for_val = row.get('hiring_for', '').strip().lower()
-                hiring_for = hiring_for_val if hiring_for_val in [c[0] for c in HiringFor.choices] else HiringFor.SELF.value
-
-                priority_val = row.get('priority', '').strip().lower()
-                priority = priority_val if priority_val in [c[0] for c in Priority.choices] else Priority.MEDIUM.value
-
-                job_type_val = row.get('job_type', '').strip().lower()
-                job_type = job_type_val if job_type_val in [c[0] for c in JobTypes.choices] else JobTypes.PERMANENT.value
-
-                job_mode_val = row.get('job_mode', '').strip().lower()
-                job_mode = job_mode_val if job_mode_val in [c[0] for c in JobModes.choices] else JobModes.OFFICE.value
+                status = _get_choice(row.get('status'), JobStatus.choices, JobStatus.OPEN.value)
+                priority = _get_choice(row.get('priority'), Priority.choices, Priority.MEDIUM.value)
+                job_type = _get_choice(row.get('job_type'), JobTypes.choices, JobTypes.PERMANENT.value)
+                job_mode = _get_choice(row.get('job_mode'), JobModes.choices, JobModes.OFFICE.value)
+                hiring_for = _get_choice(row.get('hiring_for'), HiringFor.choices, HiringFor.SELF.value)
 
                 education = row.get('education', '').strip()
-                description = row.get('description', '').strip()
+                description = row.get('description', '').strip() or 'Imported via CSV'
 
-                job = Job.objects.create(
-                    title=row.get('title', '').strip(),
-                    min_experience=min_exp,
-                    max_experience=max_exp,
-                    location=row.get('location', '').strip(),
-                    openings=openings,
-                    priority=priority,
-                    job_type=job_type,
-                    job_mode=job_mode,
-                    hiring_for=hiring_for,
-                    client=client,
-                    status=status,
-                    skills=skills,
-                    education=education,
-                    budget=budget,
-                    description=description,
-                    created_by=request.user,
-                    organization=request.user.organization,
-                )
-
-                # Auto-create default stages (same as JobViewSet.perform_create)
-                for stage_data in DEFAULT_STAGES:
-                    Stage.objects.create(
-                        job=job,
+                with transaction.atomic():
+                    job = Job.objects.create(
+                        title=title,
+                        min_experience=min_exp,
+                        max_experience=max_exp,
+                        location=row.get('location', '').strip(),
+                        openings=openings,
+                        priority=priority,
+                        job_type=job_type,
+                        job_mode=job_mode,
+                        hiring_for=hiring_for,
+                        client=client,
+                        status=status,
+                        skills=skills,
+                        education=education,
+                        budget=budget,
+                        description=description,
                         created_by=request.user,
-                        organization=job.organization,
-                        **stage_data
+                        organization=request.user.organization,
                     )
+
+                    # Auto-create default stages (matches JobViewSet.perform_create)
+                    for stage_data in DEFAULT_STAGES:
+                        Stage.objects.create(
+                            job=job,
+                            created_by=request.user,
+                            organization=job.organization,
+                            **stage_data
+                        )
                 created += 1
             except Exception as e:
                 errors.append({"row": i, "error": str(e)})
                 skipped += 1
 
-        log_action(request.user, 'imported', 'Job', None, f"Imported {created} jobs from CSV")
+        log_action(
+            request.user, 'imported', 'Job', None,
+            f"Imported {created} jobs from CSV (skipped: {skipped})"
+        )
         return Response({
             "created": created,
             "skipped": skipped,

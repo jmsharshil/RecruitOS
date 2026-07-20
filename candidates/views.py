@@ -3,6 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.exceptions import ValidationError, NotFound
 from django.utils import timezone
 from django.db.models import Q
 from candidates.models import Candidate, Application, CandidateStatus, ClientSubmission, SubmissionStatus, InterviewSchedule
@@ -11,9 +12,21 @@ from jobs.models import Job, Stage
 from accounts.models import UserRole
 from audit.utils import log_action
 from candidates.tasks import simulate_client_submission_email, simulate_resume_submission_notification
+from common.permissions import IsAdminOrManager, IsAdmin
 
 class CandidateViewSet(viewsets.ModelViewSet):
     serializer_class = CandidateSerializer
+
+    def get_permissions(self):
+        """RBAC via common.permissions + role-scoped QS.
+        Recruiters can list/create/parse/upload for pool + assigned.
+        Destroy restricted to admin.
+        """
+        if self.action in ['list', 'retrieve', 'create', 'update', 'parse_resume', 'upload_resume']:
+            return [permissions.IsAuthenticated()]
+        if self.action == 'destroy':
+            return [IsAdmin()]
+        return [IsAdminOrManager()]
 
     def get_queryset(self):
         user = self.request.user
@@ -61,12 +74,12 @@ class CandidateViewSet(viewsets.ModelViewSet):
             candidate.resume_file_name = request.FILES['resume'].name
             candidate.save()
             return Response({"message": "Resume uploaded successfully"})
-        return Response({"error": "No file provided"}, status=400)
+        raise ValidationError({"error": "No file provided"})
 
     @action(detail=False, methods=['post'], url_path='parse-resume', parser_classes=[MultiPartParser, FormParser])
     def parse_resume(self, request):
         if 'resume' not in request.FILES:
-            return Response({"error": "No resume file provided"}, status=400)
+            raise ValidationError({"error": "No resume file provided"})
         try:
             from .utils import parse_resume_task
             # Pass organization for scoped duplicate detection in shared talent pool
@@ -74,13 +87,25 @@ class CandidateViewSet(viewsets.ModelViewSet):
                 request.FILES['resume'], 
                 organization=request.user.organization
             )
+            if isinstance(parsed_data, dict) and "error" in parsed_data:
+                raise ValidationError(parsed_data)
             return Response(parsed_data)
         except Exception as e:
-            return Response({"error": f"Parse failed: {str(e)}"}, status=500)
+            raise ValidationError({"error": f"Parse failed: {str(e)}"})
 
 
 class ApplicationViewSet(viewsets.ModelViewSet):
     serializer_class = ApplicationSerializer
+
+    def get_permissions(self):
+        """RBAC via common.permissions. All roles (incl. recruiters) can manage their assigned applications.
+        Destroy restricted to admin. Uses IsAdminOrManager for safety on bulk-like actions.
+        """
+        if self.action in ['list', 'retrieve', 'create', 'update', 'move_stage', 'schedule_interview', 'send_to_client']:
+            return [permissions.IsAuthenticated()]
+        if self.action == 'destroy':
+            return [IsAdmin()]
+        return [IsAdminOrManager()]
 
     def get_queryset(self):
         user = self.request.user
@@ -91,7 +116,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             return qs.filter(job__created_by=user)
         elif user.role == UserRole.RECRUITER:
             return qs.filter(job__assigned_recruiters=user)
-        return Application.objects.none()
+        return qs.none()
 
     def perform_create(self, serializer):
         application = serializer.save(organization=self.request.user.organization)
@@ -133,15 +158,15 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             log_action(request.user, 'updated', 'Application', application.id, f"Stage moved to {stage.name}")
             return Response(ApplicationSerializer(application).data)
         except Stage.DoesNotExist:
-            return Response({"error": "Stage not found for this job"}, status=400)
+            raise ValidationError({"error": "Invalid stage for this job", "detail": "Stage not found for this job"})
 
     @action(detail=True, methods=['post'], url_path='send-to-client')
     def send_to_client(self, request, pk=None):
         application = self.get_object()
         if application.job.hiring_for != 'client':
-            return Response({"error": "Job is not hiring for a client"}, status=400)
+            raise ValidationError({"error": "Job is not hiring for a client"})
         if hasattr(application, 'client_submission'):
-            return Response({"error": "Submission already exists"}, status=400)
+            raise ValidationError({"error": "Submission already exists"})
             
         submission = ClientSubmission.objects.create(
             application=application,
@@ -181,7 +206,7 @@ class CalendarEventsView(APIView):
         end_date = request.query_params.get('end_date')
         
         if not start_date or not end_date:
-            return Response({"error": "start_date and end_date are required"}, status=400)
+            raise ValidationError({"error": "start_date and end_date are required"})
             
         user = request.user
         
@@ -249,13 +274,13 @@ class PublicUploadView(APIView):
                 "company_name": job.client.company_name if job.client else "Self"
             })
         except Job.DoesNotExist:
-            return Response({"error": "Job not found"}, status=404)
+            raise NotFound({"error": "Job not found"})
 
     def post(self, request, job_id):
         try:
             job = Job.objects.get(id=job_id, is_deleted=False)
         except Job.DoesNotExist:
-            return Response({"error": "Job not found"}, status=404)
+            raise NotFound({"error": "Job not found"})
             
         name = request.data.get('name')
         email = request.data.get('email')
@@ -263,7 +288,7 @@ class PublicUploadView(APIView):
         resume = request.FILES.get('resume')
         
         if not all([name, email, phone, resume]):
-            return Response({"error": "All fields (name, email, phone, resume) are required"}, status=400)
+            raise ValidationError({"error": "All fields (name, email, phone, resume) are required"})
             
         # Use AI parsing for better data extraction if possible (fallback to form values)
         try:

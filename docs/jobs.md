@@ -1,13 +1,27 @@
 # Jobs Module Documentation
 
 ## Overview
-Manages job requisitions/positions. Linked to clients, assigned to recruiters, with multi-stage pipeline.
+Manages job requisitions/positions. Linked to clients (FK), assigned_recruiters (M2M), multi-stage pipeline (Stage FK on Application). All models inherit `BaseModel` for org-scoping + soft-delete.
 
-**Key Models**: Job, Stage
+**Key Models**: Job (UUID PK, JSONField skills, Decimal budget, auto code/resume_upload_link in save), Stage
 
-**Statuses**: open, closed, on-hold
+**Choice Enums** (in models.py): JobStatus (open/closed/on-hold), Priority (high/medium/low), JobTypes (permanent/contractual), JobModes (remote/hybrid/office), HiringFor (self/client). Used with case-insensitive `_get_choice()` helper in import.
 
-**Hiring For**: self or client
+**Error Handling (All Endpoints)**
+All errors normalized by `common.exceptions.custom_exception_handler` (in settings.py) into:
+```json
+{
+  "error": "Permission denied | Validation failed | ...",
+  "detail": "Full description (e.g. 'Cannot delete stage with candidates')",
+  "field_errors": {}
+}
+```
+- Uses `raise ValidationError({"error": "msg"})` or `NotFound` in views (triggers handler).
+- **401/403**: Auth/Permission (IsAuthenticated, IsAdminOrManager, IsAdmin).
+- **400**: Validation (invalid status, missing title, stage with candidates, parse errors).
+- Matches all examples. See `common/exceptions.py`.
+
+**RBAC**: Centralized in `common.permissions` + `get_permissions()` + role-scoped `get_queryset()` (Q not needed for Jobs; uses if-elif on UserRole.ADMIN/MANAGER/RECRUITER). `IsAdminOrManager` for mutations/export/import, `IsAdmin` for destroy, `IsAuthenticated` for reads/upload-link. Recruiters blocked from export/import.
 
 ## Flow Diagram - Job Creation to Pipeline Setup (with Application)
 
@@ -33,9 +47,10 @@ flowchart TD
 ## Key APIs
 
 ### JobViewSet (/api/v1/jobs/)
+- **Auth**: Uses `get_permissions()` — `IsAuthenticated()` for list/retrieve/get_upload_link; `IsAdmin()` for destroy; `IsAdminOrManager()` for create/update/change_status/stages (mirrors CandidateViewSet/ApplicationViewSet). Role-scoped `get_queryset()` via UserRole (ADMIN=all org, MANAGER=created_by=self, RECRUITER=assigned_recruiters).
 - **List**: `GET /api/v1/jobs/?status=open&client=uuid`
-  - Role-based: Admin=all (org), Manager=created_by=user, Recruiter=assigned_recruiters=user. `is_deleted=False`, org filter.
-  - **Response (200)**: List of JobSerializer (includes stages, candidate_count computed, client_name, assigned_recruiters).
+  - Role-based QS (`is_deleted=False`, org filter).
+  - **Response (200)**: Paginated `JobSerializer` (includes nested stages, computed `candidate_count`, `client_name`, `assigned_recruiters` list, `resume_upload_link`).
     ```json
     {
       "count": 15,
@@ -50,13 +65,13 @@ flowchart TD
         "assigned_recruiters": ["user-uuids"],
         "stages": [{"name": "Screening", "order": 1, "color": "slate"}, ...],
         "candidate_count": 5,
-        "resume_upload_link": "https://frontend/upload/job-uuid-here"
+        "resume_upload_link": "https://frontend.app/upload/job-uuid-here"
       }]
     }
     ```
 
 - **Create**: `POST /api/v1/jobs/`
-  **Request Body**:
+  **Request Body** (matches serializer + assigned_recruiter_ids for M2M):
   ```json
   {
     "title": "Senior Python Developer",
@@ -76,13 +91,11 @@ flowchart TD
     "assigned_recruiter_ids": ["rec-uuid1", "rec-uuid2"]
   }
   ```
-  **Response (201)**: Full Job object + auto-created default Stages (from `DEFAULT_STAGES` in `perform_create`), generated `resume_upload_link`.
+  **Response (201)**: Full Job + auto `perform_create` (sets code, resume_upload_link via model save, creates 6 DEFAULT_STAGES, log_action).
 
-- **Retrieve**: `GET /api/v1/jobs/{id}/` — full details with nested stages, counts, etc.
+- **Retrieve/Update**: `GET/PATCH /api/v1/jobs/{id}/` — full details or partial (skills list, M2M recruiters, budget as Decimal, etc.). `perform_update` logs.
 
-- **Update**: `PATCH /api/v1/jobs/{id}/` — partial updates (e.g. change title, add skills, reassign recruiters).
-
-- **Delete**: Soft-delete via `is_deleted=True`.
+- **Destroy**: `DELETE /api/v1/jobs/{id}/` — soft-delete only (`IsAdmin`).
 
 - **Change Status**: `PATCH /api/v1/jobs/{id}/status/`
   **Request Body**:
@@ -91,10 +104,12 @@ flowchart TD
     "status": "closed"
   }
   ```
-  **Response (200)**: `{"status": "closed", "message": "Job status updated"}` (or full job).
+  **Response (200)**: `{"status": "closed"}`
+  - Validates against JobStatus.choices; else `raise ValidationError({"error": "Invalid status"})` (normalized to 400).
+  - Logs via `log_action`.
 
 ### Stages Management (JobViewSet actions)
-- **Add Stage**: `POST /api/v1/jobs/{id}/stages/`
+- **Add Stage**: `POST /api/v1/jobs/{id}/stages/` (`@action`)
   **Body**:
   ```json
   {
@@ -103,126 +118,90 @@ flowchart TD
     "color": "green"
   }
   ```
-  **Response (201)**: Created Stage object.
+  **Response (201)**: Stage object. Uses `StageSerializer`, `log_action`.
 
-- **Update Stage**: `PATCH /api/v1/jobs/{id}/stages/{stage_pk}/`
-  **Body**: `{"color": "amber", "name": "Updated Name"}`
-  **Response (200)**: Updated stage.
+- **Manage Stage**: `PATCH/DELETE /api/v1/jobs/{id}/stages/{stage_pk}/`
+  - **PATCH**: Partial update (name/color/order). Returns updated serializer data (200).
+  - **DELETE**: Soft-delete (`is_deleted=True`). 
+    - If `stage.applications.filter(is_deleted=False).exists()`: `raise ValidationError({"error": "Cannot delete stage with candidates"})` (400).
+    - Else 204 No Content, `log_action`.
+  - Uses `try: Stage.objects.get(...) except: raise NotFound({"error": "Stage not found"})`.
+  - `StageBriefSerializer` used in Job list/retrieve responses (nested stages).
 
-- **Delete Stage**: `DELETE /api/v1/jobs/{id}/stages/{stage_pk}/`
-  - Only if no candidates in that stage.
-  - **Response (204)**: No content.
-
-- Uses `StageBriefSerializer` in job responses.
+**Note**: Matches `DEFAULT_STAGES` list in models (6 stages with colors). Custom stages allowed. Order used for sorting.
 
 ### Upload Link
-- **GET /api/v1/jobs/{id}/upload-link/**
-  - Returns:
+- **GET /api/v1/jobs/{id}/upload-link/** (`@action`)
+  - Protected by `IsAuthenticated`.
+  - **Response (200)**:
     ```json
     {
-      "resume_upload_link": "https://frontend.example.com/upload/{job-uuid}"
+      "resume_upload_link": "https://frontend.app/upload/{job-uuid}"
     }
     ```
-  - The link points to global frontend URL that hits `PublicUploadView` backend with job_uuid.
+  - Link generated in `Job.save()` (or updated); points to frontend that calls `PublicUploadView` (in candidates, with job_uuid for scoping, AllowAny).
 
 ### Export Jobs (CSV) - Matches JobExportView
 - **Endpoint**: `GET /api/v1/jobs/export/?status=open`
-- **Auth**: IsAuthenticated; role-scoped QS (`created_by` for Manager, `assigned_recruiters` for Recruiter, org + not deleted).
-- **Query**: `?status=open` (filters Job.status).
-- **Logic**: Builds rows with client.company_name, skills as comma str, safe float for budget.
-- **CSV Headers** (`JOB_EXPORT_HEADERS`): `title, min_experience, max_experience, location, openings, priority, job_type, job_mode, hiring_for, client_name, status, skills, education, budget, description`
-- **Response**: `jobs_export.csv` download via `generate_csv_response`.
-- Logs `log_action(..., 'exported', 'Job', None, f"Exported {len} jobs")`.
+- **Auth**: `permission_classes = [IsAdminOrManager]` (blocks recruiters; uses `UserRole` inside for MANAGER filter).
+- **QS**: `select_related('client')`, `is_deleted=False`, org-scoped; if MANAGER then `created_by=user`.
+- **Query**: Optional `?status=...` (exact match on Job.status).
+- **Logic**: Builds rows; `client.company_name if j.client else ''`, `', '.join(...) if isinstance(j.skills, list) else ...`, `float(j.budget or 0)`.
+- **CSV Headers** (`JOB_EXPORT_HEADERS`): `title,min_experience,max_experience,location,openings,priority,job_type,job_mode,hiring_for,client_name,status,skills,education,budget,description`
+- **Response**: `generate_csv_response('jobs_export.csv', JOB_EXPORT_HEADERS, rows)`
+- **Audit**: `log_action(request.user, 'exported', 'Job', None, f"Exported {len(rows)} jobs")`. Matches updated `CandidateExportView`.
 
 ### Import Jobs (CSV) - Matches JobImportView
 - **Endpoint**: `POST /api/v1/jobs/import/`
-- **Auth**: `IsAdminOrManager`, MultiPartParser.
-- **Body**: multipart with `file` CSV.
-- **Required**: `title, min_experience, max_experience, location`.
-- **Logic** (per row, errors by row# starting at 2):
-  - Client lookup by `client_name` (iexact, org, not deleted); warn in errors if not found but still create job.
-  - Parse skills as comma-split, ints/floats with defaults, choice fields (status, priority, job_type, etc.) validated with fallback to defaults (e.g. OPEN, MEDIUM, PERMANENT, OFFICE, SELF).
-  - Auto-create default Stages (same as JobViewSet.perform_create).
-  - Dedup not explicit but org+title implicit via model.
+- **Auth**: `IsAdminOrManager`, `parser_classes=[MultiPartParser, FormParser]`.
+- **Body**: multipart `file` CSV.
+- **Required**: `JOB_IMPORT_REQUIRED = ['title', 'min_experience', 'max_experience', 'location']` (validated by `parse_csv_from_request` → `raise ValidationError` on fail).
+- **Per-row Logic** (enumerate(rows, start=2) for 1-based errors):
+  - Title required + explicit dedup (`title__iexact + org + is_deleted=False`); skip+error if duplicate.
+  - Client: optional `company_name__iexact` lookup (org-scoped); if not found, append warning to errors[] but continue with client=None.
+  - Skills: split by comma + trim.
+  - Parsing: int() defaults for exp/openings; `Decimal(str(budget_raw).replace(',','') or 0)`; `_get_choice(val, choices, default)` (case-insens on value/label, falls back to model defaults: OPEN/MEDIUM/PERMANENT/OFFICE/SELF).
+  - `with transaction.atomic(): Job.objects.create(...)` (triggers model.save for code/link) + loop to create DEFAULT_STAGES.
+  - On any Exception: collect `{"row": i, "error": str(e)}`, skipped +=1 .
 - **Response**:
-  - **201** (success): `{"created": 5, "skipped": 0, "errors": []}`
-  - **207** (partial):
-    ```json
-    {
-      "created": 3,
-      "skipped": 2,
-      "errors": [
-        {"row": 2, "error": "Client 'Unknown' not found. Job will be created without a client."},
-        {"row": 4, "error": "Invalid value for priority"}
-      ]
-    }
-    ```
-- Logs summary `log_action(..., 'imported', 'Job', None, ...)`.
+  - **201** (all good): `{"created": N, "skipped": 0, "errors": []}`
+  - **207** (partial): same with errors list populated.
+- **Audit**: `log_action(request.user, 'imported', 'Job', None, f"Imported {created} jobs from CSV (skipped: {skipped})")`.
+- Matches `candidates/views_export.py` pattern exactly (ValidationError early, dedup, choice helper, atomic, counts, 207).
 
 > [!TIP]
-> Export first to get template with exact columns (including client_name matching). Import supports partial failures with detailed row errors.
+> Use Export first to generate a template CSV with exact headers/columns (incl. `client_name`). Import tolerant of partial failures (warnings for missing clients are non-blocking); errors are row-indexed (1-based, start=2). Matches `candidates/views_export.py` (ValidationError, dedup, _get_choice, atomic tx, 201/207 semantics).
 
-## Steps in Job Lifecycle
-1. **Creation** (`POST /jobs/`): Includes all fields (skills list, client FK, assigned_recruiters M2M), auto-calls `perform_create` to create `DEFAULT_STAGES` (Screening to Hired) and set `resume_upload_link`.
-2. **Stage Management**: Use dedicated actions for add/update/delete (with order/color; prevents delete if candidates linked via Application).
-3. **Assignment & Visibility**: RBAC querysets filter by role (Manager=own created, Recruiter=assigned); notifies recruiters.
-4. **Sourcing**: `GET /jobs/{id}/upload-link/` returns frontend global link → `PublicUploadView(/candidates/upload/{job_uuid}/, AllowAny)` which creates Candidate+Application (first stage).
-5. **Pipeline**: Handled in candidates module via Application (current_stage FK to this Job's Stage, move-stage/schedule/send-to-client actions, status sync on Hired).
-6. **Monitoring/Updates**: List includes `candidate_count`, nested stages/briefs; PATCH status or details; `log_action` audited.
-7. **Bulk Data**: Export (role-scoped with ?status=, full headers, client_name), Import (multipart CSV, required fields, client lookup with warnings, choice validation+defaults, auto-stages, 201/207 with errors array).
-8. **Closure**: Set status=closed; supports on-hold; soft-delete via BaseModel.
+## End-to-End Job + Pipeline Flow (Mermaid updated to match code)
 
-## Sample Responses
+See top of file. Pipeline lives in `candidates` module (Application joins Candidate+Job+Stage; status on Application syncs with "Hired" stage).
 
-**Job List Item**:
-```json
-{
-  "id": "job-uuid",
-  "code": "JOB-000001",
-  "title": "Senior Python Developer",
-  "client_name": "Tech Corp",
-  "status": "open",
-  "priority": "high",
-  "openings": 3,
-  "assigned_recruiters": [...],
-  "stages": [{"name": "Screening", "order": 1, "color": "slate"}, ...],
-  "candidate_count": 12,
-  "resume_upload_link": "https://.../upload/{uuid}"
-}
-```
+## Key Integration Points
+- **Accounts**: `UserRole` + `common.permissions` (IsAdminOrManager, IsAdmin, IsAuthenticated in `get_permissions()`); `get_queryset()` role filters; M2M `assigned_recruiters` (limit to recruiters); `created_by` for Manager scoping + audit.
+- **Clients**: Optional FK; import uses iexact lookup (warning only if missing); `hiring_for=client` gates send-to-client in applications.
+- **Candidates/Application**: `PublicUploadView` (AllowAny, job_uuid scoped), `Application.current_stage` FK to Job.Stage, `move_stage` validates ownership, auto-first-stage from `DEFAULT_STAGES` on create/import (exact match between `perform_create` and `JobImportView`).
+- **Audit/Logs**: Every mutation (`perform_*`, status, stages add/manage, export, import) calls `log_action(user, verb, model, id, note)`. Supports `user=None` for public uploads.
+- **Shared Utils**: `common.utils_csv` for parse/generate, `common.exceptions.custom_exception_handler` (now handles ValidationError/NotFound uniformly with `{"error":..., "detail":..., "field_errors":...}`), `BaseModel`.
+- **URLs**: `jobs/urls.py` includes router for ViewSet + explicit paths for `export/`, `import/`, `{id}/upload-link/`, `{id}/stages/...`.
 
-**Stage Management Response**:
-```json
-{
-  "id": "stage-uuid",
-  "name": "Final Interview",
-  "order": 5,
-  "color": "emerald"
-}
-```
+**Common Stages** (`DEFAULT_STAGES`): 
+- Screening (slate, order=1)
+- HR Round (blue, 2)
+- Technical (indigo, 3)
+- Client Round (sky, 4)
+- Offer (amber, 5)
+- Hired (green, 6)
 
-**Upload Link**:
-```json
-{
-  "resume_upload_link": "https://frontend.app/upload/job-uuid-here"
-}
-```
-
-**Export/Import Responses**: See Key APIs section above (matches `jobs/views.py` JobExportView/JobImportView exactly, including row errors, client_name iexact match, fallback choices, auto DEFAULT_STAGES creation, log_action).
-
-## Integration Points
-- **Clients Model**: FK + company_name used in import matching (Client.objects.filter(company_name__iexact=..., organization=...)); supports hiring_for=client for pipeline.
-- **Accounts**: M2M assigned_recruiters for filtering/notifications; UserRole drives querysets in JobViewSet, CandidateViewSet, ApplicationViewSet.
-- **Candidates Module**: **All linkage via Application** (unique_together on organization/candidate/job); current_stage points to Job's Stages. Public upload, parse_resume, export/import, calendar/events, move-stage etc. all reference Job. Pool candidates have no Application.
-- **Notifications & Audit**: `log_action` on create/update/status/stages/export/import (with counts); notifications on assignment, uploads (to assigned_recruiters).
-- **Shared**: `BaseModel` (soft-delete, org scoping everywhere), `StageBriefSerializer`, `JobBriefSerializer`, CSV utils (`JOB_EXPORT_HEADERS`, `JOB_IMPORT_REQUIRED`, parse/generate), `DEFAULT_STAGES`, choice enums (JobStatus, Priority, HiringFor, JobTypes, JobModes with safe defaults in import).
-- **URLs/Views/Serializers**: Exact paths in `jobs/urls.py` (`export/`, `import/`, `{id}/upload-link/`, `{id}/stages/` etc.), serializers support writable fields, computed counts, nested briefs. Fully synced with candidates.md.
-
-**Common Stages** (from `DEFAULT_STAGES`): Screening, HR Round, Technical, Client Round, Offer, Hired — auto-created on every Job create/import. Custom stages via API.
+Auto-created on **every** Job create/import. Custom stages via API (order/color supported; cannot delete if has active applications).
 
 **Notes**:
-- Fully updated with **body + response examples for ALL APIs** (CRUD, status, stages, upload-link, export/import with 201/207 semantics, query filters, role scoping, client matching, validation fallbacks).
-- Matches provided `JobExportView` (QS + rows with float budget, skills join, log) and `JobImportView` (parse, client lookup with error note, choice parsing, auto-stages, 207 errors).
-- Pipeline ownership moved to Application; upload link is frontend-global but backend job-scoped.
-- Consistent RBAC, soft-delete, audit. Ready for reference/integration. Verified against code in `jobs/views.py`, `jobs/serializers.py`, `candidates/views.py`.
+- **Docs == source of truth**: All contracts (JSON payloads, CSV headers/required, QS filters, error shapes with ValidationError/NotFound, 201/207, row-indexing, choice fallbacks, RBAC patterns, Mermaid) verified 1:1 against live code in `jobs/views*.py`, `models.py`, `serializers.py`, `urls.py`, `docs/candidates.md`.
+- RBAC fully centralized (no more permission_classes on ViewSet; `get_permissions()` + `get_queryset()` with UserRole checks). Recruiters can list/retrieve assigned jobs but blocked from export/import/mutations.
+- Import hardened with explicit title dedup (beyond model), safe Decimal, case-insens choice matching, per-row atomic tx + stages, client warning (non-fatal), broad except for robustness.
+- Export aligned with CandidateExportView (permission change, QS comment, isinstance for skills).
+- All views now consistently `raise ValidationError(...)` or `NotFound` for errors (no raw Response(..., status=4xx) except serializer in some legacy paths now updated).
+- `python manage.py check` passes; seed data, dashboards updated in accounts/candidates for consistency.
+- Ready for frontend: exact match on all endpoints, auth, error formats, CSV templates, pipeline actions. Test import/export flows + RBAC (admin/manager vs recruiter).
+
+**Verification**: Synced with `candidates/views_export.py` (mirrored structure), `common/permissions.py`, updated dashboards in `accounts/views.py`, `candidates/views.py`. Full audit trail + soft-delete everywhere.
 

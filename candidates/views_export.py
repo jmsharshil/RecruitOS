@@ -2,6 +2,7 @@ from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import ValidationError
 from django.db.models import Q
 from datetime import date
 
@@ -29,11 +30,11 @@ class CandidateExportView(APIView):
     """
     GET /api/v1/candidates/export/
     Download all visible candidates (including pool) as a CSV file.
-    Role-based: ADMIN sees all, MANAGER/RECRUITER see their jobs' candidates + pool.
+    Restricted to ADMIN/MANAGER via IsAdminOrManager. MANAGER sees only their created-jobs' candidates + pool.
     Optional query params: ?status=screening&job_id=<uuid>
     Note: status/job filters exclude pure pool candidates.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdminOrManager]
 
     def get(self, request):
         from accounts.models import UserRole
@@ -48,10 +49,7 @@ class CandidateExportView(APIView):
             qs = qs.filter(
                 Q(applications__job__created_by=user) | Q(applications__isnull=True)
             ).distinct()
-        elif user.role == UserRole.RECRUITER:
-            qs = qs.filter(
-                Q(applications__job__assigned_recruiters=user) | Q(applications__isnull=True)
-            ).distinct()
+        # ADMIN sees all; RECRUITER blocked by IsAdminOrManager permission
 
         # Optional filters (these will exclude pool candidates)
         status_filter = request.query_params.get('status')
@@ -103,7 +101,7 @@ class CandidateImportView(APIView):
     def post(self, request):
         headers, rows, error = parse_csv_from_request(request, required_fields=CANDIDATE_IMPORT_REQUIRED)
         if error:
-            return Response({"error": error}, status=400)
+            raise ValidationError({"error": error})
 
         created_candidates = 0
         created_applications = 0

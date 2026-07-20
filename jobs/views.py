@@ -1,15 +1,15 @@
-from rest_framework import viewsets
+from rest_framework import viewsets, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.exceptions import ValidationError, NotFound
 from django.utils import timezone
 from jobs.models import Job, Stage, DEFAULT_STAGES, JobStatus
 from jobs.serializers import JobSerializer, StageSerializer
-from common.permissions import IsAdminOrManager, IsAdmin, IsManager
+from common.permissions import IsAdminOrManager, IsAdmin
 from accounts.models import UserRole
 from audit.utils import log_action
 
 class JobViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAdminOrManager]
     serializer_class = JobSerializer
 
     def get_queryset(self):
@@ -24,9 +24,12 @@ class JobViewSet(viewsets.ModelViewSet):
         return Job.objects.none()
 
     def get_permissions(self):
+        if self.action in ['list', 'retrieve', 'get_upload_link']:
+            return [permissions.IsAuthenticated()]
         if self.action == 'destroy':
             return [IsAdmin()]
-        return super().get_permissions()
+        # Mutating actions restricted to admin/manager (create, update, status, stages)
+        return [IsAdminOrManager()]
 
     def perform_create(self, serializer):
         job = serializer.save(created_by=self.request.user, organization=self.request.user.organization)
@@ -61,7 +64,7 @@ class JobViewSet(viewsets.ModelViewSet):
             job.save()
             log_action(self.request.user, 'updated', 'Job', job.id, f"Status changed to {status_val}")
             return Response({'status': job.status})
-        return Response({"error": "Invalid status"}, status=400)
+        raise ValidationError({"error": "Invalid status"})
 
     @action(detail=True, methods=['post'], url_path='stages')
     def add_stage(self, request, pk=None):
@@ -75,7 +78,7 @@ class JobViewSet(viewsets.ModelViewSet):
             )
             log_action(request.user, 'created', 'Stage', stage.id, f"Added stage '{stage.name}' to job '{job.title}'")
             return Response(serializer.data, status=201)
-        return Response(serializer.errors, status=400)
+        raise ValidationError(serializer.errors)
 
     @action(detail=True, methods=['patch', 'delete'], url_path=r'stages/(?P<sid>[^/.]+)')
     def manage_stage(self, request, pk=None, sid=None):
@@ -83,7 +86,7 @@ class JobViewSet(viewsets.ModelViewSet):
         try:
             stage = Stage.objects.get(id=sid, job=job, is_deleted=False)
         except Stage.DoesNotExist:
-            return Response(status=404)
+            raise NotFound({"error": "Stage not found"})
 
         if request.method == 'PATCH':
             serializer = StageSerializer(stage, data=request.data, partial=True)
@@ -91,10 +94,10 @@ class JobViewSet(viewsets.ModelViewSet):
                 serializer.save()
                 log_action(request.user, 'updated', 'Stage', stage.id, f"Updated stage '{stage.name}'")
                 return Response(serializer.data)
-            return Response(serializer.errors, status=400)
+            raise ValidationError(serializer.errors)
         elif request.method == 'DELETE':
             if stage.applications.filter(is_deleted=False).exists():
-                return Response({"error": "Cannot delete stage with candidates"}, status=400)
+                raise ValidationError({"error": "Cannot delete stage with candidates"})
             stage.is_deleted = True
             stage.deleted_at = timezone.now()
             stage.save()

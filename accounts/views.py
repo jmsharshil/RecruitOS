@@ -7,6 +7,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.db.models import Count, Q
 from django.utils import timezone
+from datetime import timedelta
 
 from accounts.models import User, UserRole, Organization
 from accounts.serializers import (
@@ -268,22 +269,64 @@ class ManagerDashboardView(APIView):
         ).count()
         
         today = timezone.localdate()
-        interviews_today = InterviewSchedule.objects.filter(
+        interviews_today_qs = InterviewSchedule.objects.filter(
             is_deleted=False, 
             application__job__in=my_jobs, 
-            date=today
+            date=today,
+            application__is_deleted=False
+        ).select_related('application__candidate', 'application__job')
+        
+        interviews_today = []
+        for interview in interviews_today_qs:
+            interviews_today.append({
+                "candidate_name": interview.application.candidate.candidate_name,
+                "job_title": interview.application.job.title,
+                "time": str(interview.time),
+                "mode": interview.mode,
+                "notes": interview.notes or ""
+            })
+        interviews_today_count = len(interviews_today)
+        
+        pending_client_submissions = Application.objects.filter(
+            job__in=my_jobs,
+            status=CandidateStatus.SENT_TO_CLIENT,
+            is_deleted=False,
+            organization=org
         ).count()
+        
+        # Pipeline summary by status
+        pipeline_summary = list(
+            Application.objects.filter(
+                job__in=my_jobs, 
+                is_deleted=False,
+                organization=org
+            ).values('status').annotate(count=Count('id')).order_by('status')
+        )
+        
+        # Recent applications
+        recent_applications = Application.objects.filter(
+            job__in=my_jobs, 
+            is_deleted=False,
+            organization=org
+        ).select_related('candidate', 'current_stage', 'job').order_by('-created_at')[:5]
+        recent = [{
+            "candidate": app.candidate.candidate_name,
+            "job": app.job.title,
+            "status": app.status,
+            "stage": getattr(app.current_stage, 'name', 'Screening')
+        } for app in recent_applications]
         
         return Response({
             "stats": {
                 "my_open_jobs": my_open_jobs,
                 "candidates_in_pipeline": candidates_in_pipeline,
-                "interviews_today": interviews_today,
-                "pending_client_submissions": 0
+                "interviews_today": interviews_today_count,
+                "pending_client_submissions": pending_client_submissions
             },
-            "my_jobs": my_jobs.order_by('-created_at')[:5].values('id', 'title', 'status'),
-            "todays_interviews": [],
-            "pipeline_summary": []
+            "my_jobs": list(my_jobs.order_by('-created_at')[:5].values('id', 'title', 'status', 'openings')),
+            "todays_interviews": interviews_today,
+            "pipeline_summary": pipeline_summary,
+            "recent_applications": recent
         })
 
 class RecruiterDashboardView(APIView):
@@ -303,20 +346,52 @@ class RecruiterDashboardView(APIView):
         ).count()
         
         today = timezone.localdate()
-        interviews_today = InterviewSchedule.objects.filter(
+        interviews_today_qs = InterviewSchedule.objects.filter(
             is_deleted=False, 
             application__job__in=assigned_jobs, 
-            date=today
+            date=today,
+            application__is_deleted=False
+        ).select_related('application__candidate', 'application__job')
+        
+        interviews_today = [{
+            "candidate_name": interview.application.candidate.candidate_name,
+            "job_title": interview.application.job.title,
+            "time": str(interview.time),
+            "mode": interview.mode,
+            "notes": interview.notes or ""
+        } for interview in interviews_today_qs]
+        interviews_today_count = len(interviews_today)
+        
+        this_week = timezone.now() - timedelta(days=7)
+        resumes_this_week = Application.objects.filter(
+            job__in=assigned_jobs,
+            created_at__gte=this_week,
+            is_deleted=False,
+            organization=org
         ).count()
+        
+        # Recent candidates/applications for recruiter
+        recent_applications = Application.objects.filter(
+            job__in=assigned_jobs, 
+            is_deleted=False,
+            organization=org
+        ).select_related('candidate', 'job', 'current_stage').order_by('-created_at')[:5]
+        recent_candidates = [{
+            "name": app.candidate.candidate_name,
+            "email": app.candidate.email,
+            "status": app.status,
+            "job": app.job.title,
+            "stage": app.current_stage.name if app.current_stage else "Screening"
+        } for app in recent_applications]
         
         return Response({
             "stats": {
                 "assigned_jobs": assigned_jobs_count,
                 "total_candidates": total_candidates,
-                "resumes_this_week": 0,
-                "interviews_today": interviews_today
+                "resumes_this_week": resumes_this_week,
+                "interviews_today": interviews_today_count
             },
-            "assigned_jobs": assigned_jobs.order_by('-created_at')[:5].values('id', 'title', 'status'),
-            "recent_candidates": [],
-            "todays_interviews": []
+            "assigned_jobs": list(assigned_jobs.order_by('-created_at')[:5].values('id', 'title', 'status', 'openings')),
+            "recent_candidates": recent_candidates,
+            "todays_interviews": interviews_today
         })

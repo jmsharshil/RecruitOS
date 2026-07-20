@@ -27,7 +27,7 @@ All errors are normalized by `common.exceptions.custom_exception_handler` (confi
 - Org-scoped talent pool (candidates with no Applications)
 - Strict AI resume parsing (`parse_resume_task` wrapper around `parse_resume_ai` with anti-hallucination system prompt: explicit-only extraction, JSON-only, null/[] defaults, error path for unparseable resumes)
 - Public resume upload (AllowAny) via global job upload link → AI parse → creates Candidate (+ linked Application if job provided)
-- RBAC visibility: Recruiters see assigned-job Applications + pool; Managers see created-jobs + pool
+- RBAC enforced via `common.permissions` (`IsAuthenticated` for most actions on ViewSets, `IsAdminOrManager` for import/export + restricted mutations, `IsAdmin` for destroy) + role-scoped `get_queryset()` (using `Q` filters: `organization=user.organization`, `Q(applications__job__created_by=user) | Q(applications__isnull=True)` for candidates/pool, `job__created_by=user` or `assigned_recruiters=user` for applications/jobs). Recruiters see assigned jobs + pool; Managers see their created-jobs + pool.
 - `log_action` supports `user=None` for public/system actions (with explicit organization)
 - Threaded notifications via `simulate_resume_submission_notification` (tries Application first, falls back to Candidate for pool)
 - All models inherit `BaseModel` (org scoping + soft-delete)
@@ -62,6 +62,7 @@ flowchart TD
 ## Key APIs
 
 ### CandidateViewSet (/api/v1/candidates/)
+- **Auth**: Uses `get_permissions()` — `IsAuthenticated()` for list/retrieve/create/update/parse-resume/upload-resume; `IsAdmin()` for destroy; `IsAdminOrManager()` otherwise. Role-scoped QS via `common.permissions` integration.
 - **List**: `GET /api/v1/candidates/?search=rahul&status=screening`
   - Role-scoped queryset (pool + assigned via Q filter on applications).
   - **Response (200)**: Paginated list of `CandidateSerializer` (includes nested `applications` array).
@@ -122,7 +123,8 @@ flowchart TD
   **Response (200)**: `{"message": "Resume uploaded and parsed successfully", "candidate": {...}}`
 
 ### ApplicationViewSet (/api/v1/applications/)
-- **List**: `GET /api/v1/applications/?job_id=...&status=screening` — role-scoped (assigned jobs + pool).
+- **Auth**: Uses `get_permissions()` — `IsAuthenticated()` for list/retrieve/create/update + all pipeline actions (move-stage, schedule, send-to-client); `IsAdmin()` for destroy; `IsAdminOrManager()` otherwise. Role-scoped QS (assigned jobs only, as Applications require a Job).
+- **List**: `GET /api/v1/applications/?job_id=...&status=screening` — role-scoped (assigned jobs).
   **Response**: List of ApplicationSerializer with nested CandidateBrief, JobBrief, StageBrief, interview_schedule, client_submission (method fields).
 
 - **Create**: `POST /api/v1/applications/`
@@ -247,8 +249,8 @@ flowchart TD
 
 ### Export Candidates (CSV)
 - **Endpoint**: `GET /api/v1/candidates/export/?status=screening&job_id=uuid-here`
-- **Auth**: `IsAuthenticated` (JWT `Authorization: Bearer <token>` required; see Error Handling section above). 
-  - Role-scoped queryset (Admin: all org; Manager: `Q(applications__job__created_by=user) | Q(applications__isnull=True)`; Recruiter: assigned via applications Q-filter + pool). Prefetches applications. Uses `UserRole` from accounts.
+- **Auth**: `IsAdminOrManager` (JWT `Authorization: Bearer <token>` required; see Error Handling section above). 
+  - Role-scoped queryset (Admin: all org; Manager: `Q(applications__job__created_by=user) | Q(applications__isnull=True)` for their jobs + pool). Recruiters cannot export. Prefetches applications. Uses `UserRole` from accounts.
 - **Query Params**:
   - `status`: Filter by `Application.status` (screening, hired, etc.). Pool candidates default to `status=POOL`.
   - `job_id`: Optional filter to specific job (excludes pure pool if used).
@@ -262,15 +264,15 @@ flowchart TD
   status, share_date, feedback, job_title
   ```
 - For pool candidates: `status=POOL`, `job_title='Talent Pool'`.
-- **Error Example** (malformed/missing token):
+- **Error Example** (permission or malformed token):
   ```json
   {
-    "error": "Authentication failed",
-    "detail": "Authorization header must contain two space-delimited values",
+    "error": "Permission denied",
+    "detail": "You do not have permission to perform this action.",
     "field_errors": {}
   }
   ```
-  (status 401). Logs via `log_action(user, 'exported', 'Candidate', None, f"Exported {n} candidates (incl. pool)")`. Matches `CandidateExportView` in `candidates/views_export.py`.
+  (status 403 for recruiters) or 401 for auth issues. Logs via `log_action(...)`. Matches updated `CandidateExportView` (now uses `IsAdminOrManager`).
 
 ### Import Candidates (CSV)
 - **Endpoint**: `POST /api/v1/candidates/import/`
@@ -312,17 +314,18 @@ flowchart TD
 
 ## Integration
 - **Jobs**: Provides `stages`, `DEFAULT_STAGES`, `resume_upload_link` (from `GET /jobs/{id}/upload-link/`), `assigned_recruiters` (for Q-filter + notifications). Application links via FKs. Public upload job-scoped for isolation.
-- **Accounts**: RBAC via `IsAdminOrManager`, role querysets (`Q(applications__job__assigned_recruiters=user) | Q(applications__isnull=True)` for recruiters), `BaseModel` soft-delete.
+- **Accounts**: RBAC via `common.permissions` classes (`IsAuthenticated`, `IsAdmin`, `IsAdminOrManager` etc. used in `get_permissions()` + `get_queryset()` with role-based Q-filters), `BaseModel` soft-delete.
 - **Clients**: `hiring_for=client` enables send-to-client flow.
 - **Serializers/Views**: `CandidateSerializer`, `ApplicationSerializer` (with `StageBriefSerializer`, `JobBriefSerializer`, method fields for `interview_schedule`/`client_submission`), `candidates/views.py`, `candidates/serializers.py`, `candidates/views_export.py`, `candidates/urls.py`.
 - **Utils**: Strict `parse_resume_ai` (anti-hallucination rules: JSON-only, explicit facts, error on failure), CSV with 207 partial, threaded notifications.
 
 **Notes**: 
+- **RBAC fully centralized**: `get_permissions()` on `CandidateViewSet`/`ApplicationViewSet` (mirrors `JobViewSet`) uses `IsAuthenticated`, `IsAdmin`, `IsAdminOrManager` from `common.permissions`; `get_queryset()` applies role-specific Q-filters (pool visibility for candidates).
 - **Error responses now fully documented** and improved via updated `custom_exception_handler` (handles 401 auth header issues like the reported "Authorization header must contain two space-delimited values", promotes view `{"error": "..."}` responses, populates `field_errors` for 400s). All examples updated to match.
-- Docs exhaustive: concrete JSON for *all* endpoints/actions (including export/import 207s), query params, permissions (`IsAuthenticated`, `IsAdminOrManager`, `AllowAny`), RBAC Q-filters, validation (stage ownership, dedup, safe_float, choice fallbacks), parse anti-hallucination rules.
+- Docs exhaustive: concrete JSON for *all* endpoints/actions (including export/import 207s), query params, permissions (`IsAuthenticated`, `IsAdmin`, `IsAdminOrManager`, `AllowAny`), RBAC Q-filters, validation (stage ownership, dedup, safe_float, choice fallbacks), parse anti-hallucination rules.
 - Pipeline fully on `Application` (`current_stage` FK + dedicated `@action`s vs generic PATCH; auto first-stage from `Job.DEFAULT_STAGES` on create/import; "Hired" status sync).
 - Upload link treated as global frontend URL; backend `PublicUploadView` remains job_uuid-scoped for org isolation (`log_action(user=None, organization=...)`).
 - CSV: Export includes pool (`status=POOL`); Import uses 207 on partial failures with row-indexed errors; dedup by (email, org).
 - Consistent use of `StageBriefSerializer`/`JobBriefSerializer`, method fields, `BaseModel` soft-delete, threaded notifications.
-- All contracts verified against live code in `candidates/views*.py`, `serializers.py`, `urls.py`, `views_export.py`, `common/exceptions.py`, `utils.py`, `config/settings.py` (JWT + custom handler). Ready for frontend integration/testing.
+- All contracts verified 1:1 against live code in `candidates/views*.py` (now with `get_permissions`), `serializers.py`, `urls.py`, `views_export.py`, `common/permissions.py`, `common/exceptions.py`, `utils.py`, `config/settings.py` (JWT + custom handler). Ready for frontend integration/testing.
 
