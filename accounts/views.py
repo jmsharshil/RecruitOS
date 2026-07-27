@@ -37,7 +37,10 @@ logger = logging.getLogger(__name__)
 def send_set_pin_email(user):
     """
     Send invitation email with magic link for user to set their PIN.
-    Uses org-aware SMTP (per-org credentials + branding) via send_org_email.
+    Uses org-aware SMTP via send_org_email(), which now **enforces fallback**
+    to global credentials (.env / settings.EMAIL_*) on any SMTP auth failure,
+    inactive config, or missing OrganizationEmailConfig. This fixes delivery
+    failures (e.g. Outlook 535 auth errors) while preserving per-org branding.
     """
     token = default_token_generator.make_token(user)
     uid = urlsafe_base64_encode(force_bytes(user.pk))
@@ -73,7 +76,7 @@ def send_set_pin_email(user):
         )
         logger.info(f"Set PIN email sent to {user.email} with link to {url}")
     except Exception as e:
-        logger.error(f"Failed to send set PIN email to {user.email}: {str(e)}")
+        logger.error(f"Failed to send set PIN email to {user.email} (both org and global fallback failed): {str(e)}")
 
 # --- Auth Views ---
 

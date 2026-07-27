@@ -349,15 +349,17 @@ flowchart TD
   ```
   - Link generated in `Job.save()` (robust, org-scoped). Frontend compatibility: public upload now lands in talent pool; use Application API to move to specific job's first stage (auto-set in `perform_create`).
 
-### Export Jobs (CSV) - Matches JobExportView
-- **Endpoint**: `GET /api/v1/jobs/export/?status=open`
-- **Auth**: `permission_classes = [IsAdminOrManager]` (blocks recruiters; uses `UserRole` inside for MANAGER filter).
-- **QS**: `select_related('client')`, `is_deleted=False`, org-scoped; if MANAGER then `created_by=user`.
-- **Query**: Optional `?status=...` (exact match on Job.status).
-- **Logic**: Builds rows; `client.company_name if j.client else ''`, `', '.join(...) if isinstance(j.skills, list) else ...`, `float(j.budget or 0)`.
-- **CSV Headers** (`JOB_EXPORT_HEADERS`): `title,min_experience,max_experience,location,openings,priority,job_type,job_mode,hiring_for,client_name,status,skills,education,budget,description`
-- **Response**: `generate_csv_response('jobs_export.csv', JOB_EXPORT_HEADERS, rows)`
-- **Audit**: `log_action(request.user, 'exported', 'Job', None, f"Exported {len(rows)} jobs")`. Matches updated `CandidateExportView`.
+### Export Jobs (CSV + Excel) - Matches JobExportView
+- **Endpoint**: `GET /api/v1/jobs/export/?status=open&format=xlsx&template=1`
+- **Auth**: `permission_classes = [IsAdminOrManager]` (blocks recruiters; uses `UserRole` inside for MANAGER=created_by filter).
+- **QS/RBAC**: `select_related('client')`, `is_deleted=False`, org-scoped; if MANAGER then `created_by=user`. Matches `JobViewSet.get_queryset()`.
+- **Query Params**: `?status=` (filter), `?format=xlsx` (default csv; updates filename/ext/content-type), `?template=1` (sample row only, no DB query, separate log_msg).
+- **Logic**: For template uses sample with comma skills string; else builds rows with skills join, float(budget), client_name.
+- **Headers** (`JOB_EXPORT_HEADERS`): `title,min_experience,max_experience,location,openings,priority,job_type,job_mode,hiring_for,client_name,status,skills,education,budget,description`
+- **Response**: `generate_csv_response(..., export_format=...)` (openpyxl for xlsx, cleans data). Filename `jobs_export.{ext}` or template.
+- **Audit**: `log_action(...)` with count or "Downloaded job import template". Matches unified pattern in Client/CandidateExportView.
+
+**Note**: Use with `ExportFormatsView` for dynamic info. XLSX preferred for complex data (e.g. budget numbers).
 
 ### Import Jobs (CSV or Excel) - Matches JobImportView
 - **Endpoint**: `POST /api/v1/jobs/import/`
@@ -413,7 +415,7 @@ flowchart TD
 ```
 
 > [!TIP]
-> **Export first** for exact header template (includes `client_name`, all fields). Import now fully supports Excel (.xlsx/.xls) + CSV. Tolerant of partial failures (client lookup warnings non-fatal). Errors are row-indexed starting at 2. All choice fields use case-insensitive `get_choice()` with documented fallbacks. Matches `JobImportView`, `parse_csv_from_request()`, and candidate import pattern. Test with mixed success cases for robustness. See updated `jobs/views_export.py` and `common/utils_csv.py`.
+> Use **ExportFormatsView** (`/api/v1/export-formats/`) or Export with `?template=1&format=xlsx` for perfect header template + sample data (includes `client_name`, skills as comma string). Import fully supports Excel (.xlsx/.xls via openpyxl.data_only=True) + CSV. Tolerant of partial failures (non-fatal client warnings). Row errors indexed from 2, 207 on partial. All enums use `get_choice(..., default=...)` case-insensitive. Matches `JobImportView` (dedup title__iexact+org, Decimal budget, auto DEFAULT_STAGES), `common/utils_csv.py`, `common/serializers.py:DateParserField` (not used here but in others). Test mixed cases. See verification note.
 
 ## End-to-End Job + Pipeline Flow (Mermaid updated to match code)
 

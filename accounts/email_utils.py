@@ -1,17 +1,20 @@
 """
 accounts/email_utils.py
 
-Org-aware email sending utilities.
+Org-aware email sending utilities with robust fallback.
 
 - Encrypts/decrypts SMTP passwords using Fernet symmetric encryption.
 - Builds per-org Django email backend instances dynamically.
 - Renders templates with org branding injected (logo, colors, footer).
-- Falls back to settings.py defaults when an org has no custom config.
+- **Enforces fallback to global SMTP credentials** (from .env / settings.EMAIL_*) 
+  when OrganizationEmailConfig is missing, inactive, or fails at send-time 
+  (e.g. SMTPAuthenticationError). This fixes set_pin email delivery failures.
 """
 import base64
 import logging
+import smtplib
 from django.conf import settings
-from django.core.mail import EmailMultiAlternatives
+from django.core.mail import EmailMultiAlternatives, get_connection
 from django.core.mail.backends.smtp import EmailBackend as SMTPBackend
 from django.template.loader import render_to_string
 from django.template import Template, Context
@@ -78,12 +81,12 @@ def decrypt_value(encrypted: str) -> str:
 def get_org_email_connection(organization):
     """
     Return a Django email backend for the organization.
-    If no active OrganizationEmailConfig (or missing credentials), falls back
-    to the default backend configured in settings.py (EMAIL_BACKEND, EMAIL_HOST,
-    EMAIL_HOST_USER, DEFAULT_FROM_EMAIL, etc.). Supports console backend in DEBUG.
+    If no active OrganizationEmailConfig (or missing/invalid credentials), falls back
+    to the default backend configured in settings.py (.env EMAIL_* vars).
+    Note: SMTP auth failures are caught at send-time in send_org_email() for
+    explicit global retry (see there for full fallback logic).
     """
     if not organization:
-        from django.core.mail import get_connection
         return get_connection()
 
     try:
@@ -92,8 +95,8 @@ def get_org_email_connection(organization):
             raise AttributeError("inactive or unconfigured")
         # Prefer org config but fallback to settings.py values for missing fields
         return SMTPBackend(
-            host=cfg.smtp_host or settings.EMAIL_HOST,
-            port=cfg.smtp_port or settings.EMAIL_PORT,
+            host=cfg.smtp_host or getattr(settings, 'EMAIL_HOST', 'smtp.gmail.com'),
+            port=cfg.smtp_port or getattr(settings, 'EMAIL_PORT', 587),
             username=cfg.smtp_username,
             password=cfg.get_smtp_password(),
             use_tls=cfg.use_tls,
@@ -103,10 +106,9 @@ def get_org_email_connection(organization):
     except Exception as exc:
         # No valid org config — use Django default from settings.py
         logger.info(
-            f"No active email config for org '{getattr(organization, 'name', 'N/A')}': {exc}. "
-            f"Using default from settings.py (EMAIL_BACKEND={getattr(settings, 'EMAIL_BACKEND', 'default')})"
+            f"No active/valid email config for org '{getattr(organization, 'name', 'N/A')}': {exc}. "
+            f"Using default from settings.py (EMAIL_HOST={getattr(settings, 'EMAIL_HOST', 'N/A')})"
         )
-        from django.core.mail import get_connection
         return get_connection()
 
 
@@ -166,7 +168,10 @@ def get_org_branding(organization, template_key: str) -> dict:
 def send_org_email(organization, subject: str, template_name: str, context: dict, recipient_list: list):
     """
     Render an email template with org branding and send via the org's SMTP
-    (or Django default if not configured).
+    (or Django default if not configured). **Enforces fallback to global
+    credentials from settings.py / .env on SMTP auth or connection failures.**
+    This ensures set_pin emails (and others) always deliver when org config
+    is broken (e.g. invalid Outlook/Gmail credentials).
 
     :param organization: Organization instance (may be None for system emails)
     :param subject: Email subject string
@@ -189,6 +194,8 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
 
     plain_message = context.get('plain_message', subject)
     from_email = get_org_from_email(organization)
+
+    # Try org-specific connection first (may raise SMTP auth errors at send time)
     connection = get_org_email_connection(organization)
 
     try:
@@ -201,7 +208,39 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
         )
         msg.attach_alternative(html_message, 'text/html')
         msg.send()
-        logger.info(f"Email '{template_name}' sent to {recipient_list} via org={getattr(organization, 'name', 'default')}")
+        logger.info(
+            f"Email '{template_name}' sent to {recipient_list} "
+            f"via org={getattr(organization, 'name', 'default')}"
+        )
+        return
+    except (smtplib.SMTPAuthenticationError, smtplib.SMTPException, OSError) as exc:
+        logger.warning(
+            f"Org SMTP failed for '{template_name}' to {recipient_list} "
+            f"(org={getattr(organization, 'name', 'N/A')}): {exc}. "
+            "Falling back to global credentials from .env/settings."
+        )
     except Exception as exc:
-        logger.error(f"Failed to send email '{template_name}' to {recipient_list}: {exc}")
+        logger.error(f"Unexpected error preparing email '{template_name}': {exc}")
+        raise
+
+    # === GLOBAL FALLBACK ===
+    try:
+        global_conn = get_connection(fail_silently=False)
+        msg = EmailMultiAlternatives(
+            subject=subject,
+            body=plain_message,
+            from_email=settings.DEFAULT_FROM_EMAIL or from_email,
+            to=recipient_list,
+            connection=global_conn,
+        )
+        msg.attach_alternative(html_message, 'text/html')
+        msg.send()
+        logger.info(
+            f"Email '{template_name}' sent to {recipient_list} "
+            f"via GLOBAL fallback credentials (settings.EMAIL_*)"
+        )
+    except Exception as fallback_exc:
+        logger.error(
+            f"Global fallback ALSO failed for '{template_name}' to {recipient_list}: {fallback_exc}"
+        )
         raise

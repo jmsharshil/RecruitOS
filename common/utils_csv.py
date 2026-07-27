@@ -3,21 +3,51 @@ import io
 import re
 from django.http import HttpResponse
 import openpyxl
+from openpyxl import Workbook
 
 
-def generate_csv_response(filename, headers, rows):
+def generate_csv_response(filename, headers, rows, export_format='csv'):
     """
-    Returns an HttpResponse with CSV content.
-    `headers` - list of column header strings
-    `rows`    - list of lists/tuples with row data
+    Unified generator for CSV or XLSX export (called by *ExportView.get()).
+    Defaults to CSV for backward compat. Uses openpyxl for XLSX.
+    Updates filename extension. Supports ?format=xlsx and ?template=1.
+    Cleans bools/None for Excel/CSV compatibility. See docs/*.md.
     """
-    response = HttpResponse(content_type='text/csv')
-    response['Content-Disposition'] = f'attachment; filename="{filename}"'
-    writer = csv.writer(response)
-    writer.writerow(headers)
-    for row in rows:
-        writer.writerow(row)
-    return response
+    if export_format == 'xlsx':
+        wb = Workbook()
+        ws = wb.active
+        ws.append(headers)
+        for row in rows:
+            # Clean row for Excel (convert bool/None/date appropriately)
+            clean_row = []
+            for v in row:
+                if v is None:
+                    clean_row.append('')
+                elif isinstance(v, bool):
+                    clean_row.append('TRUE' if v else 'FALSE')
+                else:
+                    clean_row.append(v)
+            ws.append(clean_row)
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        filename = filename.replace('.csv', '.xlsx').replace('.CSV', '.xlsx')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        response.write(buffer.getvalue())
+        return response
+    else:
+        # CSV fallback (original behavior)
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        writer = csv.writer(response)
+        writer.writerow(headers)
+        for row in rows:
+            # Ensure bools/None are stringified nicely for CSV
+            clean_row = ['' if v is None else str(v) for v in row]
+            writer.writerow(clean_row)
+        return response
 
 
 def normalize_header(header):

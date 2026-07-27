@@ -35,41 +35,63 @@ class ClientExportView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        """Export respects same RBAC as ClientViewSet.get_queryset(): admins/managers see all org clients;
-        recruiters see only those linked to their assigned jobs (via jobs__assigned_recruiters)."""
-        user = request.user
-        qs = Client.objects.filter(
-            is_deleted=False,
-            organization=user.organization
-        ).select_related('created_by')
+        """Supports ?template=1 (sample row, no DB hit) + ?format=xlsx.
+        Mirrors exact RBAC/QS from ClientViewSet.get_queryset() (ADMIN/MANAGER full, RECRUITER via jobs__assigned_recruiters).
+        Separate log_msg for template. Updated filename per format."""
+        is_template = request.query_params.get('template') in ('1', 'true', 'yes')
+        export_format = request.query_params.get('format', 'csv').lower()
+        if export_format not in ('csv', 'xlsx'):
+            export_format = 'csv'
 
-        if user.role in (UserRole.ADMIN, UserRole.MANAGER):
-            pass  # full org access
-        elif user.role == UserRole.RECRUITER:
-            qs = qs.filter(
-                jobs__is_deleted=False,
-                jobs__assigned_recruiters=user
-            ).distinct()
+        if is_template:
+            # Sample data for template (note bool for commercial_decided)
+            rows = [[
+                'CLI-001', 'Acme Corp', 'John Doe', 'john@acmecorp.com', 'jane@acmecorp.com',
+                '+1234567890', '+1987654321', 'https://acmecorp.com', 'https://linkedin.com/company/acme',
+                '123 Business St', 'New York', 'NY', 'USA', '10001', 'New York Metro',
+                'Technology', 'GSTIN123456789', 'ACTIVE', '2024-01-15', 30,
+                45, True, 'agreement.pdf', 'Sample client notes for demo purposes.'
+            ]]
+            ext = 'xlsx' if export_format == 'xlsx' else 'csv'
+            filename = f'clients_import_template.{ext}'
+            log_msg = "Downloaded client import template"
         else:
-            qs = qs.none()
+            user = request.user
+            qs = Client.objects.filter(
+                is_deleted=False,
+                organization=user.organization
+            ).select_related('created_by')
 
-        status_filter = request.query_params.get('status')
-        if status_filter:
-            qs = qs.filter(status=status_filter)
+            if user.role in (UserRole.ADMIN, UserRole.MANAGER):
+                pass  # full org access
+            elif user.role == UserRole.RECRUITER:
+                qs = qs.filter(
+                    jobs__is_deleted=False,
+                    jobs__assigned_recruiters=user
+                ).distinct()
+            else:
+                qs = qs.none()
 
-        rows = []
-        for c in qs:
-            rows.append([
-                c.client_id, c.company_name, c.client_name, c.email, c.alternative_email or '',
-                c.contact, c.alternative_contact or '', c.website or '', c.linkedin or '', c.street or '',
-                c.city, c.state, c.country, c.postal_code or '', c.client_location or '',
-                c.industry, c.gst_number or '', c.status, c.agreement_date, c.payment_period_days,
-                c.replacement_period_days, c.commercial_decided, c.agreement_document_name or '',
-                c.notes or '',
-            ])
+            status_filter = request.query_params.get('status')
+            if status_filter:
+                qs = qs.filter(status=status_filter)
 
-        log_action(request.user, 'exported', 'Client', None, f"Exported {len(rows)} clients")
-        return generate_csv_response('clients_export.csv', CLIENT_EXPORT_HEADERS, rows)
+            rows = []
+            for c in qs:
+                rows.append([
+                    c.client_id, c.company_name, c.client_name, c.email, c.alternative_email or '',
+                    c.contact, c.alternative_contact or '', c.website or '', c.linkedin or '', c.street or '',
+                    c.city, c.state, c.country, c.postal_code or '', c.client_location or '',
+                    c.industry, c.gst_number or '', c.status, c.agreement_date, c.payment_period_days,
+                    c.replacement_period_days, c.commercial_decided, c.agreement_document_name or '',
+                    c.notes or '',
+                ])
+            ext = 'xlsx' if export_format == 'xlsx' else 'csv'
+            filename = f'clients_export.{ext}'
+            log_msg = f"Exported {len(rows)} clients"
+
+        log_action(request.user, 'exported', 'Client', None, log_msg)
+        return generate_csv_response(filename, CLIENT_EXPORT_HEADERS, rows, export_format=export_format)
 
 
 class ClientImportView(APIView):

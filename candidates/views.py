@@ -39,9 +39,9 @@ class CandidateViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         """
-        RBAC via common.permissions + role-scoped QS.
-        Recruiters can list/create/parse/upload for pool + assigned.
-        Destroy restricted to admin.
+        RBAC via common.permissions + role-scoped QS (updated for recruiter visibility).
+        Recruiters can list/create/parse/upload for full pool + their assigned-job candidates.
+        Destroy restricted to admin only.
         """
         if self.action in ['list', 'retrieve', 'create', 'update', 'partial_update',
                            'parse_resume', 'upload_resume', 'mark_duplicate', 'unmark_duplicate']:
@@ -63,8 +63,12 @@ class CandidateViewSet(viewsets.ModelViewSet):
                 Q(applications__job__created_by=user) | Q(applications__isnull=True)
             ).distinct()
         elif user.role == UserRole.RECRUITER:
-            # Recruiters see ALL org candidates in the pool (not scoped to job)
-            return qs
+            # Recruiters see full org talent pool + candidates linked to their assigned jobs
+            # (consistent with ApplicationViewSet and export)
+            return qs.filter(
+                Q(applications__isnull=True) |
+                Q(applications__job__assigned_recruiters=user)
+            ).distinct()
         return qs.none()
 
     def perform_create(self, serializer):
@@ -339,34 +343,46 @@ class CalendarEventsView(APIView):
 
 class TalentPoolPublicUploadView(APIView):
     """
-    Public endpoint for candidates to submit their resume to the talent pool.
-    No longer tied to a specific job — candidates enter the shared pool and
-    recruiters can apply them to relevant jobs via the Application model.
-
-    GET  /api/v1/candidates/public-upload/  — returns org info (if token provided, optional)
-    POST /api/v1/candidates/public-upload/  — submit resume to pool
+    Public endpoint (AllowAny) for talent pool resume submissions.
+    Requires org_id (query or form) for multi-tenant scoping. Creates pure
+    Candidate (pool entry, uploaded_by=None). No auto-Application.
+    Uses hardened AI parser + duplicate guard. Returns candidate_id on success.
     """
     permission_classes = [permissions.AllowAny]
     parser_classes     = [MultiPartParser, FormParser]
+
+    def get(self, request):
+        """Optional GET to return public upload info or validate org (e.g. from job link)."""
+        org_id = request.query_params.get('org_id')
+        if org_id:
+            from accounts.models import Organization
+            try:
+                org = Organization.objects.get(id=org_id)
+                return Response({"organization": {"id": str(org.id), "name": org.name}})
+            except Organization.DoesNotExist:
+                return Response({"error": "Organization not found"}, status=404)
+        return Response({
+            "message": "POST name, email, phone, resume, org_id to submit to talent pool.",
+            "note": "org_id is now required for scoping."
+        })
 
     def post(self, request):
         name   = request.data.get('name')
         email  = request.data.get('email')
         phone  = request.data.get('phone')
         resume = request.FILES.get('resume')
-
-        if not all([name, email, phone, resume]):
-            raise ValidationError({"error": "All fields (name, email, phone, resume) are required"})
-
-        # Determine organization from org_id query param or token header (optional)
         org_id = request.query_params.get('org_id') or request.data.get('org_id')
-        organization = None
-        if org_id:
-            from accounts.models import Organization
-            try:
-                organization = Organization.objects.get(id=org_id)
-            except Organization.DoesNotExist:
-                raise ValidationError({"error": "Organization not found"})
+
+        if not all([name, email, phone, resume, org_id]):
+            raise ValidationError({
+                "error": "All fields (name, email, phone, resume, org_id) are required"
+            })
+
+        from accounts.models import Organization
+        try:
+            organization = Organization.objects.get(id=org_id)
+        except Organization.DoesNotExist:
+            raise ValidationError({"error": "Organization not found"})
 
         # Use AI parsing for better data extraction if possible (fallback to form values)
         try:
@@ -442,4 +458,7 @@ class TalentPoolPublicUploadView(APIView):
         )
         simulate_resume_submission_notification(candidate.id)
 
-        return Response({"message": "Resume submitted successfully! We'll be in touch."}, status=201)
+        return Response({
+            "message": "Resume submitted successfully! We'll be in touch.",
+            "candidate_id": str(candidate.id)
+        }, status=201)

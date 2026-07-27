@@ -241,13 +241,7 @@ OPENAI_API_KEY = config('OPENAI_API_KEY', default='dummy-azure-key')
 AZURE_OPENAI_ENDPOINT = config('AZURE_OPENAI_ENDPOINT', default='https://your-resource.openai.azure.com/')
 OPENAI_API_VERSION = config('OPENAI_API_VERSION', default='2024-10-01')
 
-# Email settings — uses SMTP by default; switches to console backend when DEBUG=True
-# (so emails print to stdout in development instead of failing on missing creds).
-# Per-org OrganizationEmailConfig overrides these when active.
-if DEBUG:
-    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-else:
-    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 
 EMAIL_HOST = config("EMAIL_HOST_SERVER", default="smtp.office365.com")
 EMAIL_PORT = config("EMAIL_HOST_PORT", default=587, cast=int)

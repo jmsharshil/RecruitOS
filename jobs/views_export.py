@@ -34,32 +34,54 @@ class JobExportView(APIView):
     permission_classes = [IsAdminOrManager]
 
     def get(self, request):
-        qs = Job.objects.select_related('client').filter(
-            is_deleted=False, organization=request.user.organization
-        )
-        user = request.user
-        if user.role == UserRole.MANAGER:
-            qs = qs.filter(created_by=user)
-        # ADMIN sees all org jobs; RECRUITER blocked by IsAdminOrManager
-        # Note: Matches FDD RBAC; aligned with CandidateExportView QS pattern
+        """Supports ?template=1 (sample row, no DB hit) and ?format=xlsx (or csv).
+        Uses same RBAC QS as JobViewSet. Logs action (separate msg for template)."""
+        is_template = request.query_params.get('template') in ('1', 'true', 'yes')
+        export_format = request.query_params.get('format', 'csv').lower()
+        if export_format not in ('csv', 'xlsx'):
+            export_format = 'csv'
 
-        status_filter = request.query_params.get('status')
-        if status_filter:
-            qs = qs.filter(status=status_filter)
+        if is_template:
+            # Sample data for template - note skills as comma string (parser will split)
+            rows = [[
+                'Senior Python Developer', 3, 7, 'Bangalore', 2, 'HIGH',
+                'PERMANENT', 'HYBRID', 'SELF', 'Acme Corp', 'OPEN',
+                'Python, Django, REST API, PostgreSQL, AWS', 'B.Tech Computer Science',
+                1500000, 'Looking for experienced backend engineer with strong Python skills.'
+            ]]
+            ext = 'xlsx' if export_format == 'xlsx' else 'csv'
+            filename = f'jobs_import_template.{ext}'
+            log_msg = "Downloaded job import template"
+        else:
+            qs = Job.objects.select_related('client').filter(
+                is_deleted=False, organization=request.user.organization
+            )
+            user = request.user
+            if user.role == UserRole.MANAGER:
+                qs = qs.filter(created_by=user)
+            # ADMIN sees all org jobs; RECRUITER blocked by IsAdminOrManager
+            # Note: Matches FDD RBAC; aligned with CandidateExportView QS pattern
 
-        rows = []
-        for j in qs:
-            rows.append([
-                j.title, j.min_experience, j.max_experience, j.location, j.openings, j.priority,
-                j.job_type, j.job_mode, j.hiring_for,
-                j.client.company_name if j.client else '',
-                j.status,
-                ', '.join(j.skills) if isinstance(j.skills, list) else (j.skills or ''),
-                j.education, float(j.budget or 0), j.description or '',
-            ])
+            status_filter = request.query_params.get('status')
+            if status_filter:
+                qs = qs.filter(status=status_filter)
 
-        log_action(request.user, 'exported', 'Job', None, f"Exported {len(rows)} jobs")
-        return generate_csv_response('jobs_export.csv', JOB_EXPORT_HEADERS, rows)
+            rows = []
+            for j in qs:
+                rows.append([
+                    j.title, j.min_experience, j.max_experience, j.location, j.openings, j.priority,
+                    j.job_type, j.job_mode, j.hiring_for,
+                    j.client.company_name if j.client else '',
+                    j.status,
+                    ', '.join(j.skills) if isinstance(j.skills, list) else (j.skills or ''),
+                    j.education, float(j.budget or 0), j.description or '',
+                ])
+            ext = 'xlsx' if export_format == 'xlsx' else 'csv'
+            filename = f'jobs_export.{ext}'
+            log_msg = f"Exported {len(rows)} jobs"
+
+        log_action(request.user, 'exported', 'Job', None, log_msg)
+        return generate_csv_response(filename, JOB_EXPORT_HEADERS, rows, export_format=export_format)
 
 
 class JobImportView(APIView):

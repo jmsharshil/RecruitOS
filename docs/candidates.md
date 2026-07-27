@@ -33,6 +33,8 @@ All choice fields support case-insensitive lookup via `get_choice()` in imports.
 | `skills` | array | No | ["Python", ...] | [] | From AI parse or manual |
 | `resume_file_name` | string | No | - | "" | For display |
 | `resume` | file | No (upload separate) | PDF/DOC | null | FileField |
+| `is_duplicate` | boolean | No | - | false | Duplicate flag (set via action or AI parse dup check) |
+| `duplicate_of` | UUID | No | valid candidate UUID | null | FK to canonical candidate (for deduplication) |
 | **Application** | | | | | |
 | `job_id` | UUID | Yes (for app) | Valid Job UUID | - | Links to job (write-only) |
 | `candidate_id` | UUID | Yes (for app) | Valid Candidate UUID | - | Links to candidate (write-only) |
@@ -51,7 +53,7 @@ All choice fields support case-insensitive lookup via `get_choice()` in imports.
 | `client_feedback` | text | No | - | "" | - |
 | `client_rating` | int | No | 1-5 | null | - |
 
-**Notes**: Required for import = `candidate_name`, `email`, `contact` (plus `job_title` optional for linking). Use `assigned_recruiter_ids` pattern not applicable here; RBAC via Q on recruiter assignment to job. All decimals use `Decimal`/`safe_float`. AI parse populates many fields from resume. See `utils.py` for `parse_resume_ai`, `normalize_phone`.
+**Notes**: Required for import = `candidate_name`, `email`, `contact` (plus `job_title` optional for linking). Duplicates detected by email (iexact) or normalized phone in parse/upload/import using `_find_existing_candidate`. All decimals use `Decimal(safe_float())`. AI parse populates many fields + strict anti-hallucination. See `utils.py` for `parse_resume_ai` (hardened prompt), `normalize_phone`, `_find_existing_candidate`. New duplicate actions and serializer fields (`is_duplicate`, `duplicate_of*`) supported.
 
 **Error Handling (All Endpoints)**
 All errors are normalized by `common.exceptions.custom_exception_handler` (configured in `settings.py` REST_FRAMEWORK) into:
@@ -70,14 +72,16 @@ All errors are normalized by `common.exceptions.custom_exception_handler` (confi
 - Matches all examples below. See `common/exceptions.py` for details.
 
 **Key Features**:
-- Org-scoped talent pool (candidates with no Applications)
-- Strict AI resume parsing (`parse_resume_task` wrapper around `parse_resume_ai` with anti-hallucination system prompt: explicit-only extraction, JSON-only, null/[] defaults, error path for unparseable resumes)
-- Public resume upload (AllowAny) via global job upload link → AI parse → creates Candidate (+ linked Application if job provided)
-- RBAC enforced via `common.permissions` (`IsAuthenticated` for list/create/update/parse/upload/export/import + pipeline actions, `IsAdminOrManager` for job mutations, `IsAdmin` for destroy) + role-scoped `get_queryset()` (using `Q` filters with `organization=user.organization`, pool visibility via `Q(applications__isnull=True)`, `Q(applications__job__created_by=user | assigned_recruiters=user)`). Recruiters can now add/import/export candidates (pool + their assigned jobs); Managers see created-jobs + pool.
-- `log_action` supports `user=None` for public/system actions (with explicit organization)
-- Threaded notifications via `simulate_resume_submission_notification` (tries Application first, falls back to Candidate for pool)
-- All models inherit `BaseModel` (org scoping + soft-delete)
-- CSV export (pool-aware with special status/job_title); CSV/Excel import (via updated `parse_csv_from_request` supporting `.csv`/`.xlsx`/`.xls`, header normalization, row-indexed errors, recruiter guards) supports pool vs job-linked.
+- **Decoupled pool-first design**: `Candidate` = pure talent pool (`uploaded_by=None` supported); `Application` = join model (`unique_together(org, candidate, job)`, `current_stage` FK, status sync on "hired"). Interview/Client models 1:1 to Application.
+- Strict AI resume parsing (`parse_resume_task` + `parse_resume_ai` with anti-hallucination system prompt: "Extract ONLY facts explicitly present... Never hallucinate. JSON-only output. Use null, [], 0 for missing. Error path for unparseable_resume").
+- Public resume upload (`AllowAny`, requires `org_id`) → pure pool Candidate (no auto-Application; recruiters link manually). Uses hardened parser + duplicate guard + `log_action(user=None, organization=...)` + pool notification fallback.
+- RBAC centralized in `ViewSet.get_permissions()` (`IsAuthenticated` for list/create/parse/upload/export/import/pipeline, `IsAdmin` for destroy, `IsAdminOrManager` otherwise) + role-scoped `get_queryset()` with Q-filters:
+  - **CandidateViewSet/Export**: ADMIN=full org; MANAGER=(created jobs | pool); RECRUITER=(pool | assigned_recruiters jobs via Q + .distinct()).
+  - **ApplicationViewSet**: ADMIN=full, MANAGER=created jobs, RECRUITER=assigned jobs only.
+  - Export/Import exactly mirrors (recruiters see full pool + their pipeline).
+- `log_action(user=None, organization=...)` support; threaded notifications with pool fallback.
+- All models inherit `BaseModel` (org + soft-delete); enums for statuses/modes.
+- Unified CSV/Excel: `?format=xlsx`/`?template=1` on export (pool-aware: status=POOL, job_title="Talent Pool"); full Excel import (openpyxl.data_only, per-row atomic, row errors from 2, 201/207). Duplicate management (auto + @actions).
 
 ## End-to-End Candidate Flow Diagram (with Talent Pool + Application)
 
@@ -109,9 +113,9 @@ flowchart TD
 
 ### CandidateViewSet (/api/v1/candidates/)
 - **Auth**: Uses `get_permissions()` — `IsAuthenticated()` for list/retrieve/create/update/parse-resume/upload-resume; `IsAdmin()` for destroy; `IsAdminOrManager()` otherwise. Role-scoped QS via `common.permissions` integration.
-- **List**: `GET /api/v1/candidates/?search=rahul&status=screening`
-  - Role-scoped queryset (pool + assigned via Q filter on applications).
-  - **Response (200)**: Paginated list of `CandidateSerializer` (includes nested `applications` array).
+- **List**: `GET /api/v1/candidates/?search=rahul&status=screening&status=POOL`
+  - Role-scoped queryset: pool candidates (no apps) + those with apps to user's jobs (Q-filter + .distinct() for MANAGER/RECRUITER). Status=POOL can be used in filter.
+  - **Response (200)**: Paginated list of `CandidateListSerializer` (includes `applications_count`, `is_duplicate`, `duplicate_of_name`; nested apps only in detail).
     ```json
     {
       "count": 42,
@@ -242,7 +246,46 @@ flowchart TD
   See `candidates/utils.py:parse_resume_ai, parse_resume_task` for strict prompt and safe defaults. Matches anti-hallucination decision.
 
 - **Upload Resume (per candidate)**: `POST /api/v1/candidates/{pk}/upload-resume/` (multipart `resume`)
-  **Response (200)**: `{"message": "Resume uploaded and parsed successfully", "candidate": {...}}`
+  **Response (200)**: `{"message": "Resume uploaded successfully"}`
+  (Note: AI parse is separate `parse-resume` action for preview; upload just attaches file to existing Candidate.)
+
+### Duplicate Management Actions (on CandidateViewSet)
+New endpoints for handling duplicate candidates (common in talent pools). Integrated with AI parse and public upload for auto-detection. Visible in `CandidateListSerializer` and `CandidateDetailSerializer` (incl. `duplicate_of_detail`).
+
+- **Mark as Duplicate**: `POST /api/v1/candidates/{pk}/mark-duplicate/`
+  **Step-by-Step**:
+  1. Authenticated user with access to both candidates.
+  2. POST body with `duplicate_of` = UUID of the canonical (primary) candidate.
+  3. Validates: same org, exists, not self-reference.
+  4. Sets `is_duplicate=True`, `duplicate_of=canonical`, logs detailed action.
+  5. Returns updated candidate data.
+
+  **Request Body**:
+  ```json
+  {
+    "duplicate_of": "canonical-uuid-here"
+  }
+  ```
+  **Success Response (200)**:
+  ```json
+  {
+    "message": "Candidate marked as duplicate of 'Rahul Sharma'.",
+    "candidate": {
+      "id": "dup-uuid",
+      "is_duplicate": true,
+      "duplicate_of": "canonical-uuid",
+      "duplicate_of_name": "Rahul Sharma",
+      ...
+    }
+  }
+  ```
+
+- **Unmark Duplicate**: `POST /api/v1/candidates/{pk}/unmark-duplicate/`
+  No body required. Resets `is_duplicate=False`, `duplicate_of=None`, logs action, returns updated serializer data.
+
+**In Parse & Public Upload**: Auto-detects via `_find_existing_candidate()` (email then normalized phone, org-scoped). If duplicate found, returns 200 with `{"duplicate": true, "existing_candidate_id": "...", "message": "..."}` instead of creating.
+
+See `candidates/views.py` (mark_duplicate/unmark_duplicate methods), `utils.py` (`_find_existing_candidate`, `parse_resume_task`), serializers (method fields for names/details). Prevents data pollution in talent pool.
 
 ### ApplicationViewSet (/api/v1/applications/)
 - **Auth**: Uses `get_permissions()` — `IsAuthenticated()` for list/retrieve/create/update + all pipeline actions (move-stage, schedule, send-to-client); `IsAdmin()` for destroy; `IsAdminOrManager()` otherwise. Role-scoped QS (assigned jobs only, as Applications require a Job).
@@ -394,53 +437,49 @@ All actions use `IsAuthenticated` (via get_permissions), role-scoped QS (only ap
   ```
   Restricted by job `hiring_for`. Uses `SubmissionStatus` choices internally.
 
-### PublicUploadView (No Auth - for Job Upload Links)
-- **GET /api/v1/candidates/upload/{job_uuid}/** (`permission_classes = [AllowAny]`)
-  **Step-by-Step**: Frontend uses the `resume_upload_link` from Job to show job details publicly before upload.
-  **Full Response (200)**:
-  ```json
-  {
-    "job_title": "Senior Python Developer",
-    "company_name": "Tech Corp",
-    "description": "Build scalable backend services...",
-    "requirements": "5+ years experience, strong Python/Django skills"
-  }
-  ```
-
-- **POST /api/v1/candidates/upload/{job_uuid}/** (multipart/form-data: `name`, `email`, `phone`, `resume` file; AllowAny)
+### TalentPoolPublicUploadView (No Auth - Global Talent Pool Upload)
+- **GET /api/v1/candidates/public-upload/?org_id=...** — returns org info or usage note.
+- **POST /api/v1/candidates/public-upload/** (`permission_classes = [AllowAny]`, **required** `org_id` query param or form field for scoping)
   **Step-by-Step**:
-  1. Candidate fills form + uploads resume to public link (from JobViewSet /upload-link/).
-  2. View extracts job by UUID for org scoping.
-  3. Calls `parse_resume_task` on resume (with anti-hallucination prompt).
-  4. On AI success or fallback to form fields (`name`→candidate_name, `email`, `phone`→contact normalized).
-  5. Checks for duplicate by email+org; if exists, links to existing.
-  6. Creates Candidate (uploaded_by=None, org from job), then Application (to this job, first DEFAULT_STAGES stage, status=screening).
-  7. `log_action(user=None, verb='created', ... , organization=job.organization)`, simulate notification to assigned recruiters.
-  8. Returns success with IDs.
+  1. Public/embedded forms POST multipart with `name`, `email`, `phone`, `resume`, `org_id`.
+  2. Validates all required (incl. org_id); looks up Organization.
+  3. Calls `parse_resume_task(resume, organization=org)` — strict anti-hallucination AI (explicit facts only, JSON-only, null/[]/0 defaults, unparseable error path), fallback to form data.
+  4. Org-scoped duplicate check via `_find_existing_candidate(email, normalized_phone, organization)`.
+  5. On duplicate: 200 with info. Else creates pure `Candidate` (pool, `uploaded_by=None`, org-scoped). No auto-Application.
+  6. `log_action(user=None, 'created', ..., organization=org)` + `simulate_resume_submission_notification` (pool fallback notifies all recruiters in org).
+  7. Robust: temp files cleaned, extract_text hierarchy (PyMuPDF > pdfplumber > docx2txt), normalize_phone, rewind file.
 
-  **Request**: Multipart with:
-  - `name`: string (required for fallback)
-  - `email`: string (required)
-  - `phone`: string (required)
-  - `resume`: file (PDF preferred for AI parse)
+  **Request** (multipart/form-data):
+  - `name`, `email`, `phone`, `resume` (file), `org_id` (UUID) — all **required**
 
   **Full Success Response (201)**:
   ```json
   {
-    "message": "Resume uploaded and parsed successfully",
-    "candidate_id": "cand-uuid-here",
-    "application_id": "app-uuid-here",
-    "parsed_data": {
-      "candidate_name": "Rahul Sharma",
-      "email": "rahul@example.com",
-      "contact": "+919876543210",
-      "skills": ["Python", "Django"],
-      "experience": "6 years",
-      ...
-    }
+    "message": "Resume submitted successfully! We'll be in touch.",
+    "candidate_id": "cand-uuid-here"
   }
   ```
-  - On duplicate or parse fail, still creates with form data + logs. Job-scoped for isolation. See `candidates/views.py:PublicUploadView` and `utils.py:parse_resume_task`. Triggers threaded notification.
+
+  **Duplicate Response (200)**:
+  ```json
+  {
+    "message": "A candidate with this profile already exists in our talent pool.",
+    "duplicate": true,
+    "existing_candidate_id": "existing-uuid"
+  }
+  ```
+
+  **Error Responses** (normalized):
+  ```json
+  {
+    "error": "All fields (name, email, phone, resume, org_id) are required",
+    "detail": "...",
+    "field_errors": {}
+  }
+  ```
+  or `{"error": "unparseable_resume", "detail": "Could not extract..."}` (400).
+
+  See `candidates/views.py:TalentPoolPublicUploadView` (now with GET + required org_id), `utils.py` (hardened parser, duplicate guard, extract_text). Matches decoupled pool-first design. Job's `resume_upload_link` points here with org_id. Notification uses org-scoped recruiters. Updated for hardening (no null org).
 
 ### CalendarEventsView
 - **GET /api/v1/candidates/calendar/events/?start_date=2024-10-01&end_date=2024-10-31**
@@ -459,37 +498,36 @@ All actions use `IsAuthenticated` (via get_permissions), role-scoped QS (only ap
     ```
 
 ### Export/Import (CSV + Excel Support)
-See `candidates/views_export.py` (RBAC updated, Excel via `common/utils_csv.py:parse_csv_from_request` using openpyxl). Export=CSV only; Import supports both. All fields align with **Candidate & Application Fields Reference** table above. Choices for `status` use `get_choice()` (case-insensitive).
+See `candidates/views_export.py` (RBAC updated, unified via `common/utils_csv.py:generate_csv_response(..., export_format=...)` + `parse_csv_from_request` using openpyxl.data_only=True). Supports `?format=xlsx` (or csv) on export + full Excel import. All fields align with **Candidate & Application Fields Reference** table above. Choices for `status` use `get_choice()` (case-insensitive). Template uses sample row (no DB hit). See `ExportFormatsView` for dynamic headers/URLs.
 
-### Export Candidates (CSV-only)
-- **Endpoint**: `GET /api/v1/candidates/export/?status=screening&job_id=uuid`
+### Export Candidates (CSV + Excel)
+- **Endpoint**: `GET /api/v1/candidates/export/?status=screening&job_id=uuid&format=xlsx&template=1`
 - **Auth**: `IsAuthenticated()` (all roles including recruiters).
 - **RBAC/Step-by-Step**:
-  1. Uses same Q-filter as `CandidateViewSet.get_queryset()`: ADMIN=all, MANAGER=created jobs+pool, RECRUITER=assigned jobs + pool (`Q(applications__job__assigned_recruiters=user) | Q(applications__isnull=True)`).
-  2. Optional query params: `?status=` (filters applications.status), `?job_id=` (specific job; excludes pure pool if used).
-  3. Builds rows with special handling for pool candidates (`status=POOL`, `job_title="Talent Pool"`).
-  4. Calls `generate_csv_response` with `CANDIDATE_EXPORT_HEADERS`.
-  5. Logs `exported` action with count.
+  1. Uses **exact** same role logic as `CandidateViewSet.get_queryset()`: ADMIN=full org, MANAGER=(created_by jobs | pool), RECRUITER=full org pool. Uses prefetch_related('applications__job').distinct() where needed.
+  2. Optional query params: `?status=` (filters Application.status, excludes pure pool if filtered), `?job_id=`, `?format=xlsx` (default=csv), `?template=1` (sample row only, no DB query, filename ends .xlsx if requested).
+  3. For non-template: builds rows with pool handling (`status=POOL`, `job_title="Talent Pool"`, first non-deleted Application or None).
+  4. Calls updated `generate_csv_response(filename, CANDIDATE_EXPORT_HEADERS, rows, export_format=...)` (cleans bool/None/date for Excel compat).
+  5. Logs `exported` action (user-aware, separate msg for template).
 
-- **Full CSV Columns** (from `CANDIDATE_EXPORT_HEADERS`): `candidate_name,profile_name,current_company,current_profile,experience,current_location,preferred_location,education,college,contact,email,dob,doc,current_ctc,expected_ctc,notice_period,status,share_date,feedback,job_title`
-- **Response**: File download `candidates_export.csv`. Pool-aware.
+- **Full Columns** (from `CANDIDATE_EXPORT_HEADERS`): `candidate_name,profile_name,current_company,current_profile,experience,current_location,preferred_location,education,college,contact,email,dob,doc,current_ctc,expected_ctc,notice_period,status,share_date,feedback,job_title`
+- **Response**: File download (`candidates_export.{csv|xlsx}` or template). Pool-aware with special status/job_title.
 
-**Note**: Recruiters fully supported post-RBAC refactor.
+**Note**: Recruiters fully supported post-RBAC refactor (see Q-filter). Matches Client/JobExportView pattern. For template, use with job_title column for linking on import.
 
 ### Import Candidates (CSV/Excel)
 - **Endpoint**: `POST /api/v1/candidates/import/`
-- **Auth**: `IsAuthenticated()` (recruiters restricted to pool or assigned jobs via M2M check).
-- **Body**: multipart `file` (`.csv`/`.xlsx`/`.xls` supported).
-- **Required** (per `CANDIDATE_IMPORT_REQUIRED`): `candidate_name`, `email`, `contact` (normalized headers).
+- **Auth**: `IsAuthenticated()` (recruiters restricted to pool or assigned jobs via M2M check on `job.assigned_recruiters`).
+- **Body**: multipart `file` (`.csv`/`.xlsx`/`.xls` supported via `parse_csv_from_request`).
+- **Required** (per `CANDIDATE_IMPORT_REQUIRED`): `candidate_name`, `email`, `contact` (normalized headers via regex→snake_case).
 - **Step-by-Step**:
-  1. Export first to get template with exact columns (use Excel for ease).
-  2. Fill data; `status` can use any case of choices (screening, hired, etc.); `job_title` for linking (optional for pure pool).
-  3. Upload file.
-  4. `parse_csv_from_request` handles Excel (openpyxl, data_only=True, skip empty, header regex normalize to snake_case) or CSV (utf-8-sig).
-  5. Per row (index from 2): validate required, dedup by (email, org), optional job lookup by title__iexact + recruiter guard (for RECRUITER role).
-  6. Create Candidate if new (uses safe_float for CTCs → Decimal, defaults), then Application if job (first stage from DEFAULT_STAGES, get_choice for status).
-  7. Collect row-indexed errors (e.g. "Recruiter not assigned..."), count created/skipped.
-  8. Atomic per row, final `log_action` with summary, return 201 or 207.
+  1. Use `/export-formats/` or Export with `?template=1&format=xlsx` to get headers/sample.
+  2. Fill data; `status`/`job_title` optional. `dob`/`doc`/`share_date` flexible via `DateParserField(fuzzy=True)`. CTCs via `safe_float`.
+  3. Upload under key `file`.
+  4. Parser: Excel-first (openpyxl.data_only=True for formulas), skips empty rows, normalizes headers, validates required.
+  5. Per-row (indexed from 2, `transaction.atomic()`): dedup `(email__iexact, org)`, job lookup (`title__iexact`), recruiter RBAC guard, create Candidate (or skip existing), create Application (first_stage or DEFAULT_STAGES fallback, `get_choice(status, ..., default=SCREENING)`).
+  6. Collects row errors (e.g. missing reqs, job not found, permission, create fail).
+  7. Logs summary (`log_action` with counts). Returns 201 (full) or **207** (partial success with errors list).
 
 - **Full Response** (201 or 207):
   ```json
@@ -505,35 +543,34 @@ See `candidates/views_export.py` (RBAC updated, Excel via `common/utils_csv.py:p
   ```
 
 > [!TIP]
-> Use **Export** to generate template (includes all fields from table + status/job_title). Excel preferred for import (full support). Pure pool imports omit job_title. Dedup prevents duplicate candidates. Recruiter RBAC enforced per-row. Errors row-indexed (starts at 2). Matches updated `CandidateImportView`, `parse_csv_from_request()`, `safe_float()`, `get_choice()`. See table for all optional fields/choices. For single AI-powered uploads use PublicUploadView or Parse-Resume.
+> Use **ExportFormatsView** (`/api/v1/export-formats/`) or `?template=1&format=xlsx` for exact headers/sample row. Excel preferred (full support, computed values via data_only=True). Pure pool: omit `job_title`. Dedup by `(email,org)`. Per-row RBAC for recruiters. Row errors start at 2. Matches `CandidateImportView` (uses `DateParserField`, `safe_float`, `_find_existing_candidate` helper), `common/utils_csv.py`, `common/serializers.py`. See field table for all optional fields/choices (e.g. `status` case-insensitive). For AI-powered single uploads use PublicUploadView or Parse-Resume.
 
-**Verification Note**: All sections now include full request/response bodies, required/optional markings, explicit choice values, step-by-step flows. Synced with code (views, models, serializers, utils, permissions, exception_handler). Docs are source of truth. Run `python manage.py check` to validate. Ready for API consumption.
+**Verification Note**: All sections now include full request/response bodies, required/optional markings, explicit choice values, step-by-step flows, duplicate management, updated RBAC (full pool for recruiters in Candidate flows), and aligned export QS. Synced with latest code (incl. mark/unmark-duplicate actions, _find_existing_candidate, hardened parser, unified CSV/Excel, user=None audit, custom_exception_handler). Docs are source of truth. Run `python manage.py check` and test endpoints to validate. Ready for frontend and API consumption.
 
 ## Pipeline Steps (Detailed)
-1. **Sourcing**: Use `CandidateViewSet` (pool), `ApplicationViewSet.create` (with `job_id`/`candidate_id`), `parse_resume` + upload-resume, or **PublicUploadView POST** (multipart to `/candidates/upload/{job_uuid}/`, `AllowAny`, `parse_resume_task` + form fallback, `log_action(user=None)`).
-2. **Talent Pool**: Pure Candidates (no Application) visible via `Q(applications__isnull=True)` in role-scoped querysets.
-3. **Linking/Application**: `POST /applications/` auto-assigns first stage from `Job.DEFAULT_STAGES`; uses writable `job_id`, `current_stage_id` in serializers.
-4. **Progression**: PATCH Application or `POST /applications/{pk}/move-stage/` (validates stage ownership to Job, updates `current_stage` FK; "Hired" syncs status).
-5. **Interview**: `POST /applications/{pk}/schedule-interview/` (creates OneToOne `InterviewSchedule`, sets status, method field in serializer).
-6. **Client**: `POST /applications/{pk}/send-to-client/` (hiring_for check, creates `ClientSubmission`, status update).
-7. **Calendar**: `GET /candidates/calendar/events/` aggregates from Application-linked schedules/submissions (role scoped).
-8. **Bulk Ops**: Export (`?status=...&job_id=...`, pool support with special status/job_title), Import (dedup by (email, org), 201/207 with row-indexed error array, auto first-stage, `safe_float`).
-9. **Notifications/Audit**: All paths (`perform_create`, actions, public, import/export) use `log_action` (user=None supported) + `simulate_resume_submission_notification` (Application-first fallback to Candidate for pool).
+1. **Sourcing**: Use `CandidateViewSet.create` (pool), `parse-resume` action (AI preview + anti-hallucination), `upload-resume` (attach file), **PublicUploadView** (`POST /api/v1/candidates/public-upload/?org_id=...` **required**, `AllowAny`, pure pool Candidate), or `ApplicationViewSet.create` (with `job_id` + `candidate_id`; auto first-stage). Uses hardened `parse_resume_task` (with duplicate guard), `log_action(user=None, organization=...)`.
+2. **Talent Pool**: Pure Candidates (`applications__isnull=True`) visible to all org roles (RECRUITER gets full pool + assigned).
+3. **Linking/Application**: `POST /applications/` (unique_together enforced, auto first-stage from `Job.DEFAULT_STAGES` or provided `current_stage_id`).
+4. **Progression**: Use dedicated `move-stage` action (validates stage-to-job ownership, updates `current_stage` FK; "Hired" auto-syncs status).
+5. **Interview**: `schedule-interview` (creates 1:1 `InterviewSchedule`, sets "interview-scheduled" status).
+6. **Client**: `send-to-client` (hiring_for check, creates 1:1 `ClientSubmission`).
+7. **Calendar**: Role-scoped aggregation from linked schedules/submissions.
+8. **Bulk**: Export (pool-aware with `status=POOL`/`job_title="Talent Pool"`, mirrors QS), Import (per-row atomic, dedup by (email,org), row errors from 2, 201/207, `DateParserField`/`safe_float`/`get_choice`).
+9. **Duplicate/Audit/Notifications**: Auto in parse/upload/import; manual mark/unmark actions; `log_action` + threaded notif (pool fallback via simulate_resume_submission_notification).
 
 ## Integration
-- **Jobs**: Provides `stages`, `DEFAULT_STAGES`, `resume_upload_link` (from `GET /jobs/{id}/upload-link/`), `assigned_recruiters` (for Q-filter + notifications). Application links via FKs. Public upload job-scoped for isolation.
-- **Accounts**: RBAC via `common.permissions` classes (`IsAuthenticated`, `IsAdmin`, `IsAdminOrManager` etc. used in `get_permissions()` + `get_queryset()` with role-based Q-filters), `BaseModel` soft-delete.
+- **Jobs**: Provides `stages`, `DEFAULT_STAGES`, `resume_upload_link` (points to global `/candidates/public-upload/?org_id=...`), `assigned_recruiters` (for Q-filter + notifications). Applications link Candidate ↔ Job (decoupled; no auto-create on public upload).
+- **Accounts**: RBAC via `common.permissions` (`IsAuthenticated`, `IsAdmin`, `IsAdminOrManager` in `get_permissions()` + Q-filtered `get_queryset()`), `BaseModel` soft-delete + org scoping.
 - **Clients**: `hiring_for=client` enables send-to-client flow.
-- **Serializers/Views**: `CandidateSerializer`, `ApplicationSerializer` (with `StageBriefSerializer`, `JobBriefSerializer`, method fields for `interview_schedule`/`client_submission`), `candidates/views.py`, `candidates/serializers.py`, `candidates/views_export.py`, `candidates/urls.py`.
-- **Utils**: Strict `parse_resume_ai` (anti-hallucination rules: JSON-only, explicit facts, error on failure), CSV with 207 partial, threaded notifications.
+- **Serializers/Views**: `Candidate*Serializer` (duplicate fields, method fields), `Application*Serializer` (write-only IDs, nested briefs, schedule/submission methods), views (with duplicate actions, public upload, calendar, export/import), `candidates/urls.py`.
+- **Utils**: Hardened `parse_resume_ai` (strict anti-hallucination prompt + safe defaults + duplicate guard), `extract_text`, `normalize_phone`, `_find_existing_candidate(org-scoped)`, unified CSV/Excel in `common/utils_csv.py`, `DateParserField`, `safe_float`, `get_choice`.
 
 **Notes**: 
-- **RBAC fully centralized**: `get_permissions()` on `CandidateViewSet`/`ApplicationViewSet` (mirrors `JobViewSet`) uses `IsAuthenticated`, `IsAdmin`, `IsAdminOrManager` from `common.permissions`; `get_queryset()` applies role-specific Q-filters (pool visibility for candidates, assigned_recruiters for recruiters).
-- **Error responses now fully documented** and improved via updated `custom_exception_handler` (handles 401 auth header issues like the reported "Authorization header must contain two space-delimited values", promotes view `{"error": "..."}` responses, populates `field_errors` for 400s). All examples updated to match.
-- Docs exhaustive: concrete JSON for *all* endpoints/actions (including export/import 207s), query params, permissions (`IsAuthenticated`, `IsAdmin`, `IsAdminOrManager`, `AllowAny`), RBAC Q-filters, validation (stage ownership, dedup by (email+org), safe_float, _get_choice for status, Decimal for ctc), parse anti-hallucination rules, Excel support contract.
-- Pipeline fully on `Application` (`current_stage` FK + dedicated `@action`s vs generic PATCH; auto first-stage from `Job.DEFAULT_STAGES` on create/import; "Hired" status sync).
-- Upload link treated as global frontend URL; backend `PublicUploadView` remains job_uuid-scoped for org isolation (`log_action(user=None, organization=...)`).
-- **CSV/Excel**: Export remains CSV-only (pool support with `status=POOL`); Import now supports Excel (`.xlsx`/`.xls` via openpyxl + CSV), uses 207 on partial failures with row-indexed errors (starts at 2), header normalization, dedup by (email, org). See `common/utils_csv.py`.
-- Consistent use of `StageBriefSerializer`/`JobBriefSerializer`, method fields, `BaseModel` soft-delete, threaded notifications.
-- All contracts verified 1:1 against live code in `candidates/views*.py` (now with `get_permissions`), `serializers.py`, `urls.py`, `views_export.py`, `common/utils_csv.py`, `common/permissions.py`, `common/exceptions.py`, `utils.py`, `config/settings.py` (JWT + custom handler + openpyxl in requirements). Ready for frontend integration/testing.
+- **RBAC fully hardened**: `get_permissions()` + role-specific Q-filters in `get_queryset()` (mirrors JobViewSet). CandidateViewSet/ExportView now uses `Q(applications__isnull=True) | Q(applications__job__assigned_recruiters=user).distinct()` for RECRUITER (full pool + assigned jobs only). Prevents leaks. ApplicationViewSet strict to assigned. PublicUpload **requires** `org_id`.
+- **Error contract** fully documented/normalized via `custom_exception_handler` (handles malformed auth headers like "Authorization header must contain two space-delimited values", promotes view `{"error": "..."}`, populates `field_errors`).
+- Docs exhaustive: full JSONs for all endpoints/actions (incl. duplicate mark/unmark, public-upload GET/POST with required org_id, export ?status=POOL, import 207s), RBAC/Q details, anti-hallucination rules, Excel/CSV contract, pipeline mermaid.
+- Decoupled design: Public upload = pure pool Candidate (`uploaded_by=None`, no auto-Application even with job). Recruiters link via Application.create (auto first-stage). "Hired" syncs status on Application.
+- Duplicate fully integrated (auto via `_find_existing_candidate(email/phone/org)` in parse/upload/import; manual @actions; serializer fields).
+- **CSV/Excel Unified** across modules: `?format=xlsx`/`?template=1`, openpyxl.data_only, per-row atomic, row errors (from 2), 201/207.
+- All synced: hardened parser (strict prompt, safe defaults), `user=None` audit, `DateParserField(fuzzy=True)`, `get_choice(default=SCREENING)`, `BaseModel`, threaded notifs (pool fallback). Verified 1:1 with code (`views*.py`, `utils.py`, serializers, models, common/*). `python manage.py check` clean. Docs = source of truth. Ready for frontend/prod.
 

@@ -4,12 +4,14 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError
 from django.db.models import Q
+from django.db import transaction
 from datetime import date
 from decimal import Decimal
 
 from candidates.models import Candidate, Application, CandidateStatus
-from jobs.models import Job
+from jobs.models import Job, Stage, DEFAULT_STAGES
 from common.utils_csv import generate_csv_response, parse_csv_from_request, get_choice
+from common.serializers import DateParserField
 from audit.utils import log_action
 from candidates.utils import safe_float
 from accounts.models import UserRole
@@ -29,79 +31,105 @@ CANDIDATE_IMPORT_REQUIRED = [
 
 class CandidateExportView(APIView):
     """
-    GET /api/v1/candidates/export/?status=screening&job_id=uuid
-    Download role-scoped candidates (incl. talent pool) as CSV.
-    All authenticated roles allowed (recruiters see assigned-jobs' candidates + pool).
-    Uses same Q-filter pattern as CandidateViewSet.get_queryset().
-    Optional filters (?status=, ?job_id=) apply to applications (excludes pure pool).
-    Logs the export count. See docs/candidates.md for full RBAC/CSV contract.
+    GET /api/v1/candidates/export/?status=screening&job_id=uuid&template=1
+    Download role-scoped candidates (incl. talent pool) as CSV. All authenticated roles allowed
+    (recruiters see full org pool per CandidateViewSet.get_queryset()). Uses exact same
+    role logic as CandidateViewSet. Optional filters (?status=, ?job_id=) apply to applications
+    (excludes pure pool if filtered). Supports ?template=1. Logs action. See docs/candidates.md.
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        user = request.user
-        qs = Candidate.objects.filter(
-            is_deleted=False, 
-            organization=user.organization
-        ).prefetch_related('applications__job')
+        """Supports ?template=1 (sample row, no DB hit), ?format=xlsx, ?status=, ?job_id=.
+        Uses exact same Q-filter/RBAC as CandidateViewSet.get_queryset() for pool+assigned.
+        Filters on status/job_id exclude pure pool candidates. Updated filename per format."""
+        is_template = request.query_params.get('template') in ('1', 'true', 'yes')
+        export_format = request.query_params.get('format', 'csv').lower()
+        if export_format not in ('csv', 'xlsx'):
+            export_format = 'csv'
 
-        if user.role == UserRole.ADMIN:
-            pass  # sees all org candidates + pool
-        elif user.role == UserRole.MANAGER:
-            qs = qs.filter(
-                Q(applications__job__created_by=user) | Q(applications__isnull=True)
-            ).distinct()
-        elif user.role == UserRole.RECRUITER:
-            qs = qs.filter(
-                Q(applications__job__assigned_recruiters=user) | Q(applications__isnull=True)
-            ).distinct()
-        # Note: Matches CandidateViewSet.get_queryset() exactly for RBAC
+        if is_template:
+            # Sample data for template - can be used for pool (job_title empty) or with job_title for application linking
+            rows = [[
+                'Rahul Sharma', 'Software Engineer', 'Tech Solutions Ltd', 'Senior Backend Dev',
+                '6 years', 'Bangalore', 'Bangalore, Remote',
+                'B.Tech in Computer Science', 'IIT Bombay', '+919876543210', 'rahul.sharma@email.com',
+                '1995-05-15', '2024-01-10', 1200000, 1800000, '30 days',
+                'SCREENING', '2024-01-10', 'Strong Python/Django background', 'Senior Python Developer'
+            ]]
+            ext = 'xlsx' if export_format == 'xlsx' else 'csv'
+            filename = f'candidates_import_template.{ext}'
+            log_msg = "Downloaded candidate import template"
+        else:
+            user = request.user
+            qs = Candidate.objects.filter(
+                is_deleted=False, 
+                organization=user.organization
+            ).prefetch_related('applications__job')
 
-        # Optional filters (these will exclude pool candidates)
-        status_filter = request.query_params.get('status')
-        job_id = request.query_params.get('job_id')
-        if status_filter:
-            qs = qs.filter(
-                applications__status=status_filter,
-                applications__is_deleted=False
-            )
-        if job_id:
-            qs = qs.filter(applications__job_id=job_id)
+            if user.role == UserRole.ADMIN:
+                pass  # full org
+            elif user.role == UserRole.MANAGER:
+                qs = qs.filter(
+                    Q(applications__job__created_by=user) | Q(applications__isnull=True)
+                ).distinct()
+            elif user.role == UserRole.RECRUITER:
+                # Recruiters see full org talent pool + candidates from their assigned jobs
+                # (consistent with updated CandidateViewSet.get_queryset())
+                qs = qs.filter(
+                    Q(applications__isnull=True) |
+                    Q(applications__job__assigned_recruiters=user)
+                ).distinct()
+            # Note: Exactly matches CandidateViewSet.get_queryset() RBAC for pool + assigned jobs
 
-        rows = []
-        for c in qs:
-            # Use cached prefetched applications, ignore soft-deleted (pool candidates have none)
-            apps = [a for a in c.applications.all() if not getattr(a, 'is_deleted', False)]
-            app = apps[0] if apps else None
-            status = getattr(app, 'status', 'POOL')
-            share_date = getattr(app, 'share_date', '')
-            feedback = getattr(app, 'feedback', '')
-            job_title = getattr(app, 'job', None).title if app and getattr(app, 'job', None) else 'Talent Pool'
+            # Optional filters (these will exclude pool candidates)
+            status_filter = request.query_params.get('status')
+            job_id = request.query_params.get('job_id')
+            if status_filter:
+                qs = qs.filter(
+                    applications__status=status_filter,
+                    applications__is_deleted=False
+                )
+            if job_id:
+                qs = qs.filter(applications__job_id=job_id)
 
-            rows.append([
-                c.candidate_name, c.profile_name, c.current_company, c.current_profile,
-                c.experience, c.current_location, c.preferred_location or '',
-                c.education, c.college or '', c.contact, c.email,
-                c.dob, c.doc,
-                c.current_ctc, c.expected_ctc, c.notice_period,
-                status, share_date, feedback,
-                job_title,
-            ])
+            rows = []
+            for c in qs:
+                # Use cached prefetched applications, ignore soft-deleted (pool candidates have none)
+                apps = [a for a in c.applications.all() if not getattr(a, 'is_deleted', False)]
+                app = apps[0] if apps else None
+                status = getattr(app, 'status', 'POOL')
+                share_date = getattr(app, 'share_date', '')
+                feedback = getattr(app, 'feedback', '')
+                job_title = getattr(app, 'job', None).title if app and getattr(app, 'job', None) else 'Talent Pool'
 
-        log_action(user, 'exported', 'Candidate', None, f"Exported {len(rows)} candidates (incl. pool)")
-        return generate_csv_response('candidates_export.csv', CANDIDATE_EXPORT_HEADERS, rows)
+                rows.append([
+                    c.candidate_name, c.profile_name, c.current_company, c.current_profile,
+                    c.experience, c.current_location, c.preferred_location or '',
+                    c.education, c.college or '', c.contact, c.email,
+                    c.dob, c.doc,
+                    float(c.current_ctc or 0), float(c.expected_ctc or 0), c.notice_period,
+                    status, share_date, feedback,
+                    job_title,
+                ])
+            ext = 'xlsx' if export_format == 'xlsx' else 'csv'
+            filename = f'candidates_export.{ext}'
+            log_msg = f"Exported {len(rows)} candidates (incl. pool)"
+
+        log_action(request.user, 'exported', 'Candidate', None, log_msg)
+        return generate_csv_response(filename, CANDIDATE_EXPORT_HEADERS, rows, export_format=export_format)
 
 
 class CandidateImportView(APIView):
     """
     POST /api/v1/candidates/import/
-    Upload CSV or Excel (.xlsx, .xls) for bulk create of candidates (pool or job-linked).
-    All authenticated roles allowed (recruiters can import to pool or jobs they are assigned to via M2M check).
-    Required: candidate_name, email, contact (validated by parser against normalized headers).
-    job_title optional (iexact); creates Application with first_stage from Job.DEFAULT_STAGES equiv + status.
-    Uses safe_float (coerced to Decimal for model), get_choice for status, dedup by (email+org), row-indexed errors (start=2).
-    Response: 201 full or 207 partial. Logs summary with counts. Recruiter job guard retained.
-    See docs/candidates.md for full contract (incl. normalized headers, _get_choice notes).
+    Upload CSV or Excel (.xlsx/.xls) for bulk create of candidates (pool or job-linked).
+    All authenticated roles allowed (recruiters can import to pool or jobs they are assigned to via M2M).
+    Required: candidate_name, email, contact (parser validates normalized headers).
+    job_title optional (iexact lookup); creates Application linked to first_stage + status (get_choice).
+    Uses DateParserField for dob/doc/share_date (flexible formats), safe_float->Decimal for CTCs,
+    dedup by (email+org), recruiter RBAC guard. Transaction per record. Row errors indexed from 2.
+    Response: 201 full success or 207 partial with errors list. Logs summary. See docs/candidates.md.
     """
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
@@ -116,6 +144,7 @@ class CandidateImportView(APIView):
         created_applications = 0
         skipped = 0
         errors = []
+        date_parser = DateParserField()
 
         for i, row in enumerate(rows, start=2):  # row 1 = header; works for Excel too
             name = row.get('candidate_name', '').strip()
@@ -152,28 +181,46 @@ class CandidateImportView(APIView):
             ).first()
             if not candidate:
                 try:
-                    candidate = Candidate.objects.create(
-                        candidate_name=name,
-                        profile_name=row.get('profile_name', name).strip(),
-                        current_profile=row.get('current_profile', 'Not provided'),
-                        current_company=row.get('current_company', 'Not provided'),
-                        experience=row.get('experience', '0 years'),
-                        current_location=row.get('current_location', 'Not specified'),
-                        preferred_location=row.get('preferred_location', ''),
-                        education=row.get('education', ''),
-                        college=row.get('college', ''),
-                        contact=contact,
-                        email=email,
-                        dob=row.get('dob') or None,
-                        doc=row.get('doc') or None,
-                        current_ctc=Decimal(safe_float(row.get('current_ctc')) or 0),
-                        expected_ctc=Decimal(safe_float(row.get('expected_ctc')) or 0),
-                        notice_period=row.get('notice_period', 'Not specified'),
-                        reason_for_change=row.get('reason_for_change', 'Imported via file'),
-                        resume_file_name=row.get('resume_file_name', ''),
-                        uploaded_by=user,
-                        organization=user.organization,
-                    )
+                    # Flexible date parsing for dob/doc
+                    dob = None
+                    dob_raw = row.get('dob')
+                    if dob_raw and str(dob_raw).strip() not in ('', 'None', 'null'):
+                        try:
+                            dob = date_parser.to_internal_value(str(dob_raw).strip())
+                        except Exception:
+                            dob = None
+
+                    doc = None
+                    doc_raw = row.get('doc')
+                    if doc_raw and str(doc_raw).strip() not in ('', 'None', 'null'):
+                        try:
+                            doc = date_parser.to_internal_value(str(doc_raw).strip())
+                        except Exception:
+                            doc = None
+
+                    with transaction.atomic():
+                        candidate = Candidate.objects.create(
+                            candidate_name=name,
+                            profile_name=row.get('profile_name', name).strip(),
+                            current_profile=row.get('current_profile', 'Not provided'),
+                            current_company=row.get('current_company', 'Not provided'),
+                            experience=row.get('experience', '0 years'),
+                            current_location=row.get('current_location', 'Not specified'),
+                            preferred_location=row.get('preferred_location', ''),
+                            education=row.get('education', ''),
+                            college=row.get('college', ''),
+                            contact=contact,
+                            email=email,
+                            dob=dob,
+                            doc=doc,
+                            current_ctc=Decimal(safe_float(row.get('current_ctc')) or 0),
+                            expected_ctc=Decimal(safe_float(row.get('expected_ctc')) or 0),
+                            notice_period=row.get('notice_period', 'Not specified'),
+                            reason_for_change=row.get('reason_for_change', 'Imported via file'),
+                            resume_file_name=row.get('resume_file_name', ''),
+                            uploaded_by=user,
+                            organization=user.organization,
+                        )
                     created_candidates += 1
                 except Exception as e:
                     errors.append({"row": i, "error": f"Create candidate failed: {str(e)}"})
@@ -197,20 +244,44 @@ class CandidateImportView(APIView):
 
                 try:
                     first_stage = job.stages.filter(is_deleted=False).order_by('order').first()
+                    if not first_stage:
+                        # Fallback: create default stages if missing (consistent with JobImportView)
+                        for stage_data in DEFAULT_STAGES:
+                            Stage.objects.create(
+                                job=job,
+                                created_by=user,
+                                organization=user.organization,
+                                **stage_data
+                            )
+                        first_stage = job.stages.filter(is_deleted=False).order_by('order').first()
+
                     status_val = get_choice(
                         row.get('status'),
                         CandidateStatus.choices,
                         CandidateStatus.SCREENING.value
                     )
-                    Application.objects.create(
-                        candidate=candidate,
-                        job=job,
-                        current_stage=first_stage,
-                        status=status_val,
-                        feedback=row.get('feedback', ''),
-                        share_date=row.get('share_date') or date.today(),
-                        organization=user.organization,
-                    )
+
+                    # Flexible parsing for share_date
+                    share_date = date.today()
+                    share_raw = row.get('share_date')
+                    if share_raw and str(share_raw).strip() not in ('', 'None', 'null'):
+                        try:
+                            parsed = date_parser.to_internal_value(str(share_raw).strip())
+                            if parsed:
+                                share_date = parsed
+                        except Exception:
+                            pass  # fallback to today
+
+                    with transaction.atomic():
+                        Application.objects.create(
+                            candidate=candidate,
+                            job=job,
+                            current_stage=first_stage,
+                            status=status_val,
+                            feedback=row.get('feedback', ''),
+                            share_date=share_date,
+                            organization=user.organization,
+                        )
                     created_applications += 1
                 except Exception as e:
                     errors.append({"row": i, "error": f"Create application failed: {str(e)}"})

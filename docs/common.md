@@ -54,11 +54,12 @@ class BaseModel(models.Model):
 All models (Client, Job, Candidate, Application, InterviewSchedule, ClientSubmission, POC, ClientDocument, Stage, AuditLog, Notification, etc.) inherit from `BaseModel`. This provides `organization` scoping, timestamps, and soft-delete (`is_deleted`, `deleted_at`) support. `perform_destroy` in ViewSets typically sets `is_deleted=True` + `deleted_at` instead of hard delete. Querysets use `is_deleted=False` + org filter (often with Q() for pool visibility).
 
 ### 3. Utilities
-- `audit.utils.log_action(user=None, action, target_type, target_id, description, organization=None)` — supports `user=None` for public uploads (defaults user_name='System')
-- `candidates.utils.parse_resume_ai()` — strict anti-hallucination prompt for Azure OpenAI resume parsing (JSON-only, explicit fields only, no fabrication)
-- CSV helpers (`generate_csv_response`, `parse_csv_from_request`)
-- Notification helpers (threaded)
-- Permission mixins
+- `audit.utils.log_action(user=None, action, target_type, target_id, description, organization=None)` — supports `user=None` for public uploads/TalentPoolPublicUploadView (defaults user_name='System', explicit org)
+- `candidates.utils` (`parse_resume_ai()` with strict anti-hallucination JSON-only prompt + safe defaults, `safe_float()`, `_find_existing_candidate()` for dedup)
+- **Unified CSV/Excel** (`utils_csv.py`): `generate_csv_response(filename, headers, rows, export_format='csv')` — supports ?format=xlsx via openpyxl.Workbook (cleans None/bool/date, sets correct content-type/filename); `parse_csv_from_request(request, required_fields=None)` — Excel-first with `openpyxl.load_workbook(..., data_only=True)`, header `normalize_header()` (regex to snake_case), DictReader for CSV (utf-8-sig), row skipping, required validation; `get_choice(val, choices, default)` (case-insens match on value or display label)
+- `common/serializers.py`: `DateParserField` (uses `dateutil.parser.parse(fuzzy=True)` + explicit format fallbacks, helpful ValidationError msgs for imports)
+- Notification helpers (threaded via `@run_in_thread`)
+- `common.permissions`, `custom_exception_handler` (normalized { "error", "detail", "field_errors" } contract used by all views for consistent 4xx/5xx)
 
 ## Role-Based + Multi-Tenant Access Control Flow
 1. User logs in with role (from accounts.UserRole) + `organization` context
