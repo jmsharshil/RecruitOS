@@ -214,8 +214,33 @@ def parse_resume_ai(file_input):
         if temp_path:
             try:
                 os.remove(temp_path)
-            except:
+            except Exception:
                 pass
+
+
+def _find_existing_candidate(email: str, phone: str, organization=None):
+    """
+    Return the first matching Candidate by email or normalized phone within the org,
+    or None if no duplicate found.
+    """
+    qs = Candidate.objects.filter(is_deleted=False)
+    if organization is not None:
+        qs = qs.filter(organization=organization)
+
+    # Check email first (most reliable)
+    if email:
+        match = qs.filter(email__iexact=email).first()
+        if match:
+            return match
+
+    # Check by normalized phone
+    normalized = normalize_phone(phone) if phone else None
+    if normalized and len(normalized) >= 10:
+        match = qs.filter(contact=normalized).first()
+        if match:
+            return match
+
+    return None
 
 
 def parse_resume_task(resume_file, organization=None):
@@ -311,13 +336,14 @@ def parse_resume_task(resume_file, organization=None):
         "portfolio_url": parsed.get("portfolio_url") or "",
     }
 
-    # Duplicate check by email (org-scoped when organization provided for accuracy)
-    if email:
-        qs = Candidate.objects.filter(email=email, is_deleted=False)
-        if organization is not None:
-            qs = qs.filter(organization=organization)
-        if qs.exists():
-            data["duplicate"] = True
-            data["message"] = f"A candidate with email {email} already exists in the talent pool."
+    # --- Duplicate detection (email + phone, org-scoped) ---
+    existing = _find_existing_candidate(email=email, phone=phone or '', organization=organization)
+    if existing:
+        data["duplicate"] = True
+        data["existing_candidate_id"] = str(existing.id)
+        data["message"] = (
+            f"A candidate with {'email ' + email if existing.email == email else 'phone ' + (phone or '')}"
+            f" already exists in the talent pool."
+        )
 
     return data

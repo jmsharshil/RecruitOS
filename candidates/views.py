@@ -4,10 +4,21 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.exceptions import ValidationError, NotFound
+from rest_framework.filters import SearchFilter, OrderingFilter
+from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 from django.db.models import Q
-from candidates.models import Candidate, Application, CandidateStatus, ClientSubmission, SubmissionStatus, InterviewSchedule
-from candidates.serializers import CandidateSerializer, ApplicationSerializer, InterviewScheduleSerializer, ClientSubmissionSerializer
+
+from candidates.models import (
+    Candidate, Application, CandidateStatus,
+    ClientSubmission, SubmissionStatus, InterviewSchedule,
+)
+from candidates.serializers import (
+    CandidateListSerializer, CandidateDetailSerializer,
+    ApplicationListSerializer, ApplicationDetailSerializer,
+    InterviewScheduleSerializer, ClientSubmissionSerializer,
+)
+from candidates.filters import CandidateFilterSet, ApplicationFilterSet
 from jobs.models import Job, Stage
 from accounts.models import UserRole
 from audit.utils import log_action
@@ -15,14 +26,25 @@ from candidates.tasks import simulate_client_submission_email, simulate_resume_s
 from common.permissions import IsAdminOrManager, IsAdmin
 
 class CandidateViewSet(viewsets.ModelViewSet):
-    serializer_class = CandidateSerializer
+    filter_backends  = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class  = CandidateFilterSet
+    search_fields    = ['candidate_name', 'email', 'contact', 'current_profile', 'current_company', 'current_location']
+    ordering_fields  = ['candidate_name', 'created_at', 'current_ctc', 'expected_ctc', 'experience']
+    ordering         = ['-created_at']
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return CandidateListSerializer
+        return CandidateDetailSerializer
 
     def get_permissions(self):
-        """RBAC via common.permissions + role-scoped QS.
+        """
+        RBAC via common.permissions + role-scoped QS.
         Recruiters can list/create/parse/upload for pool + assigned.
         Destroy restricted to admin.
         """
-        if self.action in ['list', 'retrieve', 'create', 'update', 'parse_resume', 'upload_resume']:
+        if self.action in ['list', 'retrieve', 'create', 'update', 'partial_update',
+                           'parse_resume', 'upload_resume', 'mark_duplicate', 'unmark_duplicate']:
             return [permissions.IsAuthenticated()]
         if self.action == 'destroy':
             return [IsAdmin()]
@@ -31,7 +53,7 @@ class CandidateViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = Candidate.objects.filter(
-            is_deleted=False, 
+            is_deleted=False,
             organization=user.organization
         )
         if user.role == UserRole.ADMIN:
@@ -41,14 +63,13 @@ class CandidateViewSet(viewsets.ModelViewSet):
                 Q(applications__job__created_by=user) | Q(applications__isnull=True)
             ).distinct()
         elif user.role == UserRole.RECRUITER:
-            return qs.filter(
-                Q(applications__job__assigned_recruiters=user) | Q(applications__isnull=True)
-            ).distinct()
+            # Recruiters see ALL org candidates in the pool (not scoped to job)
+            return qs
         return qs.none()
 
     def perform_create(self, serializer):
         candidate = serializer.save(
-            uploaded_by=self.request.user, 
+            uploaded_by=self.request.user,
             organization=self.request.user.organization
         )
         log_action(self.request.user, 'created', 'Candidate', candidate.id, f"Created candidate '{candidate.candidate_name}'")
@@ -64,7 +85,6 @@ class CandidateViewSet(viewsets.ModelViewSet):
         instance.deleted_at = timezone.now()
         instance.save()
         log_action(self.request.user, 'deleted', 'Candidate', instance.id, f"Deleted candidate '{instance.candidate_name}'")
-
 
     @action(detail=True, methods=['post'], url_path='upload-resume', parser_classes=[MultiPartParser, FormParser])
     def upload_resume(self, request, pk=None):
@@ -84,24 +104,83 @@ class CandidateViewSet(viewsets.ModelViewSet):
             from .utils import parse_resume_task
             # Pass organization for scoped duplicate detection in shared talent pool
             parsed_data = parse_resume_task(
-                request.FILES['resume'], 
+                request.FILES['resume'],
                 organization=request.user.organization
             )
             if isinstance(parsed_data, dict) and "error" in parsed_data:
                 raise ValidationError(parsed_data)
             return Response(parsed_data)
+        except ValidationError:
+            raise
         except Exception as e:
             raise ValidationError({"error": f"Parse failed: {str(e)}"})
 
+    @action(detail=True, methods=['post'], url_path='mark-duplicate')
+    def mark_duplicate(self, request, pk=None):
+        """
+        Mark this candidate as a duplicate of another.
+        POST body: { "duplicate_of": "<candidate_uuid>" }
+        """
+        candidate = self.get_object()
+        dup_of_id = request.data.get('duplicate_of')
+        if not dup_of_id:
+            raise ValidationError({"error": "'duplicate_of' candidate ID is required."})
+        try:
+            canonical = Candidate.objects.get(
+                id=dup_of_id,
+                organization=request.user.organization,
+                is_deleted=False
+            )
+        except Candidate.DoesNotExist:
+            raise ValidationError({"error": "Canonical candidate not found."})
+        if canonical.pk == candidate.pk:
+            raise ValidationError({"error": "A candidate cannot be a duplicate of itself."})
+
+        candidate.is_duplicate = True
+        candidate.duplicate_of = canonical
+        candidate.save(update_fields=['is_duplicate', 'duplicate_of', 'updated_at'])
+        log_action(
+            request.user, 'updated', 'Candidate', candidate.id,
+            f"Marked '{candidate.candidate_name}' as duplicate of '{canonical.candidate_name}'"
+        )
+        return Response({
+            "message": f"Candidate marked as duplicate of '{canonical.candidate_name}'.",
+            "candidate": CandidateDetailSerializer(candidate).data,
+        })
+
+    @action(detail=True, methods=['post'], url_path='unmark-duplicate')
+    def unmark_duplicate(self, request, pk=None):
+        """Remove the duplicate flag from this candidate."""
+        candidate = self.get_object()
+        candidate.is_duplicate = False
+        candidate.duplicate_of = None
+        candidate.save(update_fields=['is_duplicate', 'duplicate_of', 'updated_at'])
+        log_action(
+            request.user, 'updated', 'Candidate', candidate.id,
+            f"Removed duplicate flag from '{candidate.candidate_name}'"
+        )
+        return Response({"message": "Duplicate flag removed.", "candidate": CandidateDetailSerializer(candidate).data})
+
 
 class ApplicationViewSet(viewsets.ModelViewSet):
-    serializer_class = ApplicationSerializer
+    filter_backends  = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class  = ApplicationFilterSet
+    search_fields    = ['candidate__candidate_name', 'candidate__email', 'job__title']
+    ordering_fields  = ['created_at', 'share_date', 'status']
+    ordering         = ['-created_at']
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return ApplicationListSerializer
+        return ApplicationDetailSerializer
 
     def get_permissions(self):
-        """RBAC via common.permissions. All roles (incl. recruiters) can manage their assigned applications.
+        """
+        RBAC via common.permissions. All roles (incl. recruiters) can manage their assigned applications.
         Destroy restricted to admin. Uses IsAdminOrManager for safety on bulk-like actions.
         """
-        if self.action in ['list', 'retrieve', 'create', 'update', 'move_stage', 'schedule_interview', 'send_to_client']:
+        if self.action in ['list', 'retrieve', 'create', 'update', 'partial_update',
+                           'move_stage', 'schedule_interview', 'send_to_client']:
             return [permissions.IsAuthenticated()]
         if self.action == 'destroy':
             return [IsAdmin()]
@@ -121,10 +200,10 @@ class ApplicationViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         application = serializer.save(organization=self.request.user.organization)
         log_action(
-            self.request.user, 
-            'created', 
-            'Application', 
-            application.id, 
+            self.request.user,
+            'created',
+            'Application',
+            application.id,
             f"Assigned candidate '{application.candidate.candidate_name}' to job '{application.job.title}'"
         )
         if not application.current_stage:
@@ -156,7 +235,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 application.status = CandidateStatus.HIRED.value
             application.save()
             log_action(request.user, 'updated', 'Application', application.id, f"Stage moved to {stage.name}")
-            return Response(ApplicationSerializer(application).data)
+            return Response(ApplicationDetailSerializer(application).data)
         except Stage.DoesNotExist:
             raise ValidationError({"error": "Invalid stage for this job", "detail": "Stage not found for this job"})
 
@@ -167,7 +246,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             raise ValidationError({"error": "Job is not hiring for a client"})
         if hasattr(application, 'client_submission'):
             raise ValidationError({"error": "Submission already exists"})
-            
+
         submission = ClientSubmission.objects.create(
             application=application,
             sent_by=request.user,
@@ -177,11 +256,11 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         application.status = CandidateStatus.SENT_TO_CLIENT.value
         application.save()
         log_action(request.user, 'sent', 'Application', application.id, f"Sent {application.candidate.candidate_name} to client")
-        
+
         if application.job.client and application.job.client.email:
             simulate_client_submission_email(application.id, application.job.client.email)
-            
-        return Response(ApplicationSerializer(application).data)
+
+        return Response(ApplicationDetailSerializer(application).data)
 
     @action(detail=True, methods=['post'], url_path='schedule-interview')
     def schedule_interview(self, request, pk=None):
@@ -198,167 +277,169 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             return Response(InterviewScheduleSerializer(schedule).data, status=201)
         return Response(serializer.errors, status=400)
 
+
 class CalendarEventsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         start_date = request.query_params.get('start_date')
-        end_date = request.query_params.get('end_date')
-        
+        end_date   = request.query_params.get('end_date')
+
         if not start_date or not end_date:
             raise ValidationError({"error": "start_date and end_date are required"})
-            
+
         user = request.user
-        
+
         interviews_qs = InterviewSchedule.objects.filter(
             is_deleted=False,
-            date__gte=start_date, 
-            date__lte=end_date, 
+            date__gte=start_date,
+            date__lte=end_date,
             application__is_deleted=False,
-            application__candidate__is_deleted=False, 
+            application__candidate__is_deleted=False,
             organization=user.organization
         )
         applications_qs = Application.objects.filter(
-            share_date__gte=start_date, 
-            share_date__lte=end_date, 
-            is_deleted=False, 
+            share_date__gte=start_date,
+            share_date__lte=end_date,
+            is_deleted=False,
             organization=user.organization
         )
-        
+
         if user.role == UserRole.MANAGER:
-            interviews_qs = interviews_qs.filter(application__job__created_by=user)
+            interviews_qs   = interviews_qs.filter(application__job__created_by=user)
             applications_qs = applications_qs.filter(job__created_by=user)
         elif user.role == UserRole.RECRUITER:
-            interviews_qs = interviews_qs.filter(application__job__assigned_recruiters=user)
+            interviews_qs   = interviews_qs.filter(application__job__assigned_recruiters=user)
             applications_qs = applications_qs.filter(job__assigned_recruiters=user)
-            
+
         events_by_date = {}
-        
+
         for interview in interviews_qs:
             date_str = interview.date.isoformat()
-            if date_str not in events_by_date:
-                events_by_date[date_str] = []
-            events_by_date[date_str].append({
+            events_by_date.setdefault(date_str, []).append({
                 "type": "interview",
                 "candidate_name": interview.application.candidate.candidate_name,
                 "job_title": interview.application.job.title,
                 "time": str(interview.time),
                 "mode": interview.mode
             })
-            
+
         for application in applications_qs:
             if application.share_date:
                 date_str = application.share_date.isoformat()
-                if date_str not in events_by_date:
-                    events_by_date[date_str] = []
-                events_by_date[date_str].append({
+                events_by_date.setdefault(date_str, []).append({
                     "type": "share_date",
                     "candidate_name": application.candidate.candidate_name,
                     "job_title": application.job.title
                 })
-                
+
         response_data = [{"date": k, "events": v} for k, v in events_by_date.items()]
         return Response(response_data)
 
-class PublicUploadView(APIView):
+
+class TalentPoolPublicUploadView(APIView):
+    """
+    Public endpoint for candidates to submit their resume to the talent pool.
+    No longer tied to a specific job — candidates enter the shared pool and
+    recruiters can apply them to relevant jobs via the Application model.
+
+    GET  /api/v1/candidates/public-upload/  — returns org info (if token provided, optional)
+    POST /api/v1/candidates/public-upload/  — submit resume to pool
+    """
     permission_classes = [permissions.AllowAny]
-    parser_classes = [MultiPartParser, FormParser]
+    parser_classes     = [MultiPartParser, FormParser]
 
-    def get(self, request, job_id):
-        try:
-            job = Job.objects.get(id=job_id, is_deleted=False)
-            return Response({
-                "job_id": str(job.id),
-                "title": job.title,
-                "description": job.description,
-                "company_name": job.client.company_name if job.client else "Self"
-            })
-        except Job.DoesNotExist:
-            raise NotFound({"error": "Job not found"})
-
-    def post(self, request, job_id):
-        try:
-            job = Job.objects.get(id=job_id, is_deleted=False)
-        except Job.DoesNotExist:
-            raise NotFound({"error": "Job not found"})
-            
-        name = request.data.get('name')
-        email = request.data.get('email')
-        phone = request.data.get('phone')
+    def post(self, request):
+        name   = request.data.get('name')
+        email  = request.data.get('email')
+        phone  = request.data.get('phone')
         resume = request.FILES.get('resume')
-        
+
         if not all([name, email, phone, resume]):
             raise ValidationError({"error": "All fields (name, email, phone, resume) are required"})
-            
+
+        # Determine organization from org_id query param or token header (optional)
+        org_id = request.query_params.get('org_id') or request.data.get('org_id')
+        organization = None
+        if org_id:
+            from accounts.models import Organization
+            try:
+                organization = Organization.objects.get(id=org_id)
+            except Organization.DoesNotExist:
+                raise ValidationError({"error": "Organization not found"})
+
         # Use AI parsing for better data extraction if possible (fallback to form values)
         try:
             from .utils import parse_resume_task
-            parsed = parse_resume_task(resume, organization=job.organization)
+            parsed = parse_resume_task(resume, organization=organization)
             if "error" not in parsed and not parsed.get("duplicate", False):
-                name = parsed.get("candidate_name", name) or name
-                email = parsed.get("email", email) or email
-                phone = parsed.get("contact", phone) or phone
-                current_profile = parsed.get("current_profile", "Not provided")
-                current_company = parsed.get("current_company", "Not provided")
-                experience = parsed.get("experience", "0 years")
+                name             = parsed.get("candidate_name", name) or name
+                email            = parsed.get("email", email) or email
+                phone            = parsed.get("contact", phone) or phone
+                current_profile  = parsed.get("current_profile", "Not provided")
+                current_company  = parsed.get("current_company", "Not provided")
+                experience       = parsed.get("experience", "0 years")
                 current_location = parsed.get("current_location", "Not specified")
-                education = parsed.get("education", "")
-                current_ctc = parsed.get("current_ctc", 0)
-                expected_ctc = parsed.get("expected_ctc", 0)
+                education        = parsed.get("education", "")
+                current_ctc      = parsed.get("current_ctc", 0)
+                expected_ctc     = parsed.get("expected_ctc", 0)
+                skills           = parsed.get("skills", [])
+            elif parsed.get("duplicate", False):
+                return Response({
+                    "message": "A candidate with this profile already exists in our talent pool.",
+                    "duplicate": True,
+                    "existing_candidate_id": parsed.get("existing_candidate_id"),
+                }, status=200)
             else:
-                current_profile = "Not provided"
-                current_company = "Not provided"
-                experience = "0 years"
+                current_profile  = "Not provided"
+                current_company  = "Not provided"
+                experience       = "0 years"
                 current_location = "Not specified"
-                education = ""
-                current_ctc = 0
-                expected_ctc = 0
+                education        = ""
+                current_ctc      = 0
+                expected_ctc     = 0
+                skills           = []
         except Exception:
-            current_profile = "Not provided"
-            current_company = "Not provided"
-            experience = "0 years"
+            current_profile  = "Not provided"
+            current_company  = "Not provided"
+            experience       = "0 years"
             current_location = "Not specified"
-            education = ""
-            current_ctc = 0
-            expected_ctc = 0
+            education        = ""
+            current_ctc      = 0
+            expected_ctc     = 0
+            skills           = []
+
+        # Rewind file pointer after parse_resume_task read it
+        try:
+            resume.seek(0)
+        except Exception:
+            pass
 
         candidate = Candidate.objects.create(
-            candidate_name=name,
-            profile_name=name,
-            current_profile=current_profile,
-            current_company=current_company,
-            experience=experience,
-            current_location=current_location,
-            education=education,
-            contact=phone,
-            email=email,
-            current_ctc=current_ctc,
-            expected_ctc=expected_ctc,
-            notice_period="Not specified",
-            resume=resume,
-            resume_file_name=resume.name,
-            organization=job.organization,
-            uploaded_by=None
+            candidate_name   = name,
+            profile_name     = name,
+            current_profile  = current_profile,
+            current_company  = current_company,
+            experience       = experience,
+            current_location = current_location,
+            education        = education,
+            contact          = phone,
+            email            = email,
+            current_ctc      = current_ctc,
+            expected_ctc     = expected_ctc,
+            notice_period    = "Not specified",
+            skills           = skills,
+            resume           = resume,
+            resume_file_name = resume.name,
+            organization     = organization,
+            uploaded_by      = None
         )
-        
-        first_stage = job.stages.filter(is_deleted=False).order_by('order').first()
-        
-        application = Application.objects.create(
-            candidate=candidate,
-            job=job,
-            status=CandidateStatus.SCREENING.value,
-            current_stage=first_stage,
-            organization=job.organization
-        )
-        
+
         log_action(
-            None,
-            'created',
-            'Candidate',
-            candidate.id,
-            f"Public resume upload for job '{job.title}' by {name}",
-            organization=job.organization
+            None, 'created', 'Candidate', candidate.id,
+            f"Public talent pool upload by {name}",
+            organization=organization
         )
-        simulate_resume_submission_notification(application.id)
-        
-        return Response({"message": "Resume submitted successfully! We'll be in touch."})
+        simulate_resume_submission_notification(candidate.id)
+
+        return Response({"message": "Resume submitted successfully! We'll be in touch."}, status=201)

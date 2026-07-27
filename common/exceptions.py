@@ -22,17 +22,16 @@ def custom_exception_handler(exc, context):
         if not detail:
             detail = 'An error occurred.'
 
-        # Determine top-level error type based on status or exception
-        if isinstance(exc, (AuthenticationFailed, NotAuthenticated)) or response.status_code == 401:
+        # Determine top-level error type based on status code or exception type
+        # This ensures consistent error shapes across all endpoints (see docs/*.md)
+        status_code = getattr(response, 'status_code', 500)
+        if isinstance(exc, (AuthenticationFailed, NotAuthenticated)) or status_code == 401:
             error_type = "Authentication failed"
-            status_code = 401
-        elif isinstance(exc, PermissionDenied) or response.status_code == 403:
+        elif isinstance(exc, PermissionDenied) or status_code == 403:
             error_type = "Permission denied"
-            status_code = 403
-        elif response.status_code == 400:
+        elif status_code == 400:
             error_type = "Validation failed"
-            status_code = 400
-        elif response.status_code >= 500:
+        elif status_code >= 500:
             error_type = "Server error"
         else:
             error_type = detail if isinstance(detail, str) and len(detail) < 100 else "Error"
@@ -44,7 +43,7 @@ def custom_exception_handler(exc, context):
         }
         
         # For validation errors, extract field-specific errors (matches docs for 400s)
-        if response.status_code == 400 and isinstance(data, dict):
+        if status_code == 400 and isinstance(data, dict):
             for key, value in data.items():
                 if key not in ('detail', 'error'):
                     custom_response["field_errors"][key] = (

@@ -159,7 +159,29 @@ flowchart TD
 - All actions logged to Audit module.
 - **Multi-tenancy enforced**: Querysets filtered by `request.user.organization`; middleware ensures org context.
 
+## Email Configuration (OrganizationEmailConfig + EmailTemplate)
+Per-tenant email sending with branding support. 
+
+- **OrganizationEmailConfig** (OneToOne to Organization): Stores SMTP host/port/username/encrypted-password, from_email, use_tls etc. 
+  - Use `set_smtp_password(raw_pw)` to encrypt via Fernet (key from `EMAIL_ENCRYPTION_KEY` in settings/.env).
+  - `is_active=False` or missing creds → fallback.
+- **EmailTemplate** (per-org, per-template_key): Allows custom logo, colors, footer, or full custom_html override for templates like `set_pin`, `interview_reminder`, `client_submission`.
+
+**send_org_email(organization, subject, template_name, context, recipient_list)** in `accounts/email_utils.py`:
+- Injects `get_org_branding()` (colors/logo from template or defaults).
+- Renders `templates/emails/{template_name}.html` (or custom_html).
+- Uses `get_org_email_connection()`: if org has valid active config → custom SMTPBackend; **else falls back to Django settings.py EMAIL_* values** (console backend when `DEBUG=True`).
+- `get_org_from_email()` prefers org.from_email else `DEFAULT_FROM_EMAIL`.
+- Logs success/errors; raises on send failure.
+- Updated tasks/views (notifications, candidates) now call this for org-aware emails.
+
+**Setup**:
+- Add EMAIL_ENCRYPTION_KEY to `.env` (see settings.py comment for generation).
+- Admin can configure via Django admin or future API.
+- Templates live in `templates/emails/` (base_email.html + specific ones).
+
 ## Integration Points
 - Used by all other modules for authentication and authorization.
 - Created users can be assigned to jobs as recruiters.
 - Dashboard data aggregates from Clients, Jobs, Candidates, Audit.
+- Email utils integrated into notifications/tasks.py, candidates/views.py for client submissions, interview reminders, PIN emails.

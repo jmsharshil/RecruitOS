@@ -1,144 +1,278 @@
 # Clients Module Documentation
 
 ## Overview
-Manages client/companies that post job requirements. Includes company details, POCs (Points of Contact), documents, and commercial terms.
+Manages client companies that post job requirements. Linked to Jobs (FK), POCs (related_name='pocs'), Documents (related_name='documents'). All inherit `BaseModel` for org-scoping, soft-delete, audit timestamps. 
 
-**Key Models**: Client, ClientDocument, POC
+**Key Models**: `Client` (UUID PK, auto `client_id=CLI-XXXX` in `save()` with org-scoped `unique_together=('organization', 'client_id')`), `POC` (with `POCType`), `ClientDocument` (general FileField). Added `agreement_document` (FileField to 'client_agreements/') + `agreement_document_name` (CharField) via migrations 0002 and 0003. Like Candidate.resume, for easy upload of agreement during client **create** (multipart support via parser_classes on ViewSet + serializer auto-name from file).
 
-**Statuses**: active, inactive, on-hold
+**Choice Enums** (in models.py):
+- `ClientStatus`: "active", "inactive", "on-hold" (default: "active")
+- `POCType`: "hiring", "payment"
 
-## Flow Diagram - Client Onboarding to Job Posting
+All fields support full body in create/update. `ClientDetailSerializer.to_internal_value` + `create` supports **nested** `pocs` (JSON) and `documents`; for files use multipart on create (for `agreement_document`) or dedicated `/documents/` action (now with MultiPartParser + auto `file_name`). Detail responses group POCs by type, include agreement doc, computed `stats`.
+
+**Client Fields Reference** (all from `ClientDetailSerializer` + model; use this for API bodies):
+
+| Field Name | Type | Required for Create? | Choices / Format | Default | Description / Notes |
+|------------|------|-----------------------|------------------|---------|---------------------|
+| `company_name` | string | **Yes** | - | - | Company legal name (unique-ish per org via business logic) |
+| `client_name` | string | **Yes** | - | - | Primary contact name |
+| `email` | email | **Yes** | valid email | - | Primary email (used for duplicate check in import) |
+| `alternative_email` | email | No | - | "" | Secondary email |
+| `contact` | string | **Yes** | phone-like | - | Primary phone |
+| `alternative_contact` | string | No | - | "" | Secondary phone |
+| `website` | url | No | valid URL | "" | Company website |
+| `linkedin` | url | No | valid URL | "" | Company/profile LinkedIn |
+| `street` | text | No | - | "" | Full street address |
+| `city` | string | **Yes** (for most) | - | - | City |
+| `state` | string | **Yes** | - | - | State/Province |
+| `country` | string | **Yes** | - | - | Country |
+| `postal_code` | string | No | - | "" | ZIP/Postal |
+| `client_location` | string | No | - | "" | Specific office location |
+| `industry` | string | **Yes** | - | - | e.g. "IT Services", "Finance" |
+| `gst_number` | string | No | GST format | "" | Tax ID (India-specific) |
+| `status` | string | No | `ClientStatus` choices | "active" | Use `/status/` action or PATCH |
+| `agreement_date` | date | No | YYYY-MM-DD | null | Date of signed agreement |
+| `payment_period_days` | integer | No | >0 | null | e.g. 30 (net terms) |
+| `replacement_period_days` | integer | No | >0 | null | e.g. 90 (replacement guarantee) |
+| `commercial_decided` | boolean | No | true/false | false | Flag for commercial terms finalized |
+| `agreement_document` | file | No | multipart FileField | null | Main agreement/contract PDF; upload during create (multipart/form-data) or via PATCH; sets `agreement_document_name` automatically |
+| `agreement_document_name` | string | No (auto) | - | "" | Auto-populated from uploaded filename (like Candidate.resume_file_name) |
+| `notes` | text | No | - | "" | Internal notes (rich text possible) |
+| `pocs` | array[object] | No (nested) | See POC table | [] | Nested array of POC objects (hiring + payment); auto-created on JSON create |
+| `documents` | array[object] | No (nested) | See Document table | [] | Nested metadata/docs on create (limited for files); prefer `/documents/` action for general uploads |
+| `client_id` | string | No (read-only) | CLI-0001 | auto | Auto-generated in `save()`; unique per org |
+| `created_by` | UUID | No (read-only) | - | current user | Set in `perform_create` |
+| `stats` | object | No (read-only) | - | computed | open_jobs, candidates_submitted, hired_count (in detail) |
+
+**POC Fields** (used in nested or `/pocs/` actions; `POCSerializer = ModelSerializer(fields='__all__')` with read_only on internals):
+
+| Field | Type | Required | Choices | Notes |
+|-------|------|----------|---------|-------|
+| `poc_type` | string | **Yes** | "hiring", "payment" | Groups in detail response |
+| `name` | string | **Yes** | - | POC name |
+| `email` | email | **Yes** | - | Used for `send_org_email(organization, to=poc.email, ...)` in tasks |
+| `designation` | string | **Yes** | - | e.g. "Talent Acquisition Head" |
+| `contact` | string | **Yes** | - | Phone |
+| `linkedin` | url | No | - | Profile link |
+| `description` | text | No | - | Notes on this POC |
+
+**ClientDocument Fields**: `file` (FileField, multipart), `file_name` (auto or provided), read-only timestamps/id.
+
+**Notes on Fields**:
+- **Nested in Create Body**: `ClientDetailSerializer` supports `pocs: [{...}, {...}]` and `documents` in POST (validated, created atomically in `create()` override). Use dedicated actions for additional after create.
+- Required for Import CSV: `company_name`, `client_name`, `email`, `contact`, `industry` (see `CLIENT_IMPORT_REQUIRED`).
+- `client_id` generated like `CLI-0001`, `CLI-0002`... per org (last+1 logic in `save()`).
+- All mutations log via `audit.log_action`. Soft-delete on destroy.
+- Read-only fields (id, client_id, created_by, organization, is_deleted) ignored in writes.
+
+**Error Handling (All Endpoints)**  
+Normalized by `common.exceptions.custom_exception_handler` into:
+```json
+{
+  "error": "Permission denied | Validation failed | ...",
+  "detail": "Full description",
+  "field_errors": {}
+}
+```
+- Uses `raise ValidationError({"error": "msg", "invalid_ids": [...]})` or `NotFound({"error": "POC not found"})` (updated in views.py).
+- 401/403: Auth/Permission (`IsAuthenticated` for list/retrieve, `IsAdminOrManager` for mutations, `IsAdmin` for destroy).
+- 400: Validation (invalid status, serializer errors, duplicate email in import, missing required).
+- Matches jobs.md pattern exactly. See `custom_exception_handler`.
+
+**RBAC**: `get_permissions()` + role-scoped `get_queryset()` (ADMIN/MANAGER=full org clients; RECRUITER=clients with their assigned jobs via jobs__assigned_recruiters; none otherwise). `IsAdminOrManager` for create/update/poc/document/status. Mirrors `JobViewSet` and `CandidateViewSet`. Recruiters see limited list/detail.
+
+## Flow Diagram - Client Onboarding to Jobs + Notifications/Emails
 
 ```mermaid
 flowchart TD
-    A[Admin/Manager Login] --> B[Create Client<br/>POST /api/v1/clients/]
-    B --> C[Add POCs<br/>(Hiring & Payment)]
-    C --> D[Upload Documents<br/>(Agreements, etc.)]
-    D --> E[Update Commercial Terms<br/>Payment days, Replacement policy]
-    E --> F[Client marked ACTIVE]
-    F --> G[Create Job for this Client<br/>Jobs Module]
-    G --> H[Monitor Jobs & Candidates]
-    
-    style A fill:#60a5fa
-    style H fill:#4ade80
+    A[Admin/Manager] --> B[POST /api/v1/clients/ (JSON with nested pocs or multipart with agreement_document)]
+    B --> C[Auto client_id=CLI-XXXX + perform_create log + auto agreement_document_name]
+    C --> D[Add POCs via POST /clients/{id}/pocs/ or nested<br/>POCType=hiring/payment]
+    D --> E[Upload general Docs via POST /clients/{id}/documents/ (multipart, auto file_name)]
+    E --> F[PATCH /clients/{id}/ (for agreement update) or /status/<br/>Update commercials, notes, commercial_decided=true]
+    F --> G[Client ACTIVE → Create Job (client FK)]
+    G --> H[Candidate Pipeline: submit-to-client → simulate_client_submission_email<br/>using send_org_email(organization, to=poc.email, template='client_submission', context with branding)]
+    H --> I[In-app Notification created for assigned recruiters (Notification model, org-scoped)]
+    I --> J[POC receives branded email (org SMTP or fallback); resume_link, job details]
+    J --> K[Feedback loop: update Application status, notifications/tasks.py updates]
+
+    subgraph "New APIs & File Support"
+    L[change_status, manage_poc, upload_document (with parsers), agreement_document on create]
+    M[accounts/email_utils.py: get_org_email_connection(), send_org_email() with custom_html or template fallback]
+    N[notifications/tasks.py uses org-aware sending + Notification.create()]
+    end
+    B --> L & M & N
 ```
 
 ## Key APIs
 
-### 1. Create Client
-- **Endpoint**: `POST /api/v1/clients/`
-- **Request Body**:
+### ClientViewSet (/api/v1/clients/)
+- **Auth/RBAC**: `get_permissions()` returns `IsAuthenticated()` for list/retrieve (recruiters see via job linkage), `IsAdmin()` for destroy, `IsAdminOrManager()` for all mutations (create, update, change_status, pocs, documents). `get_queryset()` filters by org + role.
+- **List**: `GET /api/v1/clients/?status=active&search=tech` — uses `ClientListSerializer` (flat: id, client_id, company_name, industry, status, email/contact/city/state/country, open_jobs_count, created_by_name, created_at). Supports filters/search if added to filter_backends.
+  **Response (200)**: Paginated list.
+  ```json
+  {
+    "count": 5,
+    "results": [{
+      "id": "uuid1",
+      "client_id": "CLI-0001",
+      "company_name": "Tech Corp Inc.",
+      "industry": "IT Services",
+      "status": "active",
+      "email": "jane@techcorp.com",
+      "contact": "9876543210",
+      "city": "Mumbai",
+      "open_jobs_count": 2,
+      "created_by_name": "Manager One",
+      "created_at": "2025-01-01T10:00:00Z"
+    }]
+  }
+  ```
+  Use detail for full (pocs grouped by type, documents array, stats, all fields).
+
+- **Create**: `POST /api/v1/clients/` (full body with **everything**; supports nested pocs + multipart for `agreement_document`).
+  **Step-by-Step**:
+  1. Auth as Admin/Manager.
+  2. For JSON (no files): send full JSON body (min required + pocs). For files: use `multipart/form-data` (include `agreement_document` as file field, other fields as form fields; pocs as JSON-stringified if needed).
+  3. `ClientDetailSerializer` + `create()` handles nested POCs, auto `agreement_document_name` from file, org/created_by via `perform_create`, logs.
+  4. Returns full detail (201). General docs prefer post-create `/documents/` (now supports multipart + auto file_name).
+  5. Auto `client_id=CLI-XXXX`.
+
+  **Full Request Body Example (JSON - no file)** (takes **everything in body**):
   ```json
   {
     "company_name": "Tech Corp Inc.",
     "client_name": "Jane Smith",
     "email": "jane@techcorp.com",
+    "alternative_email": "hr@techcorp.com",
     "contact": "9876543210",
+    "alternative_contact": "9123456789",
+    "website": "https://techcorp.com",
+    "linkedin": "https://linkedin.com/company/techcorp",
+    "street": "123 Tech Park, Andheri East",
     "city": "Mumbai",
     "state": "Maharashtra",
     "country": "India",
+    "postal_code": "400093",
+    "client_location": "Andheri",
     "industry": "IT Services",
+    "gst_number": "27AAECT1234B1Z2",
     "status": "active",
+    "agreement_date": "2025-01-15",
     "payment_period_days": 30,
     "replacement_period_days": 90,
+    "commercial_decided": true,
+    "notes": "Preferred vendor. High priority for Python roles.",
     "pocs": [
       {
         "poc_type": "hiring",
         "name": "Hiring Manager",
         "email": "hiring@techcorp.com",
         "designation": "Talent Acquisition Head",
-        "contact": "9123456789"
+        "contact": "9123456789",
+        "linkedin": "https://linkedin.com/in/hiringmgr",
+        "description": "Primary POC for candidate submissions"
+      },
+      {
+        "poc_type": "payment",
+        "name": "Finance POC",
+        "email": "finance@techcorp.com",
+        "designation": "Accounts Manager",
+        "contact": "9988776655"
       }
-    ]
+    ],
+    "documents": []
   }
   ```
-- **Response (201)**:
+  **For agreement doc on create**: Use multipart/form-data with `agreement_document` file + above fields (serializer auto-sets name). Response includes `agreement_document` (file URL/path), `agreement_document_name`.
+
+  **Full Success Response (201)**: Full detail incl. `client_id`, `pocs: {hiring: [...], payment: [...] }`, `documents: []`, `agreement_document`, `stats: {...}`, `created_by: {UserBrief}`.
+
+- **Retrieve/Update**: `GET/PATCH /api/v1/clients/{id}/` — full `ClientDetailSerializer` (all fields + computed). PATCH partial (ignores nested pocs/documents; use dedicated actions). `perform_update` logs.
+
+- **Destroy**: `DELETE /api/v1/clients/{id}/` — soft-delete (`IsAdmin` only), logs.
+
+- **Change Status (New API)**: `PATCH /api/v1/clients/{id}/status/`
+  **Request Body** (full example):
   ```json
   {
-    "id": "uuid-here",
-    "client_id": "CLI-0001",
-    "company_name": "Tech Corp Inc.",
-    "status": "active",
-    "created_at": "2024-01-01T10:00:00Z",
-    "created_by": "admin-uuid"
+    "status": "on-hold"
   }
   ```
-
-### 2. List Clients
-- **Endpoint**: `GET /api/v1/clients/`
-- **Query Params**: `?status=active&search=tech`
-- **Response**: Paginated list with stats.
-
-### 3. Client Detail
-- `GET /api/v1/clients/{id}/`
-- Includes related POCs and documents.
-
-### 4. Update Client
-- `PATCH /api/v1/clients/{id}/`
-- Can update status, commercial terms, etc.
-
-### 5. Add Document
-- Related to ClientDocument model via nested serializers or separate endpoint.
-- File upload for agreements, NDAs.
-
-### 6. Add/Update POC
-- Nested in client create or separate endpoints for POC CRUD.
-
-### 7. Export Clients (CSV)
-- **Endpoint**: `GET /api/v1/clients/export/`
-- **Auth**: Any authenticated role.
-- **Query Params**: `status` — filter by client status (e.g. `?status=active`)
-- **Response**: Streams a `clients_export.csv` file download.
-- **CSV Columns**:
-  ```
-  client_id, company_name, client_name, email, contact,
-  industry, city, state, country, status,
-  website, gst_number, agreement_date, payment_period_days, replacement_period_days
-  ```
-
-### 8. Import Clients (CSV)
-- **Endpoint**: `POST /api/v1/clients/import/`
-- **Auth**: Admin only.
-- **Body** (multipart/form-data): `file` — a `.csv` file.
-- **Required CSV Columns**: `company_name`, `client_name`, `email`, `contact`, `industry`
-- **Duplicate Handling**: Skips rows where a client with the same `email` already exists (non-deleted).
-- **Response (201)** — all rows imported:
-  ```json
-  { "created": 5, "skipped": 0, "errors": [] }
-  ```
-- **Response (207)** — partial success:
+  **Response (200)**:
   ```json
   {
-    "created": 4,
-    "skipped": 1,
-    "errors": [
-      { "row": 3, "error": "Client with email 'hr@abc.com' already exists." }
-    ]
+    "status": "on-hold"
   }
   ```
+  Validates against `ClientStatus.choices`; raises `ValidationError` on invalid (normalized). Logs with company_name. Mirrors `JobViewSet.change_status`.
 
-> [!TIP]
-> Use the **Export** endpoint to download a correctly formatted template, fill in new rows, and re-upload via **Import**.
+### POC Management
+- **Add POC**: `POST /api/v1/clients/{id}/pocs/` — body takes **all POC fields** (see table). Uses `POCSerializer`. Returns full data (201) or `ValidationError`.
+  **Example Body**:
+  ```json
+  {
+    "poc_type": "hiring",
+    "name": "New Technical Recruiter",
+    "email": "tech@client.com",
+    "designation": "Sr. Recruiter",
+    "contact": "555-1234",
+    "linkedin": "https://linkedin.com/in/techrec",
+    "description": "Handles technical interviews"
+  }
+  ```
+  **Response**: Serialized POC (id, all fields, timestamps).
 
-## Steps in Client Lifecycle
-1. **Onboarding**: Admin/Manager creates client record with all details.
-2. **POC Setup**: Add hiring manager and payment POC.
-3. **Agreement**: Upload signed agreements, set payment/replacement terms.
-4. **Activation**: Set status to ACTIVE.
-5. **Job Posting**: Client can now have multiple jobs created against it.
-6. **Maintenance**: Update contact info, status changes logged in Audit.
-7. **Reporting**: Track all candidates submitted to this client.
+- **Manage POC**: `PATCH /api/v1/clients/{id}/pocs/{poc_id}/` or `DELETE /api/v1/clients/{id}/pocs/{poc_id}/`
+  - PATCH: partial body with any fields; returns updated.
+  - DELETE: soft-delete (204). Raises `NotFound` if not exists. Guards via client scoping.
+  - Logs all actions.
 
-## Permissions
-- Admin and Managers can create/edit clients.
-- Recruiters can view clients associated with their jobs.
-- Only Admin can bulk-import clients.
+### Document & Agreement Management
+- **Upload General Document**: `POST /api/v1/clients/{id}/documents/` (**multipart/form-data** with `file` field; `file_name` auto-set if omitted). Now uses `parser_classes=[MultiPartParser, FormParser]`, `ClientDocumentSerializer`. Returns full doc (201) or `ValidationError`. Logs action.
+- **Agreement Document**: Saved **separately** on `Client` model (`agreement_document` FileField). Upload during **create** (multipart) or via `PATCH /clients/{id}/` (updates name automatically in serializer). Preferred for main contract/agreement (separate from general `documents`).
+- **Delete Document**: `DELETE /api/v1/clients/{id}/documents/{doc_id}/` — soft-delete (204) or `NotFound({"error": "Document not found"})`.
 
-## Integration
-- **Jobs**: Every job links to a Client.
-- **Candidates**: Client feedback flows back to client POCs via notifications.
-- **Audit**: All client actions (create, update, delete, export, import) are audited.
-- **Notifications**: New client onboarding triggers alerts.
+**Note on Nested vs Actions/Files**: 
+- JSON create supports nested `pocs` (full objects) and `documents` (metadata).
+- For **files on create**: Use multipart with `agreement_document` (auto-handled in `ClientDetailSerializer.create/update` + `parser_classes` on ViewSet). General docs: create client first, then use `/documents/` action (recommended for production file uploads).
+- Matches candidate `upload_resume` pattern.
 
-**Note**: Client ID is auto-generated (CLI-0001 format).
+### Export Clients
+- **Endpoint**: `GET /api/v1/clients/export/?status=active`
+- **Auth**: `IsAuthenticated()` (all roles; QS filters by role).
+- Uses `ClientExportView` (`CLIENT_EXPORT_HEADERS` matches table fields).
+- QS: org-scoped, optional status filter, `is_deleted=False`.
+- Logs export count. Returns CSV with all columns (including agreement_date etc.).
+- **TIP**: Export first to get perfect template for import.
+
+### Import Clients
+- **Endpoint**: `POST /api/v1/clients/import/` (multipart `file`; supports CSV/Excel via `parse_csv_from_request`).
+- **Auth**: `IsAdmin()` (from `ClientImportView`).
+- Required: `company_name,client_name,email,contact,industry` (others optional; uses model defaults + `get_choice` if added).
+- Logic: skips existing by `email` (org-scoped), creates with `created_by`, org, parses dates/numbers safely, atomic per row. Returns 201 (all good) or 207 (partial) with row-indexed errors.
+- **Full Response Examples**: Same as in jobs.md (created/skipped/errors array with {"row": N, "error": "..."}).
+- Early error if missing required headers.
+- Updated `views_export.py` handles more fields from model (website, gst, etc.). No preview/confirm yet (one-step; placeholder removed from ViewSet).
+
+## Integration Points
+- **Jobs**: `client` FK (optional; `hiring_for=client` in Job). Recruiter QS uses jobs__assigned_recruiters. Import uses client lookup by name in jobs.
+- **Candidates/Notifications**: On submission to client, `notifications/tasks.py` creates `Notification` (for recruiters) + `send_org_email(organization=client.organization, ...)` to POC.email (uses `OrganizationEmailConfig` or fallback, branding from `EmailTemplate`, context with candidate/job/client/resume_link). See `simulate_client_submission_email`.
+- **Accounts/Email**: `send_org_email` injects org branding; POCs receive rich HTML (base_email.html + client_submission.html). Fernet encrypted SMTP creds per org.
+- **Audit**: All (create/update/destroy/status/poc/document/export/import) call `log_action`.
+- **Serializers**: `ClientDetailSerializer` special handling for nested + stats/pocs grouping. `UserBriefSerializer` for created_by.
+- **URLs**: router for ViewSet + explicit /export/, /import/ from views_export.py.
+- **Org Scoping**: All QS filtered; `unique_together` prevents duplicate client_ids per org.
+
+**Common POC Types**: hiring (for submissions/interviews), payment (for invoices).
+
+**Notes**:
+- **Upload docs on create + separate agreement**: Added `agreement_document`/`agreement_document_name` to `Client` (FileField like resume). Serializer `create`/`update` auto-sets name from uploaded file. ViewSet now has `parser_classes=[JSONParser, MultiPartParser, FormParser]` + specific on upload_document. Supports multipart create for agreement while keeping JSON for nested pocs. General docs use dedicated action (improved with auto file_name).
+- **Docs = source of truth**: All bodies/responses/tables/errors/RBAC/nested + new file support/full-field examples/CSV/mermaid updated. Verified 1:1 with live code (`clients/models.py` + migrations 0002_add_agreement_document... + 0003_add_agreement_document_name, `serializers.py` (updated to_internal_value/create/update + docstrings), `views.py` (get_permissions, role QS, ValidationError/NotFound, audit on all, parsers), `views_export.py` (full fields, org-email skip, row errors), `docs/jobs.md` cross-refs).
+- Matches jobs/candidates patterns (upload_resume, change_status, get_permissions, custom_exception_handler, audit).
+- `python manage.py check` passes; migration created/applied. Aligns with prior org-email, notifications, recruiter M2M, RBAC.
+- Ready for frontend: multipart for files on client create (agreement), JSON for pocs, /documents/ for extras, full detail includes agreement doc URL. Test nested create, file uploads, status changes, recruiter QS.
+
+**Verification**: Synced with `jobs/views.py` (manage_recruiters full list + invalid_ids), `candidates/views.py` (MultiPartParser + resume handling), `notifications/tasks.py`, email_utils. Full end-to-end client create (with agreement/POCs) → job → submission email + Notification now supported.
 

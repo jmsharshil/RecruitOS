@@ -1,0 +1,30 @@
+{% extends "emails/base_email.html" %}
+{% block title %}Set Your PIN — {{ org_name }}{% endblock %}
+
+{% block content %}
+  <p>Hi <strong>{{ user.name }}</strong>,</p>
+  <p>
+    Your account has been created for <strong>{{ org_name }}</strong>.
+    To get started, please set your security PIN using the button below.
+  </p>
+
+  <div class="btn-wrapper">
+    <a href="{{ url }}" class="btn">Set My PIN</a>
+  </div>
+
+  <div class="info-box">
+    <p>
+      <strong>Note:</strong> Your PIN must be at least 4 digits long. You will use this PIN every time you log in.
+      This link is valid for 24 hours.
+    </p>
+  </div>
+
+  <div class="divider"></div>
+
+  <p>If the button above doesn't work, copy and paste this link into your browser:</p>
+  <p class="link-fallback">{{ url }}</p>
+
+  <div class="divider"></div>
+
+  <p>If you did not expect this email, please ignore it or contact your administrator.</p>
+{% endblock %}

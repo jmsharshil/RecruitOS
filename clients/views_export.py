@@ -9,10 +9,12 @@ from common.permissions import IsAdmin
 from audit.utils import log_action
 
 CLIENT_EXPORT_HEADERS = [
-    'client_id', 'company_name', 'client_name', 'email', 'contact',
-    'industry', 'city', 'state', 'country', 'status',
-    'website', 'gst_number', 'agreement_date', 'payment_period_days',
-    'replacement_period_days',
+    'client_id', 'company_name', 'client_name', 'email', 'alternative_email',
+    'contact', 'alternative_contact', 'website', 'linkedin', 'street',
+    'city', 'state', 'country', 'postal_code', 'client_location',
+    'industry', 'gst_number', 'status', 'agreement_date', 'payment_period_days',
+    'replacement_period_days', 'commercial_decided', 'agreement_document_name',
+    'notes',
 ]
 
 CLIENT_IMPORT_REQUIRED = [
@@ -37,10 +39,12 @@ class ClientExportView(APIView):
         rows = []
         for c in qs:
             rows.append([
-                c.client_id, c.company_name, c.client_name, c.email, c.contact,
-                c.industry, c.city, c.state, c.country, c.status,
-                c.website, c.gst_number, c.agreement_date, c.payment_period_days,
-                c.replacement_period_days,
+                c.client_id, c.company_name, c.client_name, c.email, c.alternative_email or '',
+                c.contact, c.alternative_contact or '', c.website or '', c.linkedin or '', c.street or '',
+                c.city, c.state, c.country, c.postal_code or '', c.client_location or '',
+                c.industry, c.gst_number or '', c.status, c.agreement_date, c.payment_period_days,
+                c.replacement_period_days, c.commercial_decided, c.agreement_document_name or '',
+                c.notes or '',
             ])
 
         log_action(request.user, 'exported', 'Client', None, f"Exported {len(rows)} clients")
@@ -64,27 +68,41 @@ class ClientImportView(APIView):
         created, skipped, errors = 0, 0, []
 
         for i, row in enumerate(rows, start=2):
-            email = row.get('email', '').strip()
-            if Client.objects.filter(email=email, is_deleted=False, organization=request.user.organization).exists():
-                errors.append({"row": i, "error": f"Client with email '{email}' already exists."})
+            email = row.get('email', '').strip().lower()
+            if Client.objects.filter(email__iexact=email, is_deleted=False, organization=request.user.organization).exists():
+                errors.append({"row": i, "error": f"Client with email '{email}' already exists (org-scoped)."})
                 skipped += 1
                 continue
 
             try:
+                status_val = row.get('status', 'active').lower().strip()
+                if status_val not in dict(ClientStatus.choices):
+                    status_val = ClientStatus.ACTIVE
+
                 Client.objects.create(
                     company_name=row.get('company_name', '').strip(),
                     client_name=row.get('client_name', '').strip(),
                     email=email,
+                    alternative_email=row.get('alternative_email', '').strip() or None,
                     contact=row.get('contact', '').strip(),
-                    industry=row.get('industry', '').strip(),
+                    alternative_contact=row.get('alternative_contact', '').strip() or None,
+                    website=row.get('website', '').strip() or None,
+                    linkedin=row.get('linkedin', '').strip() or None,
+                    street=row.get('street', '').strip(),
                     city=row.get('city', '').strip(),
                     state=row.get('state', '').strip(),
                     country=row.get('country', '').strip(),
-                    website=row.get('website', '').strip(),
-                    gst_number=row.get('gst_number', '').strip(),
-                    status=row.get('status', ClientStatus.ACTIVE),
+                    postal_code=row.get('postal_code', '').strip() or None,
+                    client_location=row.get('client_location', '').strip() or None,
+                    industry=row.get('industry', '').strip(),
+                    gst_number=row.get('gst_number', '').strip() or None,
+                    status=status_val,
+                    agreement_date=row.get('agreement_date') or None,  # parsed by model or add DateParser if needed
                     payment_period_days=row.get('payment_period_days') or None,
                     replacement_period_days=row.get('replacement_period_days') or None,
+                    commercial_decided=row.get('commercial_decided', 'false').lower() in ('true', '1', 'yes'),
+                    agreement_document_name=row.get('agreement_document_name', '').strip() or None,
+                    notes=row.get('notes', '').strip(),
                     created_by=request.user,
                     organization=request.user.organization,
                 )

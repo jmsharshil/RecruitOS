@@ -1,0 +1,42 @@
+{% extends "emails/base_email.html" %}
+{% block title %}Candidate Profile — {{ candidate_name }}{% endblock %}
+
+{% block content %}
+  <p>Dear <strong>{{ client_name }}</strong>,</p>
+  <p>
+    We are pleased to share a shortlisted candidate profile for the
+    <strong>{{ job_title }}</strong> position.
+  </p>
+
+  <div class="info-box">
+    <p><strong>Candidate:</strong> {{ candidate_name }}</p>
+    <p><strong>Current Role:</strong> {{ current_profile }}</p>
+    <p><strong>Experience:</strong> {{ experience }}</p>
+    <p><strong>Location:</strong> {{ current_location }}</p>
+    {% if current_ctc %}
+      <p><strong>Current CTC:</strong> ₹{{ current_ctc }}</p>
+    {% endif %}
+    {% if expected_ctc %}
+      <p><strong>Expected CTC:</strong> ₹{{ expected_ctc }}</p>
+    {% endif %}
+    {% if notice_period %}
+      <p><strong>Notice Period:</strong> {{ notice_period }}</p>
+    {% endif %}
+  </div>
+
+  {% if resume_link %}
+    <div class="btn-wrapper">
+      <a href="{{ resume_link }}" class="btn">Download Resume</a>
+    </div>
+  {% endif %}
+
+  <div class="divider"></div>
+
+  <p>
+    Please review the profile at your earliest convenience and share your feedback.
+    Our team is available to arrange an interview at your preferred time.
+  </p>
+  <p>
+    Submitted by: <strong>{{ sent_by }}</strong> from <strong>{{ org_name }}</strong>
+  </p>
+{% endblock %}

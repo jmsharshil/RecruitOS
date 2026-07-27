@@ -1,0 +1,32 @@
+{% extends "emails/base_email.html" %}
+{% block title %}Interview Reminder — {{ candidate_name }}{% endblock %}
+
+{% block content %}
+  <p>Hi <strong>{{ recruiter_name }}</strong>,</p>
+  <p>
+    This is a reminder that you have an interview scheduled for tomorrow.
+  </p>
+
+  <div class="info-box">
+    <p><strong>Candidate:</strong> {{ candidate_name }}</p>
+    <p><strong>Position:</strong> {{ job_title }}</p>
+    <p><strong>Date:</strong> {{ interview_date }}</p>
+    <p><strong>Time:</strong> {{ interview_time }}</p>
+    <p><strong>Mode:</strong> {{ interview_mode|title }}</p>
+    {% if interviewer_name %}
+      <p><strong>Interviewer:</strong> {{ interviewer_name }}</p>
+    {% endif %}
+    {% if notes %}
+      <p><strong>Notes:</strong> {{ notes }}</p>
+    {% endif %}
+  </div>
+
+  {% if candidate_link %}
+    <div class="btn-wrapper">
+      <a href="{{ candidate_link }}" class="btn">View Candidate Profile</a>
+    </div>
+  {% endif %}
+
+  <div class="divider"></div>
+  <p>Please ensure all preparation is complete before the interview. Good luck!</p>
+{% endblock %}

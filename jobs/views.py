@@ -2,15 +2,29 @@ from rest_framework import viewsets, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError, NotFound
+from rest_framework.filters import SearchFilter, OrderingFilter
+from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
+
 from jobs.models import Job, Stage, DEFAULT_STAGES, JobStatus
-from jobs.serializers import JobSerializer, StageSerializer
+from jobs.serializers import JobListSerializer, JobDetailSerializer, StageSerializer
+from jobs.filters import JobFilterSet
 from common.permissions import IsAdminOrManager, IsAdmin
-from accounts.models import UserRole
+from accounts.models import User, UserRole
+from accounts.serializers import UserBriefSerializer
 from audit.utils import log_action
 
 class JobViewSet(viewsets.ModelViewSet):
-    serializer_class = JobSerializer
+    filter_backends  = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class  = JobFilterSet
+    search_fields    = ['title', 'description', 'location', 'code']
+    ordering_fields  = ['title', 'created_at', 'target_closing_date', 'priority', 'status']
+    ordering         = ['-created_at']
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return JobListSerializer
+        return JobDetailSerializer
 
     def get_queryset(self):
         user = self.request.user
@@ -24,25 +38,25 @@ class JobViewSet(viewsets.ModelViewSet):
         return Job.objects.none()
 
     def get_permissions(self):
-        if self.action in ['list', 'retrieve', 'get_upload_link']:
+        if self.action in ['list', 'retrieve', 'upload_link']:
             return [permissions.IsAuthenticated()]
         if self.action == 'destroy':
             return [IsAdmin()]
-        # Mutating actions restricted to admin/manager (create, update, status, stages)
+        # Mutating actions restricted to admin/manager (create, update, status, stages, manage_recruiters)
         return [IsAdminOrManager()]
 
     def perform_create(self, serializer):
         job = serializer.save(created_by=self.request.user, organization=self.request.user.organization)
-        
+
         # Auto-create default stages
         for stage_data in DEFAULT_STAGES:
             Stage.objects.create(
-                job=job, 
-                created_by=self.request.user, 
+                job=job,
+                created_by=self.request.user,
                 organization=job.organization,
                 **stage_data
             )
-            
+
         log_action(self.request.user, 'created', 'Job', job.id, f"Created job '{job.title}'")
 
     def perform_update(self, serializer):
@@ -72,8 +86,8 @@ class JobViewSet(viewsets.ModelViewSet):
         serializer = StageSerializer(data=request.data)
         if serializer.is_valid():
             stage = serializer.save(
-                job=job, 
-                created_by=request.user, 
+                job=job,
+                created_by=request.user,
                 organization=job.organization
             )
             log_action(request.user, 'created', 'Stage', stage.id, f"Added stage '{stage.name}' to job '{job.title}'")
@@ -104,7 +118,57 @@ class JobViewSet(viewsets.ModelViewSet):
             log_action(request.user, 'deleted', 'Stage', stage.id, f"Deleted stage '{stage.name}'")
             return Response(status=204)
 
-    @action(detail=True, methods=['get'], url_path='upload-link')
-    def get_upload_link(self, request, pk=None):
+    @action(detail=True, methods=['post'], url_path='recruiters')
+    def manage_recruiters(self, request, pk=None):
+        """Bulk set assigned recruiters via full list of IDs (replaces M2M entirely).
+        Client always sends complete desired list:
+          - Initial: {"recruiter_ids": ["uuid1", "uuid2", "uuid3"]}
+          - Add more: {"recruiter_ids": ["uuid1", "uuid2", "uuid3", "uuid4", "uuid5"]}
+          - Unassign (e.g. remove uuid4): {"recruiter_ids": ["uuid1", "uuid2", "uuid3", "uuid5"]}
+        Validates all are valid RECRUITER in same org. Uses .set() + audit logging.
+        """
         job = self.get_object()
-        return Response({"resume_upload_link": job.resume_upload_link})
+        recruiter_ids = request.data.get('recruiter_ids')
+
+        if not isinstance(recruiter_ids, list):
+            raise ValidationError({"error": "recruiter_ids must be a list"})
+
+        # Normalize to strings (handles UUIDs from JSON)
+        recruiter_ids = [str(rid).strip() for rid in recruiter_ids if rid]
+
+        if not recruiter_ids:
+            job.assigned_recruiters.clear()
+            log_action(
+                request.user, 'unassigned', 'Job', job.id,
+                f"Unassigned all recruiters from job '{job.title}'"
+            )
+            return Response({"status": "updated", "assigned_recruiters": []})
+
+        # Validate all provided IDs exist + are recruiters in org
+        recruiters_qs = User.objects.filter(
+            id__in=recruiter_ids,
+            role=UserRole.RECRUITER,
+            organization=job.organization,
+            is_active=True
+        ).distinct()
+
+        found_ids = {str(r.id) for r in recruiters_qs}
+        provided_set = set(recruiter_ids)
+        if found_ids != provided_set:
+            invalid = list(provided_set - found_ids)
+            raise ValidationError({
+                "error": "Some recruiter IDs are invalid, inactive, or not in organization",
+                "invalid_ids": invalid
+            })
+
+        job.assigned_recruiters.set(recruiters_qs)
+        log_action(
+            request.user, 'updated', 'Job', job.id,
+            f"Set {len(recruiters_qs)} assigned recruiters on job '{job.title}' (IDs: {', '.join(str(i) for i in recruiter_ids)})"
+        )
+
+        recruiter_data = UserBriefSerializer(recruiters_qs, many=True).data
+        return Response({
+            "status": "updated",
+            "assigned_recruiters": recruiter_data
+        })

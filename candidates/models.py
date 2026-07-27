@@ -28,10 +28,10 @@ class Candidate(BaseModel):
     id                 = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     profile_name       = models.CharField(max_length=200)
     candidate_name     = models.CharField(max_length=150)
-    current_profile    = models.CharField(max_length=200,blank=True)
-    current_company    = models.CharField(max_length=200,blank=True)
+    current_profile    = models.CharField(max_length=200, blank=True)
+    current_company    = models.CharField(max_length=200, blank=True)
     experience         = models.CharField(max_length=50)
-    current_location   = models.CharField(max_length=150,blank=True)
+    current_location   = models.CharField(max_length=150, blank=True)
     preferred_location = models.CharField(max_length=150, blank=True)
     education          = models.CharField(max_length=200, blank=True)
     college            = models.CharField(max_length=200, blank=True)
@@ -47,6 +47,16 @@ class Candidate(BaseModel):
     resume             = models.FileField(upload_to='resumes/', null=True, blank=True)
     resume_file_name   = models.CharField(max_length=255, blank=True)
     uploaded_by        = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='added_candidates')
+    # Skills stored as JSON list for quick filtering
+    skills             = models.JSONField(default=list, blank=True)
+    # General-purpose tags for internal categorization
+    tags               = models.JSONField(default=list, blank=True)
+    # Duplicate management
+    is_duplicate       = models.BooleanField(default=False)
+    duplicate_of       = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.SET_NULL, related_name='duplicates'
+    )
+
 
 class Application(BaseModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

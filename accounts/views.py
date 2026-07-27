@@ -9,12 +9,15 @@ from django.db.models import Count, Q
 from django.utils import timezone
 from datetime import timedelta
 
-from accounts.models import User, UserRole, Organization
+from accounts.models import User, UserRole, Organization, OrganizationEmailConfig, EmailTemplate
 from accounts.serializers import (
-    UserBriefSerializer, 
-    UserSerializer, 
+    UserBriefSerializer,
+    UserDetailSerializer,
+    UserListSerializer,
     CustomTokenObtainPairSerializer,
-    OrganizationRegisterSerializer
+    OrganizationRegisterSerializer,
+    OrganizationEmailConfigSerializer,
+    EmailTemplateSerializer,
 )
 from common.permissions import IsAdmin, IsAdminOrManager, IsManager, IsRecruiter, IsOwnerOrAdmin
 from audit.utils import log_action
@@ -23,8 +26,54 @@ from audit.serializers import AuditLogSerializer
 from jobs.models import Job, JobStatus
 from clients.models import Client, ClientStatus
 from candidates.models import Application, Candidate, CandidateStatus, InterviewSchedule
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.utils.encoding import force_bytes
+from django.contrib.auth.tokens import default_token_generator
+from accounts.email_utils import send_org_email
 
 logger = logging.getLogger(__name__)
+
+
+def send_set_pin_email(user):
+    """
+    Send invitation email with magic link for user to set their PIN.
+    Uses org-aware SMTP (per-org credentials + branding) via send_org_email.
+    """
+    token = default_token_generator.make_token(user)
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
+    domain = 'localhost:5173'  # Update to your frontend domain in production
+    protocol = 'http'
+    url = f"{protocol}://{domain}/set-pin?uid={uid}&token={token}"
+
+    org = getattr(user, 'organization', None)
+    plain_message = (
+        f"Hi {user.name},\n\n"
+        f"Your account has been created for {getattr(org, 'name', 'RecruitSmart')}.\n"
+        f"Please set your security PIN by visiting:\n{url}\n\n"
+        "The PIN can be 4-6 digits. You will use it to log in going forward."
+    )
+
+    context = {
+        'user': user,
+        'uid': uid,
+        'token': token,
+        'domain': domain,
+        'protocol': protocol,
+        'url': url,
+        'plain_message': plain_message,
+    }
+
+    try:
+        send_org_email(
+            organization=org,
+            subject=f'Set Your PIN — {getattr(org, "name", "RecruitSmart")} Account Created',
+            template_name='set_pin',
+            context=context,
+            recipient_list=[user.email],
+        )
+        logger.info(f"Set PIN email sent to {user.email} with link to {url}")
+    except Exception as e:
+        logger.error(f"Failed to send set PIN email to {user.email}: {str(e)}")
 
 # --- Auth Views ---
 
@@ -54,6 +103,61 @@ class ForgotPasswordView(APIView):
         
         logger.info(f"[SIMULATION] Password reset link sent to {email}")
         return Response({"message": "If an account with that email exists, we have sent a password reset link."})
+
+
+class SetPinView(APIView):
+    """
+    API to set PIN (which sets the user's password).
+    Called from the link in the invitation email.
+    Uses uid + token for security (same as Django password reset).
+    Endpoint: /api/v1/auth/set-pin/
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        uidb64 = request.data.get('uid') or request.query_params.get('uid')
+        token = request.data.get('token') or request.query_params.get('token')
+        pin = request.data.get('pin')
+        confirm_pin = request.data.get('confirm_pin')
+
+        if not all([uidb64, token, pin]):
+            return Response({
+                "error": "Validation failed",
+                "field_errors": {"uid": ["uid, token, and pin are required."]}
+            }, status=400)
+
+        try:
+            uid = urlsafe_base64_decode(uidb64).decode()
+            user = User.objects.get(pk=uid)
+        except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+            return Response({"error": "Invalid user link"}, status=400)
+
+        if not default_token_generator.check_token(user, token):
+            return Response({"error": "Invalid or expired token. Please request a new PIN setup link."}, status=400)
+
+        pin_str = str(pin).strip()
+        if len(pin_str) < 4:
+            return Response({
+                "error": "Validation failed",
+                "field_errors": {"pin": ["PIN must be at least 4 characters long."]}
+            }, status=400)
+
+        if pin != confirm_pin:
+            return Response({
+                "error": "Validation failed",
+                "field_errors": {"confirm_pin": ["PIN and confirm PIN do not match."]}
+            }, status=400)
+
+        # Set the password to the provided PIN (allows login with it)
+        user.set_password(pin_str)
+        user.save()
+        
+        logger.info(f"PIN successfully set for user {user.email}")
+        log_action(None, 'updated', 'User', user.id, f"User set their PIN via email link")
+        
+        return Response({
+            "message": "PIN set successfully. You can now log in using your PIN."
+        }, status=status.HTTP_200_OK)
 
 
 class RegisterOrganizationView(APIView):
@@ -157,7 +261,11 @@ class UserViewSet(viewsets.ModelViewSet):
     - Endpoint: /api/v1/users/
     """
     permission_classes = [IsAdminOrManager, IsOwnerOrAdmin]
-    serializer_class = UserSerializer
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return UserListSerializer
+        return UserDetailSerializer
 
     def get_queryset(self):
         qs = User.objects.filter(
@@ -189,9 +297,10 @@ class UserViewSet(viewsets.ModelViewSet):
             created_by=self.request.user, 
             organization=self.request.user.organization
         )
-        if 'password' in self.request.data:
-            user.set_password(self.request.data['password'])
-            user.save()
+        # if 'password' in self.request.data:
+        #     user.set_password(self.request.data['password'])
+        #     user.save()
+        send_set_pin_email(user)
         log_action(self.request.user, 'created', 'User', user.id, f"Created {role} '{user.name}'")
 
     def perform_destroy(self, instance):
@@ -395,3 +504,83 @@ class RecruiterDashboardView(APIView):
             "recent_candidates": recent_candidates,
             "todays_interviews": interviews_today
         })
+
+
+# ---------------------------------------------------------------------------
+# Organization Email Config — GET/PUT/PATCH (admin only)
+# ---------------------------------------------------------------------------
+
+class OrganizationEmailConfigView(APIView):
+    """
+    Manage the SMTP email configuration for the authenticated user's organization.
+    GET  /api/v1/org/email-config/       — retrieve current config
+    PUT  /api/v1/org/email-config/       — full update
+    PATCH /api/v1/org/email-config/      — partial update
+    """
+    permission_classes = [IsAdmin]
+
+    def _get_or_create_config(self, org):
+        config, _ = OrganizationEmailConfig.objects.get_or_create(organization=org)
+        return config
+
+    def get(self, request):
+        config = self._get_or_create_config(request.user.organization)
+        serializer = OrganizationEmailConfigSerializer(config)
+        return Response(serializer.data)
+
+    def put(self, request):
+        config = self._get_or_create_config(request.user.organization)
+        serializer = OrganizationEmailConfigSerializer(config, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            log_action(request.user, 'updated', 'OrganizationEmailConfig', config.id, 'Updated org email config')
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def patch(self, request):
+        config = self._get_or_create_config(request.user.organization)
+        serializer = OrganizationEmailConfigSerializer(config, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            log_action(request.user, 'updated', 'OrganizationEmailConfig', config.id, 'Patched org email config')
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ---------------------------------------------------------------------------
+# Email Templates — full CRUD per org (admin only)
+# ---------------------------------------------------------------------------
+
+class EmailTemplateViewSet(viewsets.ModelViewSet):
+    """
+    CRUD for per-organization email templates (branding + optional custom HTML).
+    Endpoint: /api/v1/org/email-templates/
+    """
+    permission_classes = [IsAdmin]
+    serializer_class = EmailTemplateSerializer
+
+    def get_queryset(self):
+        return EmailTemplate.objects.filter(
+            organization=self.request.user.organization
+        ).order_by('template_key')
+
+    def perform_create(self, serializer):
+        template = serializer.save(organization=self.request.user.organization)
+        log_action(
+            self.request.user, 'created', 'EmailTemplate', template.id,
+            f"Created email template '{template.template_key}'"
+        )
+
+    def perform_update(self, serializer):
+        template = serializer.save()
+        log_action(
+            self.request.user, 'updated', 'EmailTemplate', template.id,
+            f"Updated email template '{template.template_key}'"
+        )
+
+    def perform_destroy(self, instance):
+        log_action(
+            self.request.user, 'deleted', 'EmailTemplate', instance.id,
+            f"Deleted email template '{instance.template_key}'"
+        )
+        instance.delete()

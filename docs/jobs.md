@@ -33,14 +33,14 @@ Use this table to understand **required** vs **optional**, types, choices, and d
 | `job_type` | string | No | "permanent", "contractual" | "permanent" | Type of employment |
 | `job_mode` | string | No | "remote", "hybrid", "office" | "office" | Work arrangement |
 | `hiring_for` | string | No | "self", "client" | "self" | Whether hiring for internal or client |
-| `client` | UUID (string) | No | Valid Client ID from org | null | Foreign key to Client (lookup by UUID) |
-| `status` | string | No | "open", "closed", "on-hold" | "open" | Current job status |
-| `assigned_recruiter_ids` | array[UUID] | No | Valid recruiter User IDs | [] | Write-only; assigns M2M recruiters (must be role=recruiter) |
+| `client` | UUID (string) | No | Valid Client ID from org (see docs/clients.md for full Client/POC fields + change_status API) | null | FK to Client; enables send-to-client flow + POC emails/notifications. Use nested or lookup by company_name in import. |
+| `status` | string | No | "open", "closed", "on-hold" | "open" | Current job status (use /status/ action) |
+| `assigned_recruiter_ids` | array[UUID] | No | Valid recruiter User IDs | [] | Write-only in create; full list semantics also via dedicated /recruiters/ endpoint (see below) |
 | `target_closing_date` | string (date) | No | YYYY-MM-DD | null | Target date to close the req |
 | `notice_period_preference` | string | No | - | "" | Preferred notice period (e.g. "30 days") |
 | `skill_criteria` | decimal (0-100) | No | 0-100 | 70.00 | AI resume match threshold % |
 | `code` | string | No (read-only) | JOB-000001 | auto | Auto-generated per org |
-| `resume_upload_link` | string | No (read-only) | URL | auto | Generated link for public uploads |
+| `resume_upload_link` | string | No (read-only) | URL | auto | Generated link for public uploads (used in candidate email context) |
 
 **Notes on Fields**:
 - **Required in Import CSV/Excel**: `title`, `min_experience`, `max_experience`, `location` (validated in `parse_csv_from_request` + per-row check).
@@ -64,52 +64,66 @@ All errors normalized by `common.exceptions.custom_exception_handler` (in settin
 
 **RBAC**: Centralized in `common.permissions` + `get_permissions()` + role-scoped `get_queryset()` (Q not needed for Jobs; uses if-elif on UserRole.ADMIN/MANAGER/RECRUITER). `IsAdminOrManager` for mutations/export/import, `IsAdmin` for destroy, `IsAuthenticated` for reads/upload-link. Recruiters blocked from job export/import (but allowed for candidates).
 
-## Flow Diagram - Job Creation to Pipeline Setup (with Application)
+## Flow Diagram - Job Creation to Pipeline Setup (with Application + Client/POC/Email Integration)
 
 ```mermaid
 flowchart TD
-    A[Client Created] --> B[Create Job<br/>POST /api/v1/jobs/]
-    B --> C[Auto-create Default Stages<br/>Screening → HR Round → Technical → Client Round → Offer → Hired]
-    C --> D[Assign Recruiters<br/>Many-to-Many]
-    D --> E[Share Resume Upload Link (PublicUploadView)]
-    E --> F[Add to Pool (Candidate) or Create Application (job-linked)]
-    F --> G[Monitor Pipeline per Stage (via Application queryset)]
-    G --> H[Update Job Status<br/>PATCH /jobs/{id}/status/]
-    H --> I[Close Job when positions filled]
+    A[Client Created (docs/clients.md)<br/>with POCs + change_status] --> B[Create Job<br/>POST /api/v1/jobs/ (full body)]
+    B --> C[Auto-create 6 DEFAULT_STAGES + code= JOB-XXXX + resume_upload_link<br/>in Job.save() + perform_create + audit]
+    C --> D[Assign Recruiters via POST /jobs/{id}/recruiters/<br/>full {"recruiter_ids": [...] } list → .set() after validation]
+    D --> E[GET /jobs/{id}/upload-link/ → Public talent pool upload]
+    E --> F[Candidate created (pool) → Application (auto first stage)]
+    F --> G[Pipeline: move_stage, schedule_interview (reminder email), send-to-client]
+    G --> H[send_org_email(organization, to=POC.email, template='client_submission', full context + branding)<br/>+ create Notification (in-app for recruiters)]
+    H --> I[Client feedback → update status, hired syncs job status]
+    I --> J[Update Job Status<br/>PATCH /jobs/{id}/status/ or close when filled]
     
-    subgraph Stages Management
-    J[Add Custom Stage]
-    K[Reorder Stages]
-    L[Update Stage Color]
+    subgraph "Stages + Recruiter Mgmt"
+    K[POST /jobs/{id}/stages/ (add)]
+    L[PATCH/DELETE /jobs/{id}/stages/{sid}/ (guard on candidates)]
+    M[manage_recruiters (full list, invalid_ids error, UserBrief response)]
     end
-    C --> J & K & L
+    C --> K & L & M
+    A --> H
 ```
 
 ## Key APIs
 
 ### JobViewSet (/api/v1/jobs/)
-- **Auth**: Uses `get_permissions()` — `IsAuthenticated()` for list/retrieve/get_upload_link; `IsAdmin()` for destroy; `IsAdminOrManager()` for create/update/change_status/stages (mirrors CandidateViewSet/ApplicationViewSet). Role-scoped `get_queryset()` via UserRole (ADMIN=all org, MANAGER=created_by=self, RECRUITER=assigned_recruiters).
-- **List**: `GET /api/v1/jobs/?status=open&client=uuid`
-  - Role-based QS (`is_deleted=False`, org filter).
-  - **Response (200)**: Paginated `JobSerializer` (includes nested stages, computed `candidate_count`, `client_name`, `assigned_recruiters` list, `resume_upload_link`).
+- **Auth**: Uses `get_permissions()` — `IsAuthenticated()` for list/retrieve/get_upload_link; `IsAdmin()` for destroy; `IsAdminOrManager()` for create/update/change_status/stages/manage_recruiters (mirrors CandidateViewSet/ApplicationViewSet). Role-scoped `get_queryset()` via UserRole (ADMIN=all org, MANAGER=created_by=self, RECRUITER=assigned_recruiters).
+- **List**: `GET /api/v1/jobs/?status=open&client=uuid&search=python&priority=high`
+  - Uses `JobListSerializer` (flat, performant for lists; no nested). 
+  - Role-based `get_queryset()` via `UserRole`: ADMIN=full org, MANAGER=own created jobs, RECRUITER=assigned_jobs only. All filter `is_deleted=False`.
+  - Supports `DjangoFilterBackend` (`JobFilterSet`: status, priority, job_mode, job_type, hiring_for, client=uuid, min_exp, max_exp, location__icontains, closing_after/before, created_after/before), `SearchFilter` (title,description,location,code), `OrderingFilter`.
+  - Computed: `client_name` (from client.company_name), `candidate_count`, `created_by_name`.
+  - **Response (200)**: Paginated `JobListSerializer`.
     ```json
     {
       "count": 15,
+      "next": null,
+      "previous": null,
       "results": [{
-        "id": "job-uuid",
-        "code": "JOB-0001",
+        "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+        "code": "JOB-000001",
         "title": "Senior Python Developer",
         "status": "open",
         "priority": "high",
+        "job_mode": "remote",
+        "job_type": "permanent",
+        "location": "Remote",
         "openings": 3,
+        "min_experience": 5,
+        "max_experience": 8,
+        "hiring_for": "self",
         "client_name": "Tech Corp",
-        "assigned_recruiters": ["user-uuids"],
-        "stages": [{"name": "Screening", "order": 1, "color": "slate"}, ...],
         "candidate_count": 5,
-        "resume_upload_link": "https://frontend.app/upload/job-uuid-here"
+        "target_closing_date": "2025-06-30",
+        "created_by_name": "Manager One",
+        "created_at": "2025-01-01T10:00:00Z"
       }]
     }
     ```
+    For full details (stages array via `get_stages()`, `assigned_recruiters` as UserBrief[], `resume_upload_link`, `description`, `skills`, `created_by` object, etc.) use `GET /api/v1/jobs/{id}/` which uses `JobDetailSerializer`.
 
 - **Create**: `POST /api/v1/jobs/`
   **Step-by-Step Guide**:
@@ -171,7 +185,7 @@ flowchart TD
     "client_name": "Tech Corp",
     "status": "open",
     "assigned_recruiters": [
-      {"id": "user-uuid-1", "email": "rec1@org.com", "full_name": "Recruiter One"}
+      {"id": "user-uuid-1", "name": "Recruiter One", "email": "rec1@org.com", "role": "recruiter"}
     ],
     "stages": [
       {"id": "stage-1", "name": "Screening", "order": 1, "color": "slate"},
@@ -183,7 +197,7 @@ flowchart TD
     ],
     "candidate_count": 0,
     "resume_upload_link": "https://frontend.app/upload/3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "created_by": {"id": "...", "email": "...", "full_name": "..."},
+    "created_by": {"id": "...", "name": "Manager One", "email": "...", "role": "manager"},
     "created_at": "2025-01-01T10:00:00Z",
     "target_closing_date": "2025-06-30",
     "notice_period_preference": "30 days",
@@ -291,22 +305,49 @@ flowchart TD
 
 **Stage Fields** (from StageSerializer): `id`, `name` (req), `order` (req for sort), `color` (default "indigo"). Nested in Job responses via `StageBriefSerializer` (id, name, color only).
 
+### Recruiter Management
+**Bulk set of assigned recruiters** (`@action(detail=True, methods=['post'], url_path='recruiters')` named `manage_recruiters`).
+
+- **Endpoint**: `POST /api/v1/jobs/{job_id}/recruiters/`
+- **Method**: POST only. Body must contain `{"recruiter_ids": ["uuid1", "uuid2", ...]}` (complete desired list of recruiter User UUIDs **every time**).
+  - Initial assign: `["1", "2", "3"]`
+  - Add more (4,5): `["1", "2", "3", "4", "5"]`
+  - Unassign (e.g. remove 4): `["1", "2", "3", "5"]` (or empty `[]` to clear all)
+- **Behavior**: Fully replaces M2M `assigned_recruiters.set(valid_recruiters)` (no incremental add/remove). Validates **all** IDs are active `role=RECRUITER` in same org (returns specific `invalid_ids` on error). Handles duplicates gracefully.
+- **Auth/Permissions**: `IsAdminOrManager()` (recruiters cannot manage assignments). Uses `get_object()` for org scoping + RBAC.
+- **Response (200)**:
+  ```json
+  {
+    "status": "updated",
+    "assigned_recruiters": [
+      {"id": "uuid1", "name": "Recruiter One", "email": "r1@org.com", "role": "recruiter", ...},
+      ...
+    ]
+  }
+  ```
+  (Uses `UserBriefSerializer(many=True)`; empty list on clear.)
+- **Logging**: `log_action(..., 'updated' or 'unassigned', 'Job', job.id, note_with_count_and_ids)`
+- **Errors** (normalized 400):
+  - Bad input: `{"error": "recruiter_ids must be a list", ...}`
+  - Invalid IDs: `{"error": "Some recruiter IDs are invalid...", "invalid_ids": ["bad-uuid"]}`
+- **Notes**: Complements writable `assigned_recruiter_ids` (in `JobDetailSerializer` for create/PATCH of whole Job). Affects recruiter `get_queryset()` (only see assigned jobs), notifications (`candidates/tasks.py`), dashboards, and detail responses. Matches exact user requirement for full-list semantics on every call. No per-ID URL param or DELETE method. Updated in `get_permissions()`, view action, and this doc.
+
 ### Upload Link
-- **GET /api/v1/jobs/{id}/upload-link/** (`@action(detail=True, methods=['get'])`)
+- **GET /api/v1/jobs/{id}/upload-link/** (`@action(detail=True, methods=['get'])` in JobViewSet)
   **Step-by-Step**:
-  1. Any authenticated user (IsAuthenticated) who can see the job (per get_queryset RBAC).
-  2. Call GET `/api/v1/jobs/{job_id}/upload-link/`.
-  3. Returns the pre-generated link (from `Job.resume_upload_link`, set in `save()`).
-  4. Frontend uses this link to allow candidates to upload resumes publicly (hits `candidates.PublicUploadView` with job_uuid param for scoping to org/job).
-  5. Uploaded candidates go to pool or first stage of this job.
+  1. Any authenticated user (`IsAuthenticated()`) who can see the job per RBAC `get_queryset()`.
+  2. GET `/api/v1/jobs/{job_id}/upload-link/`.
+  3. If `resume_upload_link` not set (legacy), calls `job.save()` to generate it (uses `http://localhost:5173/upload/{job.id}` or configured frontend domain).
+  4. Returns the link. Frontend route `/upload/{job-id}` uses `TalentPoolPublicUploadView` (AllowAny, at `/api/v1/candidates/public-upload/`) — now decoupled to shared talent pool (no direct job_uuid in backend; recruiters later create `Application` to link to job/stage).
+  5. Public uploads log with `user=None`, trigger notification, support AI parse fallback.
 
   **Full Response (200)**:
   ```json
   {
-    "resume_upload_link": "https://frontend.app/upload/3fa85f64-5717-4562-b3fc-2c963f66afa6"
+    "resume_upload_link": "http://localhost:5173/upload/3fa85f64-5717-4562-b3fc-2c963f66afa6"
   }
   ```
-  - Link is unique per job. Can be regenerated if needed by updating job. Protected but publicly usable endpoint it points to is AllowAny.
+  - Link generated in `Job.save()` (robust, org-scoped). Frontend compatibility: public upload now lands in talent pool; use Application API to move to specific job's first stage (auto-set in `perform_create`).
 
 ### Export Jobs (CSV) - Matches JobExportView
 - **Endpoint**: `GET /api/v1/jobs/export/?status=open`
@@ -379,12 +420,13 @@ flowchart TD
 See top of file. Pipeline lives in `candidates` module (Application joins Candidate+Job+Stage; status on Application syncs with "Hired" stage).
 
 ## Key Integration Points
-- **Accounts**: `UserRole` + `common.permissions` (IsAdminOrManager, IsAdmin, IsAuthenticated in `get_permissions()`); `get_queryset()` role filters; M2M `assigned_recruiters` (limit to recruiters); `created_by` for Manager scoping + audit.
-- **Clients**: Optional FK; import uses iexact lookup (warning only if missing); `hiring_for=client` gates send-to-client in applications.
-- **Candidates/Application**: `PublicUploadView` (AllowAny, job_uuid scoped), `Application.current_stage` FK to Job.Stage, `move_stage` validates ownership, auto-first-stage from `DEFAULT_STAGES` on create/import (exact match between `perform_create` and `JobImportView`).
-- **Audit/Logs**: Every mutation (`perform_*`, status, stages add/manage, export, import) calls `log_action(user, verb, model, id, note)`. Supports `user=None` for public uploads.
-- **Shared Utils**: `common.utils_csv` for parse/generate, `common.exceptions.custom_exception_handler` (now handles ValidationError/NotFound uniformly with `{"error":..., "detail":..., "field_errors":...}`), `BaseModel`.
-- **URLs**: `jobs/urls.py` includes router for ViewSet + explicit paths for `export/`, `import/`, `{id}/upload-link/`, `{id}/stages/...`.
+- **Accounts**: `UserRole` + `common.permissions` (IsAdminOrManager, IsAdmin, IsAuthenticated in `get_permissions()`); `get_queryset()` role filters; M2M `assigned_recruiters` (limit to recruiters via `User.objects.filter(role=RECRUITER...)` in manage_recruiters); `created_by` for Manager scoping + audit. `UserBriefSerializer` for recruiter responses.
+- **Clients**: Optional FK to full Client model (see **docs/clients.md** for exhaustive fields table, nested POC create, change_status API, POCType, ClientDocument, org-aware emails to POCs). Import uses client_name lookup (warning on miss); `hiring_for=client` + POC.email gates `send_org_email` + `Notification` creation in `candidates/views.py` and `notifications/tasks.py`.
+- **Candidates/Application**: `PublicUploadView` (AllowAny, resolves org), `Application` joins Candidate+Job+Stage, `move_stage`, `schedule_interview`, `send_to_client` (creates ClientSubmission, triggers org email + in-app notif). Auto-first-stage from `DEFAULT_STAGES`.
+- **Notifications & Email**: Full org-aware stack (`OrganizationEmailConfig` with encrypted SMTP, `EmailTemplate` per-org, `send_org_email()` with branding/context/custom_html fallback to templates/emails/*.html). Used in client submission, interview reminders (to assigned_recruiters), resume notifications. Tasks wrapped in `@run_in_thread`.
+- **Audit/Logs**: Every mutation (`perform_*`, status, stages, **manage_recruiters**, export, import, client actions) calls `log_action`. Supports full context in notes (e.g. recruiter IDs, invalid_ids).
+- **Shared Utils**: `common.utils_csv`, `common.exceptions.custom_exception_handler` (normalizes ValidationError with "invalid_ids", NotFound), `BaseModel`, Fernet encryption in email_utils.
+- **URLs**: router + explicit for export/import/upload-link/stages/recruiters.
 
 **Common Stages** (`DEFAULT_STAGES`): 
 - Screening (slate, order=1)
@@ -394,16 +436,13 @@ See top of file. Pipeline lives in `candidates` module (Application joins Candid
 - Offer (amber, 5)
 - Hired (green, 6)
 
-Auto-created on **every** Job create/import. Custom stages via API (order/color supported; cannot delete if has active applications).
+Auto-created on every Job. Custom via API (cannot delete with candidates).
 
 **Notes**:
-- **Docs == source of truth**: All contracts (JSON payloads, CSV headers/required, QS filters, error shapes with ValidationError/NotFound, 201/207, row-indexing, choice fallbacks, RBAC patterns, Mermaid) verified 1:1 against live code in `jobs/views*.py`, `models.py`, `serializers.py`, `urls.py`, `docs/candidates.md`.
-- RBAC fully centralized (no more permission_classes on ViewSet; `get_permissions()` + `get_queryset()` with UserRole checks). Recruiters can list/retrieve assigned jobs but blocked from export/import/mutations.
-- Import hardened with explicit title dedup (beyond model), safe Decimal, case-insens choice matching, per-row atomic tx + stages, client warning (non-fatal), broad except for robustness.
-- Export aligned with CandidateExportView (permission change, QS comment, isinstance for skills).
-- All views now consistently `raise ValidationError(...)` or `NotFound` for errors (no raw Response(..., status=4xx) except serializer in some legacy paths now updated).
-- `python manage.py check` passes; seed data, dashboards updated in accounts/candidates for consistency.
-- Ready for frontend: exact match on all endpoints, auth, error formats, CSV templates, pipeline actions. Test import/export flows + RBAC (admin/manager vs recruiter).
+- **Docs == source of truth**: Updated to sync with clients.md (full client/POC integration, org-email, notifications). All JSON bodies take "everything in body" (full fields + recruiter_ids list), responses use UserBriefSerializer for recruiters, normalized errors with invalid_ids for manage_recruiters. Verified 1:1 with live code in `jobs/views.py` (updated manage_recruiters with full validation/.set()/audit), `clients/views.py` (new change_status + consistent raises), models, serializers, `accounts/email_utils.py`, `notifications/tasks.py`, `docs/clients.md`.
+- RBAC centralized in `get_permissions()` + role QS (ADMIN full, MANAGER own, RECRUITER assigned). `manage_recruiters` restricted to IsAdminOrManager.
+- Import/export hardened; client submissions now fully org-email aware with branding.
+- `python manage.py check` passes. All QS org-filtered. Ready for testing/frontend (use full bodies, /recruiters/ for M2M, /clients/{id}/status/ for lifecycle, POC emails auto-triggered).
 
-**Verification**: Synced with `candidates/views_export.py` (mirrored structure), `common/permissions.py`, updated dashboards in `accounts/views.py`, `candidates/views.py`. Full audit trail + soft-delete everywhere.
+**Verification**: Matches prior work on Client/POC/Notification models, recruiter bulk-set, org-email encryption+fallback (console in DEBUG), custom_exception_handler. Full end-to-end from client create → job → candidate → POC email + in-app Notification.
 

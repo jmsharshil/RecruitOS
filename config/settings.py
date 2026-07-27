@@ -69,12 +69,26 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'config.wsgi.application'
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+CONNECTION_STRING = os.environ.get('AZURE_POSTGRESQL_CONNECTIONSTRING')
+
+if not CONNECTION_STRING:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
     }
-}
+else:
+    conn_str_params = {pair.split('=')[0]: pair.split('=')[1] for pair in CONNECTION_STRING.split(' ')}
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': conn_str_params['dbname'],
+            'HOST': conn_str_params['host'],
+            'USER': conn_str_params['user'],
+            'PASSWORD': conn_str_params['password'],
+        }
+    }
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',},
@@ -116,7 +130,7 @@ REST_FRAMEWORK = {
 }
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME':  timedelta(hours=8),
+    'ACCESS_TOKEN_LIFETIME':  timedelta(hours=8000),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS':  True,
     'BLACKLIST_AFTER_ROTATION': True,
@@ -140,7 +154,84 @@ SPECTACULAR_SETTINGS = {
     },
 }
 
+FRONTEND_BASE_URL = os.getenv('FRONTEND_BASE_URL', 'http://localhost:5173')
+BASE_URL = os.getenv('BASE_URL', 'http://localhost:8000')
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Security Headers (Production)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SECURE_HSTS_SECONDS = 31536000  # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_BROWSER_XSS_FILTER = True
+    X_FRAME_OPTIONS = 'DENY'
+    SECURE_REFERRER_POLICY = 'strict-origin-when-cross-origin'
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Logging Configuration (Production)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+if not DEBUG:
+    LOGGING = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'formatters': {
+            'verbose': {
+                'format': '{levelname} {asctime} {module} {message}',
+                'style': '{',
+            },
+        },
+        'handlers': {
+            # stdout → Azure Log Stream / App Service Diagnostics / local console
+            'console': {
+                'class': 'logging.StreamHandler',
+                'formatter': 'verbose',
+                'level': 'ERROR',
+            },
+            'file': {
+                'level': 'ERROR',
+                'class': 'logging.FileHandler',
+                'filename': os.getenv('DJANGO_LOG_FILE', os.path.join(BASE_DIR, 'django_errors.log')),
+                'formatter': 'verbose',
+            },
+        },
+        'loggers': {
+            '': {
+                'handlers': ['console', 'file'],
+                'level': 'ERROR',
+                'propagate': True,
+            },
+            'django': {
+                'handlers': ['console', 'file'],
+                'level': 'ERROR',
+                'propagate': False,
+            },
+        },
+    }
+if not DEBUG:
+    CSRF_COOKIE_SECURE = True
+    SESSION_COOKIE_SECURE = True
+
+CSRF_TRUSTED_ORIGINS = ["https://*.azurewebsites.net", "http://localhost:5173", "http://localhost:3000"]
 CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://localhost:5173,http://localhost:3000', cast=Csv())
+
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
 
 FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024   # 10 MB
 DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024   # 10 MB
@@ -149,3 +240,63 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024   # 10 MB
 OPENAI_API_KEY = config('OPENAI_API_KEY', default='dummy-azure-key')
 AZURE_OPENAI_ENDPOINT = config('AZURE_OPENAI_ENDPOINT', default='https://your-resource.openai.azure.com/')
 OPENAI_API_VERSION = config('OPENAI_API_VERSION', default='2024-10-01')
+
+# Email settings — uses SMTP by default; switches to console backend when DEBUG=True
+# (so emails print to stdout in development instead of failing on missing creds).
+# Per-org OrganizationEmailConfig overrides these when active.
+if DEBUG:
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+else:
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+
+EMAIL_HOST = config("EMAIL_HOST_SERVER", default="smtp.office365.com")
+EMAIL_PORT = config("EMAIL_HOST_PORT", default=587, cast=int)
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@recruitsmart.local')
+EMAIL_FROM = DEFAULT_FROM_EMAIL
+
+# Fernet key for encrypting per-org SMTP passwords stored in DB.
+# Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# Keep this secret — rotating it requires re-saving all org SMTP passwords.
+EMAIL_ENCRYPTION_KEY = config('EMAIL_ENCRYPTION_KEY', default='')
+
+# Media files (user uploads)
+USE_AZURE_MEDIA = os.environ.get("USE_AZURE_MEDIA", "0") in ("1", "true", "True")
+
+if USE_AZURE_MEDIA:
+    AZURE_ACCOUNT_NAME = os.environ["AZURE_ACCOUNT_NAME"]
+    AZURE_ACCOUNT_KEY  = os.environ["AZURE_ACCOUNT_KEY"]
+    AZURE_CONTAINER    = os.environ.get("AZURE_MEDIA_CONTAINER")
+    AZURE_ACCOUNT_URL  = f"https://{AZURE_ACCOUNT_NAME}.blob.core.windows.net"
+    AZURE_CUSTOM_DOMAIN = os.environ.get(
+        "AZURE_CUSTOM_DOMAIN",
+        f"{AZURE_ACCOUNT_NAME}.blob.core.windows.net",
+    )
+    AZURE_URL_EXPIRATION_SECS = int(os.environ.get("AZURE_URL_EXPIRATION_SECS", "3600"))
+    AZURE_OVERWRITE_FILES = False
+
+    STORAGES = {
+        "default": {
+            "BACKEND": "storages.backends.azure_storage.AzureStorage",
+            "OPTIONS": {
+                "account_name": AZURE_ACCOUNT_NAME,
+                "account_key": AZURE_ACCOUNT_KEY,
+                "azure_container": AZURE_CONTAINER,
+                "overwrite_files": AZURE_OVERWRITE_FILES,
+                "expiration_secs": None,
+            }
+        },
+        "staticfiles": {
+            # keep whatever you use for static files (example with WhiteNoise)
+            "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
+        },
+    }
+
+    WHITENOISE_USE_FINDERS = True
+
+    MEDIA_URL = f"https://{AZURE_CUSTOM_DOMAIN}/{AZURE_CONTAINER}/"
+else:
+    MEDIA_URL  = "/media/"
+    MEDIA_ROOT = os.path.join(BASE_DIR, "media")

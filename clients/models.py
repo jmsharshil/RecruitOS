@@ -36,6 +36,12 @@ class Client(BaseModel):
     payment_period_days     = models.PositiveIntegerField(null=True, blank=True)
     replacement_period_days = models.PositiveIntegerField(null=True, blank=True)
     commercial_decided      = models.BooleanField(default=False)
+    agreement_document      = models.FileField(
+        upload_to='client_agreements/',
+        null=True,
+        blank=True
+    )
+    agreement_document_name = models.CharField(max_length=255, blank=True)
     created_by              = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='created_clients')
     #Internal Notes
     notes                   = models.TextField(blank=True)
