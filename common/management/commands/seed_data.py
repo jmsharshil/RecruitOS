@@ -9,7 +9,7 @@ from accounts.models import User, UserRole, Organization
 from clients.models import Client, POC, POCType, ClientStatus, ClientDocument
 from jobs.models import Job, Stage, HiringFor, JobStatus, DEFAULT_STAGES
 from candidates.models import (
-    Candidate, CandidateStatus, InterviewSchedule, InterviewMode,
+    Candidate, Application, CandidateStatus, InterviewSchedule, InterviewMode,
     ClientSubmission, SubmissionStatus
 )
 from audit.models import AuditLog, AuditActionType
@@ -23,10 +23,11 @@ class Command(BaseCommand):
         self.stdout.write('Clearing existing demo data...')
         
         # Clear existing demo data (including organizations) to allow re-running.
-        # Order matters due to FK relationships with CASCADE.
-        Candidate.objects.all().delete()
+        # Order matters due to FK relationships with CASCADE. Updated for Application decoupling.
+        Application.objects.all().delete()
         InterviewSchedule.objects.all().delete()
         ClientSubmission.objects.all().delete()
+        Candidate.objects.all().delete()
         Stage.objects.all().delete()
         Job.objects.all().delete()
         POC.objects.all().delete()
@@ -155,7 +156,7 @@ class Command(BaseCommand):
                 'company_name': 'Wipro',
                 'client_name': 'Amit Singh',
                 'email': 'amit.singh@wipro.com',
-                'alternative_email': '',
+                'alternative_email': 'amit.hr@wipro.com',
                 'contact': '+91-9876543212',
                 'alternative_contact': '+91-9876543239',
                 'website': 'https://www.wipro.com',
@@ -226,7 +227,8 @@ class Command(BaseCommand):
                 'status': JobStatus.OPEN,
                 'hiring_for': HiringFor.CLIENT,
                 'created_by': manager1,
-                'experience': '5-8 years',
+                'min_experience': 5,
+                'max_experience': 8,
                 'location': 'Bengaluru, Remote',
                 'skills': ['Python', 'Django', 'PostgreSQL', 'AWS', 'REST APIs'],
                 'organization': org1,
@@ -238,7 +240,8 @@ class Command(BaseCommand):
                 'status': JobStatus.OPEN,
                 'hiring_for': HiringFor.CLIENT,
                 'created_by': manager1,
-                'experience': '3-6 years',
+                'min_experience': 3,
+                'max_experience': 6,
                 'location': 'Mumbai',
                 'skills': ['React', 'TypeScript', 'JavaScript', 'Tailwind', 'Redux'],
                 'organization': org1,
@@ -250,7 +253,8 @@ class Command(BaseCommand):
                 'status': JobStatus.OPEN,
                 'hiring_for': HiringFor.CLIENT,
                 'created_by': manager1,
-                'experience': '4-7 years',
+                'min_experience': 4,
+                'max_experience': 7,
                 'location': 'Pune, Hybrid',
                 'skills': ['AWS', 'Docker', 'Kubernetes', 'Terraform', 'Jenkins'],
                 'organization': org1,
@@ -262,7 +266,8 @@ class Command(BaseCommand):
                 'status': JobStatus.ON_HOLD,
                 'hiring_for': HiringFor.CLIENT,
                 'created_by': manager1,
-                'experience': '2-5 years',
+                'min_experience': 2,
+                'max_experience': 5,
                 'location': 'Pune',
                 'skills': ['SQL', 'Python', 'Tableau', 'Excel', 'PowerBI'],
                 'organization': org1,
@@ -274,7 +279,8 @@ class Command(BaseCommand):
                 'status': JobStatus.OPEN,
                 'hiring_for': HiringFor.CLIENT,
                 'created_by': manager2,
-                'experience': '4-8 years',
+                'min_experience': 4,
+                'max_experience': 8,
                 'location': 'Bengaluru',
                 'skills': ['MongoDB', 'Express', 'React', 'Node.js', 'TypeScript'],
                 'organization': org2,
@@ -286,7 +292,8 @@ class Command(BaseCommand):
                 'status': JobStatus.OPEN,
                 'hiring_for': HiringFor.SELF,
                 'created_by': manager2,
-                'experience': '7+ years',
+                'min_experience': 7,
+                'max_experience': 15,
                 'location': 'Mumbai',
                 'skills': ['HR Management', 'Recruitment', 'Employee Relations', 'Performance Management'],
                 'organization': org2,
@@ -316,7 +323,8 @@ class Command(BaseCommand):
         job1, job2, job3, job4, job5, job6 = created_jobs
         self.stdout.write('Created 6 jobs (4 in Tech Solutions, 2 in Global Corp) with stages and recruiter assignments')
         
-        # 4. Create Candidates with varied pipeline states + realistic stage mapping (org partitioned)
+        # 4. Create Candidates (talent pool) + linked Applications (decoupled join model for pipeline)
+        # Status, stage, feedback now live on Application; Interview/ClientSubmission link to Application
         candidate_profiles = [
             ('Rahul Sharma', 'Python Backend Dev', 'TCS', '4.5 years', 'Bangalore', '15.2', '22.5', '60 days', 'Better opportunity'),
             ('Priya Patel', 'React Developer', 'Infosys', '3 years', 'Mumbai', '12.0', '18.0', '30 days', 'Role change'),
@@ -335,7 +343,7 @@ class Command(BaseCommand):
             ('Nikhil Verma', 'Data Scientist', 'Amazon', '5 years', 'Delhi', '19.5', '27.0', '60 days', 'AI/ML focus'),
         ]
         
-        # Cycle through realistic statuses
+        # Cycle through realistic statuses (now on Application)
         candidate_statuses = [
             CandidateStatus.SCREENING,
             CandidateStatus.INTERVIEW_SCHEDULED,
@@ -355,10 +363,11 @@ class Command(BaseCommand):
         
         jobs = created_jobs
         created_candidates = []
+        created_applications = []
         
         for i, (name, profile, company, exp, loc, ctc, expctc, notice, reason) in enumerate(candidate_profiles):
             job = jobs[i % len(jobs)]
-            recruiter = list(job.assigned_recruiters.all())[0]
+            recruiter = list(job.assigned_recruiters.all())[0] if job.assigned_recruiters.exists() else manager1
             
             status = candidate_statuses[i % len(candidate_statuses)]
             stage_name = status_stage_map.get(status, "Screening")
@@ -368,8 +377,8 @@ class Command(BaseCommand):
             offer = Decimal('18.5') if status == CandidateStatus.HIRED else None
             doc_date = date.today() - timedelta(days=random.randint(5, 60)) if i % 4 == 0 else None
             
+            # Create pool Candidate (no job linkage)
             candidate = Candidate.objects.create(
-                job=job,
                 candidate_name=name,
                 profile_name=profile,
                 current_profile=profile,
@@ -388,20 +397,28 @@ class Command(BaseCommand):
                 offer_in_hand=offer,
                 notice_period=notice,
                 reason_for_change=reason or 'Looking for new opportunities',
-                share_date=date.today() - timedelta(days=random.randint(0,30)),
-                feedback='Strong technical skills, good communication.' if i % 3 != 0 else 'Average communication, needs improvement in DSA.',
-                current_stage=stage,
-                status=status,
                 resume_file_name=f'{name.lower().replace(" ", "_")}_resume.pdf',
                 uploaded_by=recruiter,
                 organization=job.organization
             )
             created_candidates.append(candidate)
             
-            # Add related objects based on status (OneToOne so only for matching)
+            # Create Application (the join model carrying pipeline state)
+            app = Application.objects.create(
+                candidate=candidate,
+                job=job,
+                current_stage=stage,
+                status=status,
+                feedback='Strong technical skills, good communication.' if i % 3 != 0 else 'Average communication, needs improvement in DSA.',
+                share_date=date.today() - timedelta(days=random.randint(0,30)),
+                organization=job.organization
+            )
+            created_applications.append(app)
+            
+            # Add related objects based on status (now linked to Application, 1:1)
             if status == CandidateStatus.INTERVIEW_SCHEDULED:
                 InterviewSchedule.objects.create(
-                    candidate=candidate,
+                    application=app,
                     date=timezone.now().date() + timedelta(days=random.randint(1,5)),
                     time=time(random.randint(9,17), random.randint(0, 59)),
                     mode=random.choice(list(InterviewMode)),
@@ -416,7 +433,7 @@ class Command(BaseCommand):
                 }.get(status, SubmissionStatus.REVIEWED)
                 sent_by_user = manager1 if job.organization == org1 else manager2
                 ClientSubmission.objects.create(
-                    candidate=candidate,
+                    application=app,
                     sent_by=sent_by_user,
                     status=sub_status,
                     client_feedback='Excellent candidate with strong Python/Django background and good communication skills.' if status == CandidateStatus.HIRED else 'Candidate rejected due to salary expectations.' if status == CandidateStatus.REJECTED else 'Under review by hiring manager.',
@@ -424,13 +441,13 @@ class Command(BaseCommand):
                     organization=candidate.organization
                 )
                 if status == CandidateStatus.HIRED:
-                    candidate.feedback = 'Selected by client after final round. Offer extended at 28 LPA with 2 weeks joining.'
-                    candidate.save()
+                    app.feedback = 'Selected by client after final round. Offer extended at 28 LPA with 2 weeks joining.'
+                    app.save()
                 elif status == CandidateStatus.REJECTED:
-                    candidate.feedback = 'Rejected by client - salary mismatch.'
-                    candidate.save()
+                    app.feedback = 'Rejected by client - salary mismatch.'
+                    app.save()
         
-        self.stdout.write('Created 15 candidates (partitioned across organizations) across all pipeline stages with matching stages, interviews & submissions')
+        self.stdout.write('Created 15 candidates (partitioned across organizations) + 15 Applications across all pipeline stages with matching stages, interviews & submissions')
         
         # 5. Create Audit Logs for key actions (with organization)
         audit_entries = [
