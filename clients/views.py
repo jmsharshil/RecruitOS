@@ -4,15 +4,22 @@ from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError, NotFound
 from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
 from django.utils import timezone
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.filters import SearchFilter, OrderingFilter
 
 from clients.models import Client, POC, ClientDocument, ClientStatus
 from clients.serializers import ClientListSerializer, ClientDetailSerializer, POCSerializer, ClientDocumentSerializer
+from clients.filters import ClientFilterSet
 from common.permissions import IsAdminOrManager, IsAdmin
 from accounts.models import UserRole
 from audit.utils import log_action
 
 class ClientViewSet(viewsets.ModelViewSet):
-    filter_backends = []  # Can extend with SearchFilter etc. if needed
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = ClientFilterSet
+    search_fields   = ['company_name', 'client_name', 'email', 'industry', 'city']
+    ordering_fields = ['company_name', 'status', 'created_at', 'updated_at', 'agreement_date']
+    ordering        = ['-created_at']
     parser_classes  = [JSONParser, MultiPartParser, FormParser]
 
     def get_serializer_class(self):
@@ -22,7 +29,15 @@ class ClientViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = Client.objects.filter(is_deleted=False, organization=user.organization)
+        qs = Client.objects.filter(
+            is_deleted=False,
+            organization=user.organization
+        ).select_related('created_by')
+
+        # Prefetch for detail view to optimize pocs/documents/stats (avoids N+1)
+        if self.action in ('retrieve', 'change_status', 'add_poc', 'manage_poc', 'upload_document', 'delete_document'):
+            qs = qs.prefetch_related('pocs', 'documents', 'jobs')
+
         if user.role in (UserRole.ADMIN, UserRole.MANAGER):
             return qs
         elif user.role == UserRole.RECRUITER:

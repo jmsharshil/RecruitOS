@@ -4,6 +4,7 @@
 Manages client companies that post job requirements. Linked to Jobs (FK), POCs (related_name='pocs'), Documents (related_name='documents'). All inherit `BaseModel` for org-scoping, soft-delete, audit timestamps. 
 
 **Key Models**: `Client` (UUID PK, auto `client_id=CLI-XXXX` in `save()` with org-scoped `unique_together=('organization', 'client_id')`), `POC` (with `POCType`), `ClientDocument` (general FileField). Added `agreement_document` (FileField to 'client_agreements/') + `agreement_document_name` (CharField) via migrations 0002 and 0003. Like Candidate.resume, for easy upload of agreement during client **create** (multipart support via parser_classes on ViewSet + serializer auto-name from file).
+- `clients/filters.py`: `ClientFilterSet` (status, industry/city/state/country icontains, date ranges, has_agreement, commercial_decided) registered on ViewSet.
 
 **Choice Enums** (in models.py):
 - `ClientStatus`: "active", "inactive", "on-hold" (default: "active")
@@ -109,7 +110,7 @@ flowchart TD
 
 ### ClientViewSet (/api/v1/clients/)
 - **Auth/RBAC**: `get_permissions()` returns `IsAuthenticated()` for list/retrieve (recruiters see via job linkage), `IsAdmin()` for destroy, `IsAdminOrManager()` for all mutations (create, update, change_status, pocs, documents). `get_queryset()` filters by org + role.
-- **List**: `GET /api/v1/clients/?status=active&search=tech` — uses `ClientListSerializer` (flat: id, client_id, company_name, industry, status, email/contact/city/state/country, open_jobs_count, created_by_name, created_at). Supports filters/search if added to filter_backends.
+- **List**: `GET /api/v1/clients/?status=active&industry=IT&city=Mumbai&search=tech&ordering=-created_at` — uses `ClientListSerializer` (flat fields). Full filtering via `ClientFilterSet` (status, industry~icontains, city/state/country~icontains, created_after/before, agreement_date_after, has_agreement, commercial_decided), `SearchFilter` (company_name, client_name, email, industry, city), `OrderingFilter` (company_name, status, created_at, updated_at, agreement_date). `DjangoFilterBackend` enabled.
   **Response (200)**: Paginated list.
   ```json
   {
@@ -129,7 +130,7 @@ flowchart TD
     }]
   }
   ```
-  Use detail for full (pocs grouped by type, documents array, stats, all fields).
+  Use detail for full (pocs grouped by type {hiring:[], payment:[]}, documents array, stats, agreement_document, all fields).
 
 - **Create**: `POST /api/v1/clients/` (full body with **everything**; supports nested pocs + multipart for `agreement_document`).
   **Step-by-Step**:
@@ -240,21 +241,28 @@ flowchart TD
 - Matches candidate `upload_resume` pattern.
 
 ### Export Clients
-- **Endpoint**: `GET /api/v1/clients/export/?status=active`
-- **Auth**: `IsAuthenticated()` (all roles; QS filters by role).
-- Uses `ClientExportView` (`CLIENT_EXPORT_HEADERS` matches table fields).
-- QS: org-scoped, optional status filter, `is_deleted=False`.
-- Logs export count. Returns CSV with all columns (including agreement_date etc.).
-- **TIP**: Export first to get perfect template for import.
+- **Endpoint**: `GET /api/v1/clients/export/?status=active&search=...` (query params respected via same filters as list).
+- **Auth**: `IsAuthenticated()` (all roles; QS mirrors `ClientViewSet.get_queryset()` exactly — admins/managers full org, recruiters only clients linked via their assigned jobs, others none).
+- Uses `ClientExportView` (`CLIENT_EXPORT_HEADERS` includes new fields: agreement_date, payment/replacement_period_days, commercial_decided, agreement_document_name).
+- Logs export count. Returns CSV (Excel-friendly). No file columns (agreement_document omitted).
+- **TIP**: Export first to get perfect template for import (headers normalized, all fields covered). Supports ?status=active filter.
 
 ### Import Clients
-- **Endpoint**: `POST /api/v1/clients/import/` (multipart `file`; supports CSV/Excel via `parse_csv_from_request`).
+- **Endpoint**: `POST /api/v1/clients/import/` (multipart `file`; supports CSV/Excel via `parse_csv_from_request` + header normalization to snake_case).
 - **Auth**: `IsAdmin()` (from `ClientImportView`).
-- Required: `company_name,client_name,email,contact,industry` (others optional; uses model defaults + `get_choice` if added).
-- Logic: skips existing by `email` (org-scoped), creates with `created_by`, org, parses dates/numbers safely, atomic per row. Returns 201 (all good) or 207 (partial) with row-indexed errors.
-- **Full Response Examples**: Same as in jobs.md (created/skipped/errors array with {"row": N, "error": "..."}).
-- Early error if missing required headers.
-- Updated `views_export.py` handles more fields from model (website, gst, etc.). No preview/confirm yet (one-step; placeholder removed from ViewSet).
+- Required: `company_name,client_name,email,contact,industry` (others optional). Uses `DateParserField.to_internal_value()` (flexible formats via dateutil + common patterns), `get_choice()` for status (defaults to ACTIVE), int() safe parse for days, boolean coercion for commercial_decided. Dedup by email (org-scoped). `transaction.atomic()` per row. Row errors start at line 2.
+- Logic: skips duplicates, collects row-indexed errors, returns 201 (success) or 207 (partial success with errors array). Early ValidationError if missing required headers.
+- **Full Response Examples**: Same as jobs.md:
+  ```json
+  {
+    "created": 3,
+    "skipped": 1,
+    "errors": [{"row": 4, "error": "Client with email 'dup@ex.com' already exists (org-scoped)."}]
+  }
+  ```
+- Export first for perfect CSV template (includes all fields like agreement_date, agreement_document_name). Updated `views_export.py` now mirrors JobImportView robustness + DateParser for imports (as per summary).
+
+**TIP**: agreement_date in CSV can be "2025-01-15", "15/01/2025", "Jan 15, 2025" etc. — all parsed successfully.
 
 ## Integration Points
 - **Jobs**: `client` FK (optional; `hiring_for=client` in Job). Recruiter QS uses jobs__assigned_recruiters. Import uses client lookup by name in jobs.
