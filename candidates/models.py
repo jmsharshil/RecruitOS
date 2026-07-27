@@ -56,7 +56,7 @@ class Application(BaseModel):
         Stage, null=True, blank=True, on_delete=models.SET_NULL, related_name='applications'
     )
     status = models.CharField(
-        max_length=30, choices=CandidateStatus.choices, default=CandidateStatus.SCREENING
+        max_length=30, choices=CandidateStatus.choices, default="screening"
     )
     feedback = models.TextField(blank=True)
     share_date = models.DateField(default=date.today)

@@ -153,7 +153,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             stage = Stage.objects.get(id=stage_id, job=application.job)
             application.current_stage = stage
             if stage.name.lower() == "hired":
-                application.status = CandidateStatus.HIRED
+                application.status = CandidateStatus.HIRED.value
             application.save()
             log_action(request.user, 'updated', 'Application', application.id, f"Stage moved to {stage.name}")
             return Response(ApplicationSerializer(application).data)
@@ -174,7 +174,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             status=SubmissionStatus.PENDING,
             organization=request.user.organization
         )
-        application.status = CandidateStatus.SENT_TO_CLIENT
+        application.status = CandidateStatus.SENT_TO_CLIENT.value
         application.save()
         log_action(request.user, 'sent', 'Application', application.id, f"Sent {application.candidate.candidate_name} to client")
         
@@ -192,7 +192,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 application=application,
                 organization=request.user.organization
             )
-            application.status = CandidateStatus.INTERVIEW_SCHEDULED
+            application.status = CandidateStatus.INTERVIEW_SCHEDULED.value
             application.save()
             log_action(request.user, 'updated', 'Application', application.id, f"Scheduled interview for {application.candidate.candidate_name}")
             return Response(InterviewScheduleSerializer(schedule).data, status=201)
@@ -346,7 +346,7 @@ class PublicUploadView(APIView):
         application = Application.objects.create(
             candidate=candidate,
             job=job,
-            status=CandidateStatus.SCREENING,
+            status=CandidateStatus.SCREENING.value,
             current_stage=first_stage,
             organization=job.organization
         )

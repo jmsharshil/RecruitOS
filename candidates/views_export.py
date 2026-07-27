@@ -5,13 +5,14 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError
 from django.db.models import Q
 from datetime import date
+from decimal import Decimal
 
 from candidates.models import Candidate, Application, CandidateStatus
 from jobs.models import Job
-from common.utils_csv import generate_csv_response, parse_csv_from_request
-from common.permissions import IsAdminOrManager
+from common.utils_csv import generate_csv_response, parse_csv_from_request, get_choice
 from audit.utils import log_action
 from candidates.utils import safe_float
+from accounts.models import UserRole
 
 CANDIDATE_EXPORT_HEADERS = [
     'candidate_name', 'profile_name', 'current_company', 'current_profile',
@@ -28,28 +29,33 @@ CANDIDATE_IMPORT_REQUIRED = [
 
 class CandidateExportView(APIView):
     """
-    GET /api/v1/candidates/export/
-    Download all visible candidates (including pool) as a CSV file.
-    Restricted to ADMIN/MANAGER via IsAdminOrManager. MANAGER sees only their created-jobs' candidates + pool.
-    Optional query params: ?status=screening&job_id=<uuid>
-    Note: status/job filters exclude pure pool candidates.
+    GET /api/v1/candidates/export/?status=screening&job_id=uuid
+    Download role-scoped candidates (incl. talent pool) as CSV.
+    All authenticated roles allowed (recruiters see assigned-jobs' candidates + pool).
+    Uses same Q-filter pattern as CandidateViewSet.get_queryset().
+    Optional filters (?status=, ?job_id=) apply to applications (excludes pure pool).
+    Logs the export count. See docs/candidates.md for full RBAC/CSV contract.
     """
-    permission_classes = [IsAdminOrManager]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        from accounts.models import UserRole
-
         user = request.user
         qs = Candidate.objects.filter(
             is_deleted=False, 
             organization=user.organization
         ).prefetch_related('applications__job')
 
-        if user.role == UserRole.MANAGER:
+        if user.role == UserRole.ADMIN:
+            pass  # sees all org candidates + pool
+        elif user.role == UserRole.MANAGER:
             qs = qs.filter(
                 Q(applications__job__created_by=user) | Q(applications__isnull=True)
             ).distinct()
-        # ADMIN sees all; RECRUITER blocked by IsAdminOrManager permission
+        elif user.role == UserRole.RECRUITER:
+            qs = qs.filter(
+                Q(applications__job__assigned_recruiters=user) | Q(applications__isnull=True)
+            ).distinct()
+        # Note: Matches CandidateViewSet.get_queryset() exactly for RBAC
 
         # Optional filters (these will exclude pool candidates)
         status_filter = request.query_params.get('status')
@@ -82,23 +88,26 @@ class CandidateExportView(APIView):
                 job_title,
             ])
 
-        log_action(request.user, 'exported', 'Candidate', None, f"Exported {len(rows)} candidates (incl. pool)")
+        log_action(user, 'exported', 'Candidate', None, f"Exported {len(rows)} candidates (incl. pool)")
         return generate_csv_response('candidates_export.csv', CANDIDATE_EXPORT_HEADERS, rows)
 
 
 class CandidateImportView(APIView):
     """
     POST /api/v1/candidates/import/
-    Upload a CSV to bulk-create candidates (supports pool and job-linked).
-    The CSV must have at minimum: candidate_name, email, contact.
-    job_title is optional: if provided and matching job found, also creates an Application.
-    Optional columns: profile_name, current_profile, current_company, experience, current_location,
-    education, college, dob, doc, current_ctc, expected_ctc, notice_period, status, feedback, share_date, reason_for_change.
+    Upload CSV or Excel (.xlsx, .xls) for bulk create of candidates (pool or job-linked).
+    All authenticated roles allowed (recruiters can import to pool or jobs they are assigned to via M2M check).
+    Required: candidate_name, email, contact (validated by parser against normalized headers).
+    job_title optional (iexact); creates Application with first_stage from Job.DEFAULT_STAGES equiv + status.
+    Uses safe_float (coerced to Decimal for model), get_choice for status, dedup by (email+org), row-indexed errors (start=2).
+    Response: 201 full or 207 partial. Logs summary with counts. Recruiter job guard retained.
+    See docs/candidates.md for full contract (incl. normalized headers, _get_choice notes).
     """
-    permission_classes = [IsAdminOrManager]
+    permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request):
+        user = request.user
         headers, rows, error = parse_csv_from_request(request, required_fields=CANDIDATE_IMPORT_REQUIRED)
         if error:
             raise ValidationError({"error": error})
@@ -108,7 +117,7 @@ class CandidateImportView(APIView):
         skipped = 0
         errors = []
 
-        for i, row in enumerate(rows, start=2):  # row 1 = header
+        for i, row in enumerate(rows, start=2):  # row 1 = header; works for Excel too
             name = row.get('candidate_name', '').strip()
             email = row.get('email', '').strip().lower()
             contact = row.get('contact', '').strip()
@@ -122,18 +131,23 @@ class CandidateImportView(APIView):
             if job_title:
                 job = Job.objects.filter(
                     title__iexact=job_title,
-                    organization=request.user.organization,
+                    organization=user.organization,
                     is_deleted=False
                 ).first()
                 if not job:
                     errors.append({"row": i, "error": f"Job '{job_title}' not found."})
                     skipped += 1
                     continue
+                # RBAC: Recruiters can only link to jobs they are assigned to
+                if user.role == UserRole.RECRUITER and not job.assigned_recruiters.filter(id=user.id).exists():
+                    errors.append({"row": i, "error": f"Recruiter not assigned to job '{job_title}'. Access denied."})
+                    skipped += 1
+                    continue
 
             # Get or create candidate (pool-friendly, dedup by email+org)
             candidate = Candidate.objects.filter(
                 email=email,
-                organization=request.user.organization,
+                organization=user.organization,
                 is_deleted=False
             ).first()
             if not candidate:
@@ -152,13 +166,13 @@ class CandidateImportView(APIView):
                         email=email,
                         dob=row.get('dob') or None,
                         doc=row.get('doc') or None,
-                        current_ctc=safe_float(row.get('current_ctc')) or 0,
-                        expected_ctc=safe_float(row.get('expected_ctc')) or 0,
+                        current_ctc=Decimal(safe_float(row.get('current_ctc')) or 0),
+                        expected_ctc=Decimal(safe_float(row.get('expected_ctc')) or 0),
                         notice_period=row.get('notice_period', 'Not specified'),
-                        reason_for_change=row.get('reason_for_change', 'Imported via CSV'),
+                        reason_for_change=row.get('reason_for_change', 'Imported via file'),
                         resume_file_name=row.get('resume_file_name', ''),
-                        uploaded_by=request.user,
-                        organization=request.user.organization,
+                        uploaded_by=user,
+                        organization=user.organization,
                     )
                     created_candidates += 1
                 except Exception as e:
@@ -166,15 +180,15 @@ class CandidateImportView(APIView):
                     skipped += 1
                     continue
             else:
-                # Optionally update existing candidate fields
+                # Optionally update existing; for now skip to avoid partial updates
                 pass
 
             if job:
-                # Create application if not exists (unique per candidate-job)
+                # Create application if not exists (unique per candidate-job via Meta)
                 if Application.objects.filter(
                     candidate=candidate,
                     job=job,
-                    organization=request.user.organization,
+                    organization=user.organization,
                     is_deleted=False
                 ).exists():
                     errors.append({"row": i, "error": f"Application already exists for {email} on job '{job_title}'."})
@@ -183,14 +197,19 @@ class CandidateImportView(APIView):
 
                 try:
                     first_stage = job.stages.filter(is_deleted=False).order_by('order').first()
+                    status_val = get_choice(
+                        row.get('status'),
+                        CandidateStatus.choices,
+                        CandidateStatus.SCREENING.value
+                    )
                     Application.objects.create(
                         candidate=candidate,
                         job=job,
                         current_stage=first_stage,
-                        status=row.get('status', CandidateStatus.SCREENING),
+                        status=status_val,
                         feedback=row.get('feedback', ''),
                         share_date=row.get('share_date') or date.today(),
-                        organization=request.user.organization,
+                        organization=user.organization,
                     )
                     created_applications += 1
                 except Exception as e:
@@ -199,15 +218,16 @@ class CandidateImportView(APIView):
                     continue
 
         log_action(
-            request.user, 
-            'imported', 
-            'Candidate/Application', 
-            None, 
-            f"Imported {created_candidates} candidates and {created_applications} applications from CSV"
+            user,
+            'imported',
+            'Candidate/Application',
+            None,
+            f"Imported {created_candidates} candidates and {created_applications} applications from file (skipped: {skipped})"
         )
+        status_code = 207 if errors else 201
         return Response({
             "created_candidates": created_candidates,
             "created_applications": created_applications,
             "skipped": skipped,
             "errors": errors,
-        }, status=207 if errors else 201)
+        }, status=status_code)

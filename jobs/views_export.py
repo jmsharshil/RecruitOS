@@ -9,7 +9,7 @@ from accounts.models import UserRole
 
 from jobs.models import Job, Stage, JobStatus, HiringFor, Priority, JobTypes, JobModes, DEFAULT_STAGES
 from clients.models import Client
-from common.utils_csv import generate_csv_response, parse_csv_from_request
+from common.utils_csv import generate_csv_response, parse_csv_from_request, get_choice
 from common.permissions import IsAdminOrManager
 from audit.utils import log_action
 
@@ -65,12 +65,11 @@ class JobExportView(APIView):
 class JobImportView(APIView):
     """
     POST /api/v1/jobs/import/
-    Upload CSV to bulk-create jobs (Admin/Manager only). Supports partial success (207).
-    Required columns: title, min_experience, max_experience, location.
-    Optional: client_name (iexact lookup with warning), skills (comma sep), status/priority/job_type/job_mode/hiring_for (with fallback to defaults),
-    budget (Decimal), education, description, openings.
-    Dedup by title (org-scoped). Auto-creates DEFAULT_STAGES. Row errors 1-based (start=2).
-    See docs/jobs.md for full contract.
+    Upload CSV or Excel (.xlsx, .xls) for bulk create of jobs (Admin/Manager only; recruiters blocked).
+    Required: title, min_experience, max_experience, location (validated by parser on normalized headers).
+    Optional: client_name (lookup or warning), skills (comma-split), status/priority/etc via get_choice (defaults provided),
+    budget as Decimal, etc. Dedup by title__iexact+org. Auto-creates stages from DEFAULT_STAGES. Row errors start at 2.
+    Response: 201 or 207 partial with errors list. Uses transaction per job. See docs/jobs.md.
     """
     permission_classes = [IsAdminOrManager]
     parser_classes = [MultiPartParser, FormParser]
@@ -82,17 +81,7 @@ class JobImportView(APIView):
 
         created, skipped, errors = 0, 0, []
 
-        # Helper for safe choice lookup (case-insensitive on value or label)
-        def _get_choice(val, choices, default):
-            if not val:
-                return default
-            v = str(val).strip().lower()
-            for c_val, c_disp in choices:
-                if v in (c_val.lower(), str(c_disp).lower()):
-                    return c_val
-            return default
-
-        for i, row in enumerate(rows, start=2):  # row 1 = header
+        for i, row in enumerate(rows, start=2):  # row 1 = header; works for Excel too
             title = row.get('title', '').strip()
             if not title:
                 errors.append({"row": i, "error": "Missing required title"})
@@ -134,14 +123,14 @@ class JobImportView(APIView):
                 except:
                     budget = Decimal('0')
 
-                status = _get_choice(row.get('status'), JobStatus.choices, JobStatus.OPEN.value)
-                priority = _get_choice(row.get('priority'), Priority.choices, Priority.MEDIUM.value)
-                job_type = _get_choice(row.get('job_type'), JobTypes.choices, JobTypes.PERMANENT.value)
-                job_mode = _get_choice(row.get('job_mode'), JobModes.choices, JobModes.OFFICE.value)
-                hiring_for = _get_choice(row.get('hiring_for'), HiringFor.choices, HiringFor.SELF.value)
+                status = get_choice(row.get('status'), JobStatus.choices, JobStatus.OPEN.value)
+                priority = get_choice(row.get('priority'), Priority.choices, Priority.MEDIUM.value)
+                job_type = get_choice(row.get('job_type'), JobTypes.choices, JobTypes.PERMANENT.value)
+                job_mode = get_choice(row.get('job_mode'), JobModes.choices, JobModes.OFFICE.value)
+                hiring_for = get_choice(row.get('hiring_for'), HiringFor.choices, HiringFor.SELF.value)
 
                 education = row.get('education', '').strip()
-                description = row.get('description', '').strip() or 'Imported via CSV'
+                description = row.get('description', '').strip() or 'Imported via file'
 
                 with transaction.atomic():
                     job = Job.objects.create(
@@ -179,7 +168,7 @@ class JobImportView(APIView):
 
         log_action(
             request.user, 'imported', 'Job', None,
-            f"Imported {created} jobs from CSV (skipped: {skipped})"
+            f"Imported {created} jobs from file (skipped: {skipped})"
         )
         return Response({
             "created": created,
