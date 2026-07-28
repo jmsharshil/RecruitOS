@@ -28,10 +28,10 @@ class Candidate(BaseModel):
     id                 = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     profile_name       = models.CharField(max_length=200)
     candidate_name     = models.CharField(max_length=150)
-    current_profile    = models.CharField(max_length=200, blank=True)
-    current_company    = models.CharField(max_length=200, blank=True)
-    experience         = models.CharField(max_length=50)
-    current_location   = models.CharField(max_length=150, blank=True)
+    current_profile    = models.CharField(max_length=200, blank=True, null=True)
+    current_company    = models.CharField(max_length=200, blank=True, null=True)
+    experience         = models.CharField(max_length=50, blank=True, null=True)
+    current_location   = models.CharField(max_length=150, blank=True, null=True)
     education          = models.JSONField(default=list, blank=True)
     contact            = models.CharField(max_length=20, blank=True)
     email              = models.EmailField()
@@ -40,6 +40,11 @@ class Candidate(BaseModel):
     uploaded_by        = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='added_candidates')
     # Skills stored as JSON list for quick filtering
     skills             = models.JSONField(default=list, blank=True)
+    # New AI parsed fields
+    linkedin_url       = models.URLField(max_length=500, blank=True)
+    portfolio_url      = models.URLField(max_length=500, blank=True)
+    certifications     = models.JSONField(default=list, blank=True)
+    experience_details = models.JSONField(default=list, blank=True)
     # General-purpose tags for internal categorization
     tags               = models.JSONField(default=list, blank=True)
     # Duplicate management

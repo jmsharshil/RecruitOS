@@ -1,6 +1,7 @@
 import re
 import json
 import os
+# pyrefly: ignore [missing-import]
 import pdfplumber
 import docx2txt
 from pathlib import Path
@@ -287,7 +288,7 @@ def parse_resume_task(resume_file, organization=None):
     experience = (
         f"{int(total_exp)} years"
         if isinstance(total_exp, (int, float)) and total_exp is not None
-        else "0 years"
+        else None
     )
 
     education = parsed.get("education") or []
@@ -296,15 +297,15 @@ def parse_resume_task(resume_file, organization=None):
 
     current_profile = safe_str(
         parsed.get("current_profile") or parsed.get("title") or parsed.get("designation"),
-        default="Not provided"
+        default=None
     )
     current_employer = safe_str(
         parsed.get("current_employer") or parsed.get("current_company"),
-        default="Not provided"
+        default=None
     )
     location = safe_str(
         parsed.get("location") or parsed.get("current_location"),
-        default="Not specified"
+        default=None
     )
 
     skills = parsed.get("skills") or []
@@ -323,6 +324,10 @@ def parse_resume_task(resume_file, organization=None):
         "email": email,
         "resume_file_name": getattr(resume_file, "name", "resume.pdf"),
         "skills": skills,
+        "linkedin_url": parsed.get("linkedin_url") or "",
+        "portfolio_url": parsed.get("portfolio_url") or "",
+        "certifications": parsed.get("certifications") or [],
+        "experience_details": parsed.get("experience") or [],
     }
 
     # --- Duplicate detection (email + phone, org-scoped) ---

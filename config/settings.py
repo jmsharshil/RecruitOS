@@ -124,7 +124,7 @@ REST_FRAMEWORK = {
         'rest_framework.filters.OrderingFilter',
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 10,
+    'PAGE_SIZE': 100,
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'EXCEPTION_HANDLER': 'common.exceptions.custom_exception_handler'
 }
@@ -217,8 +217,8 @@ if not DEBUG:
     CSRF_COOKIE_SECURE = True
     SESSION_COOKIE_SECURE = True
 
-CSRF_TRUSTED_ORIGINS = ["https://*.azurewebsites.net", "http://localhost:5173", "http://localhost:3000"]
-CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://localhost:5173,http://localhost:3000', cast=Csv())
+CSRF_TRUSTED_ORIGINS = ["https://*.azurewebsites.net", "http://localhost:5173", "http://localhost:3000","https://app.apidog.com"]
+CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://localhost:5173,http://localhost:3000,https://app.apidog.com', cast=Csv())
 
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = [

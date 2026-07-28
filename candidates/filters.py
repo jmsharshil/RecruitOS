@@ -18,20 +18,56 @@ class CandidateFilterSet(django_filters.FilterSet):
     Note: CTC, notice_period, experience_min/max filters moved to ApplicationFilterSet
     as those fields now live on the Application model (per-job data).
     """
+    candidate_name     = django_filters.CharFilter(field_name='candidate_name', lookup_expr='icontains')
+    email              = django_filters.CharFilter(field_name='email', lookup_expr='icontains')
+    contact            = django_filters.CharFilter(field_name='contact', lookup_expr='icontains')
+    current_profile    = django_filters.CharFilter(field_name='current_profile', lookup_expr='icontains')
+    experience         = django_filters.CharFilter(field_name='experience', lookup_expr='icontains')
     current_location   = django_filters.CharFilter(field_name='current_location', lookup_expr='icontains')
-    is_duplicate       = django_filters.BooleanFilter(field_name='is_duplicate')
-    education          = django_filters.CharFilter(field_name='education', lookup_expr='icontains')
     current_company    = django_filters.CharFilter(field_name='current_company', lookup_expr='icontains')
+    education          = django_filters.CharFilter(field_name='education', lookup_expr='icontains')
+    skills             = django_filters.CharFilter(field_name='skills', lookup_expr='icontains')
+    tags               = django_filters.CharFilter(field_name='tags', lookup_expr='icontains')
+    is_duplicate       = django_filters.BooleanFilter(field_name='is_duplicate')
     created_after      = django_filters.DateFilter(field_name='created_at', lookup_expr='date__gte')
     created_before     = django_filters.DateFilter(field_name='created_at', lookup_expr='date__lte')
+
+    experience_min     = django_filters.NumberFilter(method='filter_exp_min')
+    experience_max     = django_filters.NumberFilter(method='filter_exp_max')
 
     class Meta:
         model = Candidate
         fields = [
-            'current_location', 'is_duplicate',
-            'education', 'current_company',
-            'created_after', 'created_before',
+            'candidate_name', 'email', 'contact', 'current_profile', 'experience',
+            'current_location', 'current_company', 'education', 'skills', 'tags',
+            'is_duplicate', 'created_after', 'created_before',
+            'experience_min', 'experience_max',
         ]
+
+    def _extract_exp_number(self, exp_str):
+        import re
+        if not exp_str:
+            return None
+        match = re.search(r'\d+(\.\d+)?', str(exp_str))
+        if match:
+            return float(match.group())
+        return None
+
+    def filter_exp_min(self, queryset, name, value):
+        valid_ids = []
+        for candidate in queryset:
+            exp_val = self._extract_exp_number(candidate.experience)
+            if exp_val is not None and exp_val >= float(value):
+                valid_ids.append(candidate.id)
+        return queryset.filter(id__in=valid_ids)
+
+    def filter_exp_max(self, queryset, name, value):
+        valid_ids = []
+        for candidate in queryset:
+            exp_val = self._extract_exp_number(candidate.experience)
+            if exp_val is not None and exp_val <= float(value):
+                valid_ids.append(candidate.id)
+        return queryset.filter(id__in=valid_ids)
 
 
 class ApplicationFilterSet(django_filters.FilterSet):
