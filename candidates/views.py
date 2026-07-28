@@ -11,8 +11,6 @@ from django.db.models import Q
 import logging
 from common.task_queue import TASK_QUEUE
 
-logger = logging.getLogger(__name__)
-
 from candidates.models import (
     Candidate, Application, CandidateStatus,
     ClientSubmission, SubmissionStatus, InterviewSchedule,
@@ -434,7 +432,7 @@ class TalentPoolPublicUploadView(APIView):
     detection. No blocking OpenAI calls on request thread. Returns immediately with
     background_parsing=True. Matches updated Candidate model (no per-job CTC/notice).
     """
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
     parser_classes     = [MultiPartParser, FormParser]
 
     def get(self, request):
@@ -465,64 +463,20 @@ class TalentPoolPublicUploadView(APIView):
         if not resume:
             raise ValidationError({"error": "No resume provided"})
 
-        # Support public uploads via ?org_id= query param (or POST data) for AllowAny.
-        # Uses form data for initial sync create; AI parse + dup check enqueued to background.
-        org_id = request.query_params.get('org_id') or request.data.get('org_id')
-        if org_id:
-            try:
-                organization = Organization.objects.get(id=org_id)
-            except (Organization.DoesNotExist, ValueError, TypeError):
-                raise ValidationError({"error": "Organization not found"})
-            user_for_log = None
-        else:
-            if not request.user.is_authenticated or not hasattr(request.user, 'organization'):
-                raise ValidationError({"error": "org_id query param or authentication required for upload"})
-            organization = request.user.organization
-            user_for_log = request.user
+        user = request.user
+        from accounts.models import Organization
+        try:
+            organization = Organization.objects.get(id=user.organization.id)
+        except Organization.DoesNotExist:
+            raise ValidationError({"error": "Organization not found"})
 
-        name = request.data.get("name") or request.data.get("candidate_name", "Unnamed Candidate")
-        email = (request.data.get("email", "") or "").strip().lower()
-        phone = request.data.get("phone") or request.data.get("contact", "")
-        current_profile = request.data.get("current_profile", "Not provided")
-        current_company = request.data.get("current_company", "Not provided")
-        experience = request.data.get("experience", "0 years")
-        current_location = request.data.get("current_location", "Not specified")
-        education = request.data.get("education", [])
-        skills = request.data.get("skills", [])
-
-        # No synchronous AI parse - enqueue to TASK_QUEUE instead (see below)
-
-        # Normalize for JSONFields in model
-        if not isinstance(skills, list):
-            skills = [s.strip() for s in str(skills).split(",") if s.strip()] if skills else []
-        if not isinstance(education, (list, dict)):
-            education = [str(education).strip()] if str(education).strip() else []
-
-        # Pre-check for duplicate using org-scoped helper (background task will re-evaluate)
-        from .utils import _find_existing_candidate, background_parse_resume
-        existing = _find_existing_candidate(email=email, phone=phone, organization=organization)
-        is_duplicate = bool(existing)
-        duplicate_of = existing
-
-        # Create Candidate synchronously with form/resume data
-        candidate = Candidate.objects.create(
-            candidate_name=name,
-            profile_name=name,
-            current_profile=current_profile,
-            current_company=current_company,
-            experience=experience,
-            current_location=current_location,
-            education=education,
-            contact=phone,
-            email=email,
-            skills=skills,
-            resume=resume,
-            resume_file_name=getattr(resume, "name", "resume.pdf"),
-            organization=organization,
-            uploaded_by=user_for_log,
-            is_duplicate=is_duplicate,
-            duplicate_of=duplicate_of,
-        )
+        # Use AI parsing (via parse_resume_task which does org-scoped duplicate detection
+        # and anti-hallucination). Fallback to form fields on error. Updated for new
+        # Candidate/Application models (profile_name added, CTC/notice moved to Application,
+        # education/skills as JSON lists).
+        ai_parsed = False
+        parsed_data = {}
+        from candidates.utils import background_parse_resume
 
         log_action(
             user,
