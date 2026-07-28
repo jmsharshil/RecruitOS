@@ -4,9 +4,15 @@ import os
 # pyrefly: ignore [missing-import]
 import pdfplumber
 import docx2txt
+import logging
 from pathlib import Path
 from django.conf import settings
 from .models import Candidate
+from common.task_queue import TASK_QUEUE
+from audit.utils import log_action
+from candidates.tasks import simulate_client_submission_email, simulate_resume_submission_notification
+
+logger = logging.getLogger(__name__)
 
 
 def get_openai_client():
@@ -205,9 +211,9 @@ def parse_resume_ai(file_input):
             if isinstance(parsed, dict) and "phone_number" in parsed and parsed["phone_number"]:
                 parsed["phone_number"] = normalize_phone(parsed["phone_number"])
         except Exception as e:
-            print(f"JSON parse error: {e}")
+            logger.error(f"JSON parse error: {e}")
             parsed = {"error": "parse_error", "reason": str(e)}
-        print("Parsed resume:", parsed)
+        logger.debug("Parsed resume: %s", parsed)
         return parsed
     finally:
         if temp_path:
@@ -245,10 +251,17 @@ def _find_existing_candidate(email: str, phone: str, organization=None):
 def parse_resume_task(resume_file, organization=None):
     """
     Parses resume using AI and returns a dict directly compatible with Candidate model/serializer fields.
+    Supports both file-like objects and file paths (str/Path). 
     Applies safe defaults, regex phone normalization, experience as string, education/skills as lists,
     current_profile extraction. No longer includes per-job fields (CTC, notice_period etc now live on Application).
     Supports org-scoped duplicate check. Creation of Candidate handled in ViewSet.
     """
+    # Support for background tasks where we pass file path string
+    if isinstance(resume_file, (str, Path)):
+        resume_file_name = Path(resume_file).name
+    else:
+        resume_file_name = getattr(resume_file, "name", "resume.pdf")
+
     parsed = parse_resume_ai(resume_file)
 
     if isinstance(parsed, dict) and "error" in parsed:
@@ -322,7 +335,7 @@ def parse_resume_task(resume_file, organization=None):
         "education": education,
         "contact": phone or "",
         "email": email,
-        "resume_file_name": getattr(resume_file, "name", "resume.pdf"),
+        "resume_file_name": resume_file_name,
         "skills": skills,
         "linkedin_url": parsed.get("linkedin_url") or "",
         "portfolio_url": parsed.get("portfolio_url") or "",
@@ -341,3 +354,119 @@ def parse_resume_task(resume_file, organization=None):
         )
 
     return data
+
+
+def background_parse_resume(user,candidate_id: str, organization_id: str = None):
+    """
+    Background task for parsing resume using TASK_QUEUE.
+    Loads candidate, calls parse_resume_task (which does AI parse + org-scoped dup check),
+    then selectively updates only non-placeholder fields from AI results. Marks
+    is_duplicate/duplicate_of if detected. Uses logger throughout.
+    """
+    try:
+        candidate = Candidate.objects.get(id=candidate_id, is_deleted=False)
+        organization = None
+        if organization_id:
+            from accounts.models import Organization
+            try:
+                organization = Organization.objects.get(id=organization_id)
+            except Organization.DoesNotExist:
+                pass
+
+        if not candidate.resume:
+            logger.warning(f"[TASK] No resume file for candidate {candidate_id}")
+            return
+
+        resume_path = candidate.resume.path
+        parsed = parse_resume_task(resume_path, organization=organization)
+
+        if isinstance(parsed, dict) and "error" in parsed:
+            logger.warning(f"[TASK] Background parse returned error for candidate {candidate_id}: {parsed}")
+            return
+
+        # Selective updates on non-placeholder fields only
+        updated_fields = []
+        placeholders = {"Pending AI Parse", "Unnamed Candidate", "Not provided", "Not specified", "0 years", "", None, []}
+
+        name = parsed.get("candidate_name") or parsed.get("name")
+        if (name and name not in placeholders and 
+            candidate.candidate_name in ("Pending AI Parse", "Unnamed Candidate")):
+            candidate.candidate_name = name
+            candidate.profile_name = name
+            updated_fields.append("candidate_name")
+
+        if (parsed.get("current_profile") and parsed.get("current_profile") not in placeholders and
+            candidate.current_profile in placeholders):
+            candidate.current_profile = parsed["current_profile"]
+            updated_fields.append("current_profile")
+
+        if (parsed.get("current_company") and parsed.get("current_company") not in placeholders and
+            candidate.current_company in placeholders):
+            candidate.current_company = parsed["current_company"]
+            updated_fields.append("current_company")
+
+        if (parsed.get("experience") and parsed.get("experience") != "0 years" and
+            candidate.experience in ("0 years", "")):
+            candidate.experience = parsed["experience"]
+            updated_fields.append("experience")
+
+        if (parsed.get("current_location") and parsed.get("current_location") not in placeholders and
+            candidate.current_location in placeholders):
+            candidate.current_location = parsed["current_location"]
+            updated_fields.append("current_location")
+
+        education = parsed.get("education")
+        if (education and isinstance(education, list) and len(education) > 0 and not candidate.education):
+            candidate.education = education
+            updated_fields.append("education")
+
+        contact = parsed.get("phone_number")
+        if contact and contact != candidate.contact:
+            candidate.contact = contact
+            updated_fields.append("contact")
+
+        email_val = parsed.get("email")
+        if email_val and email_val != candidate.email:
+            candidate.email = email_val
+            updated_fields.append("email")
+
+        skills = parsed.get("skills")
+        if (skills and isinstance(skills, list) and len(skills) > 0 and not candidate.skills):
+            candidate.skills = skills
+            updated_fields.append("skills")
+
+        # Duplicate handling from parse_resume_task
+        if parsed.get("duplicate") and parsed.get("existing_candidate_id"):
+            try:
+                existing = Candidate.objects.get(
+                    id=parsed["existing_candidate_id"], is_deleted=False
+                )
+                if not getattr(candidate, 'is_duplicate', False) or candidate.duplicate_of != existing:
+                    candidate.is_duplicate = True
+                    candidate.duplicate_of = existing
+                    updated_fields.append("is_duplicate")
+                    logger.info(f"[TASK] Background parse marked candidate {candidate_id} as duplicate of {existing.id}")
+            except Candidate.DoesNotExist:
+                logger.warning(f"[TASK] Duplicate candidate {parsed.get('existing_candidate_id')} not found for {candidate_id}")
+            except Exception as dup_err:
+                logger.error(f"[TASK] Error setting duplicate for {candidate_id}: {dup_err}")
+
+        if updated_fields:
+            candidate.uploaded_by=user
+            candidate.save()
+            log_action(
+                user,
+                'created',
+                'Candidate',
+                candidate.id,
+                f"Resume upload by {name}",
+                organization=organization
+            )
+            simulate_resume_submission_notification(candidate.id)
+            logger.info(f"[TASK] Updated candidate {candidate_id} with AI-parsed data. Fields: {updated_fields}")
+        else:
+            logger.info(f"[TASK] No meaningful AI updates for candidate {candidate_id}")
+    except Candidate.DoesNotExist:
+        logger.warning(f"[TASK] Candidate {candidate_id} not found")
+    except Exception as e:
+        logger.error(f"[TASK] Background parse failed for candidate {candidate_id}: {str(e)}", exc_info=True)
