@@ -16,7 +16,7 @@ class ClientFilterSet(django_filters.FilterSet):
       - city, state, country (icontains)
       - created range
       - has_agreement (boolean: agreement_document__isnull)
-      - commercial_decided
+      - commercial_decided (icontains on text field)
     SearchFilter on ViewSet handles company_name, client_name, email, industry.
     """
     status             = django_filters.CharFilter(field_name='status', lookup_expr='exact')
@@ -28,7 +28,7 @@ class ClientFilterSet(django_filters.FilterSet):
     created_before     = django_filters.DateFilter(field_name='created_at', lookup_expr='date__lte')
     agreement_date_after = django_filters.DateFilter(field_name='agreement_date', lookup_expr='gte')
     has_agreement      = django_filters.BooleanFilter(field_name='agreement_document', lookup_expr='isnull', exclude=True)
-    commercial_decided = django_filters.BooleanFilter(field_name='commercial_decided')
+    commercial_decided = django_filters.CharFilter(field_name='commercial_decided', lookup_expr='icontains')
 
     class Meta:
         model = Client

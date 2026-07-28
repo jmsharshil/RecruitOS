@@ -32,7 +32,7 @@ All choice fields support case-insensitive lookup via `get_choice()` in imports.
 | `reason_for_change` | text | No | - | "" | Why looking |
 | `skills` | array | No | ["Python", ...] | [] | From AI parse or manual |
 | `resume_file_name` | string | No | - | "" | For display |
-| `resume` | file | No (upload separate) | PDF/DOC | null | FileField |
+| `resume` | file | No (upload separate) | PDF/DOC | null | FileField; **auto AI parsed on upload_resume** to populate other fields if empty |
 | `is_duplicate` | boolean | No | - | false | Duplicate flag (set via action or AI parse dup check) |
 | `duplicate_of` | UUID | No | valid candidate UUID | null | FK to canonical candidate (for deduplication) |
 | **Application** | | | | | |
@@ -53,7 +53,7 @@ All choice fields support case-insensitive lookup via `get_choice()` in imports.
 | `client_feedback` | text | No | - | "" | - |
 | `client_rating` | int | No | 1-5 | null | - |
 
-**Notes**: Required for import = `candidate_name`, `email`, `contact` (plus `job_title` optional for linking). Duplicates detected by email (iexact) or normalized phone in parse/upload/import using `_find_existing_candidate`. All decimals use `Decimal(safe_float())`. AI parse populates many fields + strict anti-hallucination. See `utils.py` for `parse_resume_ai` (hardened prompt), `normalize_phone`, `_find_existing_candidate`. New duplicate actions and serializer fields (`is_duplicate`, `duplicate_of*`) supported.
+**Notes**: Required for import = `candidate_name`, `email`, `contact` (plus `job_title` optional for linking). Duplicates detected by email (iexact) or normalized phone in parse/upload/import/public-upload using `_find_existing_candidate`. All decimals use `Decimal(safe_float())`. **AI parse now auto-runs on `upload-resume`** (populates empty fields only) + parse-resume + public upload; strict anti-hallucination. See `utils.py` for `parse_resume_ai` (hardened prompt), `normalize_phone`, `_find_existing_candidate`. New duplicate actions and serializer fields (`is_duplicate`, `duplicate_of*`) supported.
 
 **Error Handling (All Endpoints)**
 All errors are normalized by `common.exceptions.custom_exception_handler` (configured in `settings.py` REST_FRAMEWORK) into:
@@ -73,7 +73,7 @@ All errors are normalized by `common.exceptions.custom_exception_handler` (confi
 
 **Key Features**:
 - **Decoupled pool-first design**: `Candidate` = pure talent pool (`uploaded_by=None` supported); `Application` = join model (`unique_together(org, candidate, job)`, `current_stage` FK, status sync on "hired"). Interview/Client models 1:1 to Application.
-- Strict AI resume parsing (`parse_resume_task` + `parse_resume_ai` with anti-hallucination system prompt: "Extract ONLY facts explicitly present... Never hallucinate. JSON-only output. Use null, [], 0 for missing. Error path for unparseable_resume").
+- Strict AI resume parsing (`parse_resume_task` + `parse_resume_ai` with anti-hallucination system prompt: "Extract ONLY facts explicitly present... Never hallucinate. JSON-only output. Use null, [], 0 for missing. Error path for unparseable_resume"). **Auto-used on upload-resume** (enriches only empty fields on existing candidates to avoid overwriting manual data).
 - Public resume upload (`AllowAny`, requires `org_id`) → pure pool Candidate (no auto-Application; recruiters link manually). Uses hardened parser + duplicate guard + `log_action(user=None, organization=...)` + pool notification fallback.
 - RBAC centralized in `ViewSet.get_permissions()` (`IsAuthenticated` for list/create/parse/upload/export/import/pipeline, `IsAdmin` for destroy, `IsAdminOrManager` otherwise) + role-scoped `get_queryset()` with Q-filters:
   - **CandidateViewSet/Export**: ADMIN=full org; MANAGER=(created jobs | pool); RECRUITER=(pool | assigned_recruiters jobs via Q + .distinct()).
@@ -245,9 +245,28 @@ flowchart TD
   - Other: `{"error": "Parse failed: ...", "detail": "...", "field_errors": {}}` (status 400/500 wrapped).
   See `candidates/utils.py:parse_resume_ai, parse_resume_task` for strict prompt and safe defaults. Matches anti-hallucination decision.
 
-- **Upload Resume (per candidate)**: `POST /api/v1/candidates/{pk}/upload-resume/` (multipart `resume`)
-  **Response (200)**: `{"message": "Resume uploaded successfully"}`
-  (Note: AI parse is separate `parse-resume` action for preview; upload just attaches file to existing Candidate.)
+- **Upload Resume with AI Auto-Parsing**: `POST /api/v1/candidates/{pk}/upload-resume/` (multipart `resume` file)
+  **Step-by-Step**:
+  1. Authenticated user with access to candidate (RBAC QS).
+  2. Upload resume via multipart form.
+  3. Auto-invokes `parse_resume_task(..., organization=...)` — uses same hardened `parse_resume_ai` (anti-hallucination prompt, explicit facts only, JSON-only, null/[] defaults, org-scoped `_find_existing_candidate` dup check via email/phone).
+  4. Enriches **only empty/placeholder fields** (e.g. if `current_profile=""`, `skills=[]`, `experience="0 years"`) — never overwrites manual data. Updates `candidate_name`, profile, company, experience, locations, education, contact, email, ctcs, skills, notice_period, reason_for_change as applicable.
+  5. Saves `resume` + `resume_file_name`, calls `log_action` (with "AI-parsed" note if updated), rewinds file pointer.
+  6. Returns enhanced response.
+
+  **Request**: Multipart with key `resume` (PDF/DOCX supported via extract_text + GPT-4o-mini).
+
+  **Success Response (200)**:
+  ```json
+  {
+    "message": "Resume uploaded successfully",
+    "resume_file_name": "rahul_sharma.pdf",
+    "ai_parsed": true
+  }
+  ```
+  (If duplicate detected: adds `"note": "A candidate with this profile already exists in our talent pool."`.)
+
+  **Note**: Now fully unified with `parse-resume` action and `TalentPoolPublicUploadView`. Fallback to file-only upload on parse error. See `candidates/views.py:upload_resume`, `utils.py:parse_resume_ai` (strict prompt), `parse_resume_task`.
 
 ### Duplicate Management Actions (on CandidateViewSet)
 New endpoints for handling duplicate candidates (common in talent pools). Integrated with AI parse and public upload for auto-detection. Visible in `CandidateListSerializer` and `CandidateDetailSerializer` (incl. `duplicate_of_detail`).
@@ -548,7 +567,7 @@ See `candidates/views_export.py` (RBAC updated, unified via `common/utils_csv.py
 **Verification Note**: All sections now include full request/response bodies, required/optional markings, explicit choice values, step-by-step flows, duplicate management, updated RBAC (full pool for recruiters in Candidate flows), and aligned export QS. Synced with latest code (incl. mark/unmark-duplicate actions, _find_existing_candidate, hardened parser, unified CSV/Excel, user=None audit, custom_exception_handler). Docs are source of truth. Run `python manage.py check` and test endpoints to validate. Ready for frontend and API consumption.
 
 ## Pipeline Steps (Detailed)
-1. **Sourcing**: Use `CandidateViewSet.create` (pool), `parse-resume` action (AI preview + anti-hallucination), `upload-resume` (attach file), **PublicUploadView** (`POST /api/v1/candidates/public-upload/?org_id=...` **required**, `AllowAny`, pure pool Candidate), or `ApplicationViewSet.create` (with `job_id` + `candidate_id`; auto first-stage). Uses hardened `parse_resume_task` (with duplicate guard), `log_action(user=None, organization=...)`.
+1. **Sourcing**: Use `CandidateViewSet.create` (pool), `parse-resume` action (AI preview), **upload-resume** (now with **auto AI parsing** to enrich empty fields on existing Candidate using `parse_resume_task`), **PublicUploadView** (`POST /api/v1/candidates/public-upload/?org_id=...` **required**, `AllowAny`, pure pool with parser + dup guard), or `ApplicationViewSet.create` (with `job_id` + `candidate_id`; auto first-stage). All use hardened `parse_resume_ai` (anti-hallucination) + `log_action`.
 2. **Talent Pool**: Pure Candidates (`applications__isnull=True`) visible to all org roles (RECRUITER gets full pool + assigned).
 3. **Linking/Application**: `POST /applications/` (unique_together enforced, auto first-stage from `Job.DEFAULT_STAGES` or provided `current_stage_id`).
 4. **Progression**: Use dedicated `move-stage` action (validates stage-to-job ownership, updates `current_stage` FK; "Hired" auto-syncs status).
@@ -573,4 +592,3 @@ See `candidates/views_export.py` (RBAC updated, unified via `common/utils_csv.py
 - Duplicate fully integrated (auto via `_find_existing_candidate(email/phone/org)` in parse/upload/import; manual @actions; serializer fields).
 - **CSV/Excel Unified** across modules: `?format=xlsx`/`?template=1`, openpyxl.data_only, per-row atomic, row errors (from 2), 201/207.
 - All synced: hardened parser (strict prompt, safe defaults), `user=None` audit, `DateParserField(fuzzy=True)`, `get_choice(default=SCREENING)`, `BaseModel`, threaded notifs (pool fallback). Verified 1:1 with code (`views*.py`, `utils.py`, serializers, models, common/*). `python manage.py check` clean. Docs = source of truth. Ready for frontend/prod.
-

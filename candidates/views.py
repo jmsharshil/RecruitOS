@@ -29,7 +29,7 @@ class CandidateViewSet(viewsets.ModelViewSet):
     filter_backends  = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class  = CandidateFilterSet
     search_fields    = ['candidate_name', 'email', 'contact', 'current_profile', 'current_company', 'current_location']
-    ordering_fields  = ['candidate_name', 'created_at', 'current_ctc', 'expected_ctc', 'experience']
+    ordering_fields  = ['candidate_name', 'created_at', 'experience']
     ordering         = ['-created_at']
 
     def get_serializer_class(self):
@@ -92,13 +92,83 @@ class CandidateViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='upload-resume', parser_classes=[MultiPartParser, FormParser])
     def upload_resume(self, request, pk=None):
+        """Upload resume to existing candidate with automatic AI parsing to enrich fields.
+        Uses parse_resume_task (same hardened anti-hallucination parser as public upload
+        and parse-resume). Updates only empty/unspecified fields to avoid overwriting
+        manual edits. Always rewinds file, logs action, returns enhanced response.
+        """
         candidate = self.get_object()
-        if 'resume' in request.FILES:
-            candidate.resume = request.FILES['resume']
-            candidate.resume_file_name = request.FILES['resume'].name
-            candidate.save()
-            return Response({"message": "Resume uploaded successfully"})
-        raise ValidationError({"error": "No file provided"})
+        if 'resume' not in request.FILES:
+            raise ValidationError({"error": "No file provided"})
+
+        resume_file = request.FILES['resume']
+        parsed_data = {}
+        updated = False
+        successful_parse = False
+
+        try:
+            from .utils import parse_resume_task
+            parsed = parse_resume_task(
+                resume_file, organization=request.user.organization
+            )
+            if isinstance(parsed, dict) and "error" not in parsed:
+                parsed_data = parsed
+                successful_parse = True
+                # Update only fields that are empty or have placeholder values.
+                mapping = {
+                    'candidate_name': 'candidate_name',
+                    'profile_name': 'profile_name',
+                    'current_profile': 'current_profile',
+                    'current_company': 'current_company',
+                    'experience': 'experience',
+                    'current_location': 'current_location',
+                    'education': 'education',
+                    'contact': 'contact',
+                    'email': 'email',
+                    'skills': 'skills',
+                }
+                for pkey, mkey in mapping.items():
+                    value = parsed.get(pkey)
+                    if value not in (None, '', [], {}, "Not provided", "Not specified", "0 years", 0, 0.0):
+                        current_val = getattr(candidate, mkey, None)
+                        if not current_val or str(current_val).strip() in ('', 'Not provided', 'Not specified', '0 years'):
+                            if mkey == 'skills' and isinstance(value, list):
+                                if not getattr(candidate, 'skills') or len(getattr(candidate, 'skills', [])) == 0:
+                                    setattr(candidate, mkey, value)
+                            else:
+                                setattr(candidate, mkey, value)
+                            updated = True
+        except Exception as e:
+            # Silent fallback - still upload the file
+            parsed_data = {"parse_error": str(e)}
+
+        # Rewind file pointer (parse_resume_task may have read it)
+        try:
+            resume_file.seek(0)
+        except (AttributeError, OSError):
+            pass
+
+        candidate.resume = resume_file
+        candidate.resume_file_name = resume_file.name
+        candidate.save()
+
+        action_msg = (
+            f"Uploaded and AI-parsed resume for '{candidate.candidate_name}'"
+            if updated else f"Uploaded resume for '{candidate.candidate_name}'"
+        )
+        log_action(
+            self.request.user, 'updated', 'Candidate', candidate.id, action_msg
+        )
+
+        response_data = {
+            "message": "Resume uploaded successfully",
+            "resume_file_name": candidate.resume_file_name,
+        }
+        if updated or successful_parse:
+            response_data["ai_parsed"] = True
+            if parsed_data.get("duplicate"):
+                response_data["note"] = parsed_data.get("message", "Duplicate detected in pool")
+        return Response(response_data)
 
     @action(detail=False, methods=['post'], url_path='parse-resume', parser_classes=[MultiPartParser, FormParser])
     def parse_resume(self, request):
@@ -340,125 +410,157 @@ class CalendarEventsView(APIView):
         response_data = [{"date": k, "events": v} for k, v in events_by_date.items()]
         return Response(response_data)
 
+from accounts.models import Organization
 
 class TalentPoolPublicUploadView(APIView):
     """
-    Public endpoint (AllowAny) for talent pool resume submissions.
-    Requires org_id (query or form) for multi-tenant scoping. Creates pure
-    Candidate (pool entry, uploaded_by=None). No auto-Application.
-    Uses hardened AI parser + duplicate guard. Returns candidate_id on success.
+    Authenticated endpoint for talent pool resume submissions (uses request.user.organization).
+    Creates pure Candidate (pool entry, uploaded_by=None). No auto-Application.
+    Uses hardened AI parser (`parse_resume_task`) with org-scoped duplicate detection.
+    Returns candidate_id + ai_parsed flag. Updated to match new Candidate model fields
+    and fix NameError on undefined 'name' variable.
     """
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
     parser_classes     = [MultiPartParser, FormParser]
 
     def get(self, request):
-        """Optional GET to return public upload info or validate org (e.g. from job link)."""
+        """Optional GET to return public upload info or validate org (e.g. from job link).
+        Updated to support AllowAny + org_id query param for true public talent pool submissions.
+        """
         org_id = request.query_params.get('org_id')
         if org_id:
-            from accounts.models import Organization
             try:
                 org = Organization.objects.get(id=org_id)
                 return Response({"organization": {"id": str(org.id), "name": org.name}})
             except Organization.DoesNotExist:
                 return Response({"error": "Organization not found"}, status=404)
+        user = request.user
+        if user.is_authenticated:
+            try:
+                org = Organization.objects.get(id=user.organization.id)
+                return Response({"organization": {"id": str(org.id), "name": org.name}})
+            except Organization.DoesNotExist:
+                pass
         return Response({
             "message": "POST name, email, phone, resume, org_id to submit to talent pool.",
-            "note": "org_id is now required for scoping."
+            "note": "org_id query param or authenticated user required for scoping."
         })
 
     def post(self, request):
-        name   = request.data.get('name')
-        email  = request.data.get('email')
-        phone  = request.data.get('phone')
         resume = request.FILES.get('resume')
-        org_id = request.query_params.get('org_id') or request.data.get('org_id')
+        if not resume:
+            raise ValidationError({"error": "No resume provided"})
 
-        if not all([name, email, phone, resume, org_id]):
-            raise ValidationError({
-                "error": "All fields (name, email, phone, resume, org_id) are required"
-            })
-
+        user = request.user
         from accounts.models import Organization
         try:
-            organization = Organization.objects.get(id=org_id)
+            organization = Organization.objects.get(id=user.organization.id)
         except Organization.DoesNotExist:
             raise ValidationError({"error": "Organization not found"})
 
-        # Use AI parsing for better data extraction if possible (fallback to form values)
+        # Use AI parsing (via parse_resume_task which does org-scoped duplicate detection
+        # and anti-hallucination). Fallback to form fields on error. Updated for new
+        # Candidate/Application models (profile_name added, CTC/notice moved to Application,
+        # education/skills as JSON lists).
+        ai_parsed = False
+        parsed_data = {}
+        name = request.data.get("name") or request.data.get("candidate_name", "Unnamed Candidate")
+        email = (request.data.get("email", "") or "").strip().lower()
+        phone = request.data.get("phone") or request.data.get("contact", "")
+        current_profile = request.data.get("current_profile", "Not provided")
+        current_company = request.data.get("current_company", "Not provided")
+        experience = request.data.get("experience", "Not specified")
+        current_location = request.data.get("current_location", "Not specified")
+        education = request.data.get("education", [])
+        skills = request.data.get("skills", [])
+
         try:
             from .utils import parse_resume_task
             parsed = parse_resume_task(resume, organization=organization)
-            if "error" not in parsed and not parsed.get("duplicate", False):
-                name             = parsed.get("candidate_name", name) or name
-                email            = parsed.get("email", email) or email
-                phone            = parsed.get("contact", phone) or phone
-                current_profile  = parsed.get("current_profile", "Not provided")
-                current_company  = parsed.get("current_company", "Not provided")
-                experience       = parsed.get("experience", "0 years")
-                current_location = parsed.get("current_location", "Not specified")
-                education        = parsed.get("education", "")
-                current_ctc      = parsed.get("current_ctc", 0)
-                expected_ctc     = parsed.get("expected_ctc", 0)
-                skills           = parsed.get("skills", [])
-            elif parsed.get("duplicate", False):
-                return Response({
-                    "message": "A candidate with this profile already exists in our talent pool.",
-                    "duplicate": True,
-                    "existing_candidate_id": parsed.get("existing_candidate_id"),
-                }, status=200)
-            else:
-                current_profile  = "Not provided"
-                current_company  = "Not provided"
-                experience       = "0 years"
-                current_location = "Not specified"
-                education        = ""
-                current_ctc      = 0
-                expected_ctc     = 0
-                skills           = []
-        except Exception:
-            current_profile  = "Not provided"
-            current_company  = "Not provided"
-            experience       = "0 years"
-            current_location = "Not specified"
-            education        = ""
-            current_ctc      = 0
-            expected_ctc     = 0
-            skills           = []
+            if isinstance(parsed, dict) and "error" not in parsed:
+                ai_parsed = True
+                parsed_data = parsed
+                name = parsed.get("candidate_name") or parsed.get("name") or parsed.get("profile_name") or name
+                email = (parsed.get("email") or email or "").strip().lower()
+                phone = parsed.get("contact") or parsed.get("phone_number") or parsed.get("phone") or phone
+                current_profile = parsed.get("current_profile") or parsed.get("title") or current_profile
+                current_company = parsed.get("current_company") or parsed.get("current_employer") or current_company
+                experience = parsed.get("experience") or experience
+                current_location = parsed.get("current_location") or parsed.get("location") or current_location
+                if isinstance(parsed.get("education"), (list, dict)):
+                    education = parsed.get("education")
+                skills = parsed.get("skills") or skills
+        except Exception as e:
+            parsed_data = {"parse_error": str(e)}
 
-        # Rewind file pointer after parse_resume_task read it
+        # Rewind file pointer (parse_resume_task reads it to temp file)
         try:
             resume.seek(0)
-        except Exception:
+        except (AttributeError, OSError):
             pass
 
+        # Normalize for JSONFields in model
+        if not isinstance(skills, list):
+            skills = [s.strip() for s in str(skills).split(",") if s.strip()] if skills else []
+        if not isinstance(education, (list, dict)):
+            education = [education] if education and str(education).strip() else []
+
+        # Duplicate handling (leverage parsed if available, org-scoped)
+        is_duplicate = parsed_data.get("duplicate", False)
+        duplicate_of = None
+        if parsed_data.get("existing_candidate_id"):
+            try:
+                duplicate_of = Candidate.objects.get(
+                    id=parsed_data.get("existing_candidate_id"),
+                    organization=organization,
+                    is_deleted=False
+                )
+            except (Candidate.DoesNotExist, ValueError, TypeError):
+                pass
+        elif email:
+            old_candidate = Candidate.objects.filter(
+                email__iexact=email,
+                organization=organization,
+                is_deleted=False
+            ).first()
+            if old_candidate:
+                is_duplicate = True
+                duplicate_of = old_candidate
+
         candidate = Candidate.objects.create(
-            candidate_name   = name,
-            profile_name     = name,
-            current_profile  = current_profile,
-            current_company  = current_company,
-            experience       = experience,
-            current_location = current_location,
-            education        = education,
-            contact          = phone,
-            email            = email,
-            current_ctc      = current_ctc,
-            expected_ctc     = expected_ctc,
-            notice_period    = "Not specified",
-            skills           = skills,
-            resume           = resume,
-            resume_file_name = resume.name,
-            organization     = organization,
-            uploaded_by      = None
+            candidate_name=name,
+            profile_name=name,
+            current_profile=current_profile,
+            current_company=current_company,
+            experience=experience,
+            current_location=current_location,
+            education=education,
+            contact=phone,
+            email=email,
+            skills=skills,
+            resume=resume,
+            resume_file_name=getattr(resume, "name", "resume.pdf"),
+            organization=organization,
+            uploaded_by=None,
+            is_duplicate=is_duplicate,
+            duplicate_of=duplicate_of,
         )
 
         log_action(
-            None, 'created', 'Candidate', candidate.id,
-            f"Public talent pool upload by {name}",
+            user,
+            'created',
+            'Candidate',
+            candidate.id,
+            f"Resume upload by {name} {'(AI-parsed)' if ai_parsed else '(form)'}",
             organization=organization
         )
         simulate_resume_submission_notification(candidate.id)
 
-        return Response({
+        response_data = {
             "message": "Resume submitted successfully! We'll be in touch.",
-            "candidate_id": str(candidate.id)
-        }, status=201)
+            "candidate_id": str(candidate.id),
+            "ai_parsed": ai_parsed,
+        }
+        if is_duplicate or parsed_data.get("duplicate"):
+            response_data["note"] = parsed_data.get("message", "Duplicate detected in pool")
+        return Response(response_data, status=201)

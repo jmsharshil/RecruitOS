@@ -125,7 +125,7 @@ class Command(BaseCommand):
                 'created_by': admin1,
                 'payment_period_days': 30,
                 'replacement_period_days': 90,
-                'commercial_decided': True,
+                'commercial_decided': '15% margin, net-30 terms agreed',
                 'organization': org1,
             },
             {
@@ -149,7 +149,7 @@ class Command(BaseCommand):
                 'created_by': manager1,
                 'payment_period_days': 45,
                 'replacement_period_days': 60,
-                'commercial_decided': True,
+                'commercial_decided': '20% margin with quarterly review',
                 'organization': org1,
             },
             {
@@ -173,7 +173,7 @@ class Command(BaseCommand):
                 'created_by': manager2,
                 'payment_period_days': 30,
                 'replacement_period_days': 90,
-                'commercial_decided': False,
+                'commercial_decided': 'Terms pending finalization',
                 'organization': org2,
             },
         ]
@@ -324,7 +324,8 @@ class Command(BaseCommand):
         self.stdout.write('Created 6 jobs (4 in Tech Solutions, 2 in Global Corp) with stages and recruiter assignments')
         
         # 4. Create Candidates (talent pool) + linked Applications (decoupled join model for pipeline)
-        # Status, stage, feedback now live on Application; Interview/ClientSubmission link to Application
+        # All per-job fields (status, ctc, notice, dob/doc, feedback, share_date, offer) now live exclusively on Application.
+        # Candidate is pure pool entity with profile, experience, skills etc.
         candidate_profiles = [
             ('Rahul Sharma', 'Python Backend Dev', 'TCS', '4.5 years', 'Bangalore', '15.2', '22.5', '60 days', 'Better opportunity'),
             ('Priya Patel', 'React Developer', 'Infosys', '3 years', 'Mumbai', '12.0', '18.0', '30 days', 'Role change'),
@@ -376,8 +377,9 @@ class Command(BaseCommand):
             # Some candidates have offer in hand or doc date
             offer = Decimal('18.5') if status == CandidateStatus.HIRED else None
             doc_date = date.today() - timedelta(days=random.randint(5, 60)) if i % 4 == 0 else None
+            dob_date = date(1995, random.randint(1,12), random.randint(1,28))
             
-            # Create pool Candidate (no job linkage)
+            # Create pure pool Candidate (no per-job fields)
             candidate = Candidate.objects.create(
                 candidate_name=name,
                 profile_name=profile,
@@ -385,30 +387,30 @@ class Command(BaseCommand):
                 current_company=company,
                 experience=exp,
                 current_location=loc,
-                preferred_location=random.choice(['Bangalore', 'Mumbai', 'Pune', 'Hyderabad', 'Remote']),
-                education='B.Tech Computer Science',
-                college='NIT / IIT',
+                education=["B.Tech Computer Science", "NIT / IIT"],
                 contact=f'+91-98{random.randint(1000000,9999999)}',
                 email=f'{name.lower().replace(" ", ".")}@example.com',
-                dob=date(1995, random.randint(1,12), random.randint(1,28)),
-                doc=doc_date,
-                current_ctc=Decimal(ctc),
-                expected_ctc=Decimal(expctc),
-                offer_in_hand=offer,
-                notice_period=notice,
-                reason_for_change=reason or 'Looking for new opportunities',
                 resume_file_name=f'{name.lower().replace(" ", "_")}_resume.pdf',
                 uploaded_by=recruiter,
-                organization=job.organization
+                organization=job.organization,
+                skills=["Python", "Django"] if "Python" in profile else ["React", "JavaScript"] if "React" in profile else ["AWS", "Docker"],
             )
             created_candidates.append(candidate)
             
-            # Create Application (the join model carrying pipeline state)
+            # Create Application (the join model carrying all per-job data, status, pipeline)
             app = Application.objects.create(
                 candidate=candidate,
                 job=job,
                 current_stage=stage,
                 status=status,
+                current_ctc=Decimal(ctc),
+                expected_ctc=Decimal(expctc),
+                offer_in_hand=offer,
+                notice_period=notice,
+                reason_for_change=reason or 'Looking for new opportunities',
+                preferred_location=random.choice(['Bangalore', 'Mumbai', 'Pune', 'Hyderabad', 'Remote']),
+                dob=dob_date,
+                doc=doc_date,
                 feedback='Strong technical skills, good communication.' if i % 3 != 0 else 'Average communication, needs improvement in DSA.',
                 share_date=date.today() - timedelta(days=random.randint(0,30)),
                 organization=job.organization

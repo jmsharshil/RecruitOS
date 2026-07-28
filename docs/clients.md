@@ -3,8 +3,8 @@
 ## Overview
 Manages client companies that post job requirements. Linked to Jobs (FK), POCs (related_name='pocs'), Documents (related_name='documents'). All inherit `BaseModel` for org-scoping, soft-delete, audit timestamps. 
 
-**Key Models**: `Client` (UUID PK, auto `client_id=CLI-XXXX` in `save()` with org-scoped `unique_together=('organization', 'client_id')`), `POC` (with `POCType`), `ClientDocument` (general FileField). Added `agreement_document` (FileField to 'client_agreements/') + `agreement_document_name` (CharField) via migrations 0002 and 0003. Like Candidate.resume, for easy upload of agreement during client **create** (multipart support via parser_classes on ViewSet + serializer auto-name from file).
-- `clients/filters.py`: `ClientFilterSet` (status, industry/city/state/country icontains, date ranges, has_agreement, commercial_decided) registered on ViewSet.
+**Key Models**: `Client` (UUID PK, auto `client_id=CLI-XXXX` in `save()` with org-scoped `unique_together=('organization', 'client_id')`), `POC` (with `POCType`), `ClientDocument` (general FileField). `commercial_decided` changed from BooleanField to TextField. Added `agreement_document` (FileField to 'client_agreements/') + `agreement_document_name` (CharField) via migrations 0002 and 0003. Like Candidate.resume, for easy upload of agreement during client **create** (multipart support via parser_classes on ViewSet + serializer auto-name from file).
+- `clients/filters.py`: `ClientFilterSet` (status, industry/city/state/country icontains, date ranges, has_agreement, commercial_decided (now icontains on text)) registered on ViewSet.
 
 **Choice Enums** (in models.py):
 - `ClientStatus`: "active", "inactive", "on-hold" (default: "active")
@@ -36,7 +36,7 @@ All fields support full body in create/update. `ClientDetailSerializer.to_intern
 | `agreement_date` | date | No | YYYY-MM-DD | null | Date of signed agreement |
 | `payment_period_days` | integer | No | >0 | null | e.g. 30 (net terms) |
 | `replacement_period_days` | integer | No | >0 | null | e.g. 90 (replacement guarantee) |
-| `commercial_decided` | boolean | No | true/false | false | Flag for commercial terms finalized |
+| `commercial_decided` | text | No | any string (e.g. "15% margin, net-30") | "" | Details of commercial terms decided (changed from boolean flag to free-text field) |
 | `agreement_document` | file | No | multipart FileField | null | Main agreement/contract PDF; upload during create (multipart/form-data) or via PATCH; sets `agreement_document_name` automatically |
 | `agreement_document_name` | string | No (auto) | - | "" | Auto-populated from uploaded filename (like Candidate.resume_file_name) |
 | `notes` | text | No | - | "" | Internal notes (rich text possible) |
@@ -91,7 +91,7 @@ flowchart TD
     B --> C[Auto client_id=CLI-XXXX + perform_create log + auto agreement_document_name]
     C --> D[Add POCs via POST /clients/{id}/pocs/ or nested<br/>POCType=hiring/payment]
     D --> E[Upload general Docs via POST /clients/{id}/documents/ (multipart, auto file_name)]
-    E --> F[PATCH /clients/{id}/ (for agreement update) or /status/<br/>Update commercials, notes, commercial_decided=true]
+    E --> F[PATCH /clients/{id}/ (for agreement update) or /status/<br/>Update commercials, notes, commercial_decided="15% margin"]
     F --> G[Client ACTIVE → Create Job (client FK)]
     G --> H[Candidate Pipeline: submit-to-client → simulate_client_submission_email<br/>using send_org_email(organization, to=poc.email, template='client_submission', context with branding)]
     H --> I[In-app Notification created for assigned recruiters (Notification model, org-scoped)]
@@ -110,7 +110,7 @@ flowchart TD
 
 ### ClientViewSet (/api/v1/clients/)
 - **Auth/RBAC**: `get_permissions()` returns `IsAuthenticated()` for list/retrieve (recruiters see via job linkage), `IsAdmin()` for destroy, `IsAdminOrManager()` for all mutations (create, update, change_status, pocs, documents). `get_queryset()` filters by org + role.
-- **List**: `GET /api/v1/clients/?status=active&industry=IT&city=Mumbai&search=tech&ordering=-created_at` — uses `ClientListSerializer` (flat fields). Full filtering via `ClientFilterSet` (status, industry~icontains, city/state/country~icontains, created_after/before, agreement_date_after, has_agreement, commercial_decided), `SearchFilter` (company_name, client_name, email, industry, city), `OrderingFilter` (company_name, status, created_at, updated_at, agreement_date). `DjangoFilterBackend` enabled.
+  - **List**: `GET /api/v1/clients/?status=active&industry=IT&city=Mumbai&search=tech&ordering=-created_at` — uses `ClientListSerializer` (flat fields). Full filtering via `ClientFilterSet` (status, industry~icontains, city/state/country~icontains, created_after/before, agreement_date_after, has_agreement, commercial_decided (text icontains)), `SearchFilter` (company_name, client_name, email, industry, city), `OrderingFilter` (company_name, status, created_at, updated_at, agreement_date). `DjangoFilterBackend` enabled.
   **Response (200)**: Paginated list.
   ```json
   {
@@ -163,7 +163,7 @@ flowchart TD
     "agreement_date": "2025-01-15",
     "payment_period_days": 30,
     "replacement_period_days": 90,
-    "commercial_decided": true,
+    "commercial_decided": "15% margin, net-30 terms agreed",
     "notes": "Preferred vendor. High priority for Python roles.",
     "pocs": [
       {
@@ -243,10 +243,10 @@ flowchart TD
 ### Export Clients (CSV + Excel)
 - **Endpoint**: `GET /api/v1/clients/export/?status=active&format=xlsx&template=1`
 - **Auth**: `IsAuthenticated()` (all roles; QS mirrors `ClientViewSet.get_queryset()` **exactly** — ADMIN/MANAGER=full org, RECRUITER=clients via `jobs__assigned_recruiters` Q-filter, else none).
-- Uses updated `ClientExportView` (`CLIENT_EXPORT_HEADERS` includes all: agreement_date, payment/replacement_period_days, commercial_decided=True in sample, agreement_document_name). Supports `?format=xlsx` (openpyxl, cleans bools like commercial_decided), `?template=1` (sample row with bool, no DB, filename with .xlsx, separate log).
+- Uses updated `ClientExportView` (`CLIENT_EXPORT_HEADERS` includes all: agreement_date, payment/replacement_period_days, commercial_decided (text e.g. "Yes - 15% margin") in sample, agreement_document_name). Supports `?format=xlsx` (openpyxl with native types), `?template=1` (sample row with text for commercial_decided, no DB hit, filename with .xlsx).
 - Optional `?status=` filter respected. Logs with count or template msg.
 - **Response**: `generate_csv_response(..., export_format=...)` → `clients_export.{csv|xlsx}` or template.
-- **TIP**: Use `/api/v1/export-formats/` or Export `?template=1&format=xlsx` for perfect import template (all fields, sample data). No file columns (agreement_document omitted; upload separately). Matches unified pattern across modules.
+- **TIP**: Use `/api/v1/export-formats/` or Export `?template=1&format=xlsx` for perfect import template (all fields, sample data with text commercial_decided). No file columns (agreement_document omitted; upload separately). Matches unified pattern across modules.
 
 ### Import Clients (Admin-only)
 - **Endpoint**: `POST /api/v1/clients/import/`
@@ -254,9 +254,9 @@ flowchart TD
 - **Body**: multipart `file` (`.csv`/`.xlsx`/`.xls`).
 - **Required** (per `CLIENT_IMPORT_REQUIRED`): `company_name, client_name, email, contact, industry` (normalized snake_case headers).
 - **Step-by-Step**:
-  1. Use template from Export `?template=1&format=xlsx` (includes sample with `commercial_decided=True`).
-  2. `parse_csv_from_request` (Excel via openpyxl.data_only=True, header normalize, required validation).
-  3. Per row (from 2, `transaction.atomic()`): dedup by `email__iexact+org`, `DateParserField` for agreement_date (fuzzy + format fallbacks), `get_choice()` for status (default ACTIVE), int parse for days, bool coercion (`str.lower() in ('true','1','yes')` for commercial_decided).
+  1. Use template from Export `?template=1&format=xlsx` (includes sample with `commercial_decided="Yes - 15% margin, net-30"`).
+  2. `parse_csv_from_request` (Excel via openpyxl.data_only=True, header normalize to snake_case, required validation, skips empty rows).
+  3. Per row (from 2, `transaction.atomic()`): dedup by `email__iexact+org`, `DateParserField` for agreement_date (fuzzy + format fallbacks), `get_choice()` for status (default ACTIVE), int parse for days, `commercial_decided` taken as string (TextField).
   4. Creates with `created_by=user`, `organization`. Skips dups with error.
   5. Returns 201 full or 207 partial + errors list (row-indexed).
 - **Full Response** (201 or 207):
@@ -268,7 +268,7 @@ flowchart TD
   }
   ```
 
-**TIP**: agreement_date flexible ("2025-01-15", "15/01/2025", "Jan 15 2025" etc. via `DateParserField`). commercial_decided accepts bool/string variants. Export first for template. Matches `ClientImportView`, `common/serializers.py`, `utils_csv.py:get_choice()`, audit with user. See field table for all (e.g. gst_number, notes).
+**TIP**: agreement_date flexible ("2025-01-15", "15/01/2025", "Jan 15 2025" etc. via `DateParserField`). commercial_decided now any text for decided terms. Export first for template. Matches `ClientImportView`, `common/serializers.py`, `utils_csv.py` (normalize_header, get_choice), audit with user. See field table for all (e.g. gst_number, notes).
 
 ## Integration Points
 - **Jobs**: `client` FK (optional; `hiring_for=client` in Job). Recruiter QS uses jobs__assigned_recruiters. Import uses client lookup by name in jobs.
@@ -282,10 +282,10 @@ flowchart TD
 **Common POC Types**: hiring (for submissions/interviews), payment (for invoices).
 
 **Notes**:
-- **Unified Export/Import**: All modules now support CSV+XLSX via `?format=xlsx` (openpyxl in `generate_csv_response` with data cleaning for bools/dates), `?template=1`, normalized parser (header snake_case, Excel data_only=True, row errors from 2, 201/207 contract, per-row atomic, `DateParserField`, `get_choice`). `ExportFormatsView` centralizes headers/required/URLs. Recruiter RBAC in export QS (via jobs link), admin-only for client import.
+- **Unified Export/Import**: All modules now support CSV+XLSX via `?format=xlsx` (openpyxl in `generate_csv_response` with native types for dates/bools/text + buffer.seek(0)), `?template=1`, normalized parser (header snake_case via normalize_header, Excel data_only=True, empty-row skip, required validation, 201/207 partial success with row errors). `ExportFormatsView` centralizes. Recruiter RBAC in export QS (via jobs link), admin-only for client import. commercial_decided handled as text.
 - **Upload docs on create + separate agreement**: Added `agreement_document`/`agreement_document_name` to `Client` (FileField like resume). Serializer handles multipart + auto-name. ViewSet parsers support both JSON/multipart.
-- **Docs = source of truth**: Full tables, JSON examples, mermaid, RBAC Q-filter details, normalized error contract, Excel support notes. Verified 1:1 with live code (`clients/views_export.py` updated with template/format/RBAC mirroring ViewSet, `views.py` with get_permissions+QS, models, serializers, `common/utils_csv.py`, `common/serializers.py`, `audit/utils.py` (user=None), `docs/*.md` cross-refs, `common/permissions.py`, exceptions).
-- Matches jobs/candidates (RBAC alignment, import patterns, public upload with user=None). `python manage.py check` clean. Ready for frontend testing (xlsx downloads, bulk imports with partial errors, template usage).
+- **Docs = source of truth**: Full tables (updated for commercial_decided=TextField), JSON examples, mermaid, RBAC Q-filter details, normalized error contract, Excel support notes. Verified 1:1 with live code (`clients/models.py`, `filters.py`, `views_export.py` (updated parsing/sample), `views.py`, serializers, `common/utils_csv.py` (native types, get_choice), `docs/*.md`, etc.).
+- Matches jobs/candidates (RBAC alignment, import patterns, public upload with user=None). `python manage.py makemigrations` needed for model change; `check` clean. Ready for frontend testing (xlsx with text fields, bulk imports).
 
 **Verification**: Synced with `jobs/views.py` (manage_recruiters full list + invalid_ids), `candidates/views.py` (MultiPartParser + resume handling), `notifications/tasks.py`, email_utils. Full end-to-end client create (with agreement/POCs) → job → submission email + Notification now supported.
 

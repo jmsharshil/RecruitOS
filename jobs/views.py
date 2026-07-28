@@ -49,13 +49,13 @@ class JobViewSet(viewsets.ModelViewSet):
         job = serializer.save(created_by=self.request.user, organization=self.request.user.organization)
 
         # Auto-create default stages
-        for stage_data in DEFAULT_STAGES:
-            Stage.objects.create(
-                job=job,
-                created_by=self.request.user,
-                organization=job.organization,
-                **stage_data
-            )
+        # for stage_data in DEFAULT_STAGES:
+        #     Stage.objects.create(
+        #         job=job,
+        #         created_by=self.request.user,
+        #         organization=job.organization,
+        #         **stage_data
+        #     )
 
         log_action(self.request.user, 'created', 'Job', job.id, f"Created job '{job.title}'")
 

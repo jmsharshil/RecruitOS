@@ -18,7 +18,7 @@ def simulate_client_submission_email(application_id, client_email):
     """Send a real (or simulated) client submission email using org branding."""
     try:
         application = Application.objects.select_related(
-            'candidate', 'job', 'job__client', 'sent_by'
+            'candidate', 'job', 'job__client', 'client_submission__sent_by'
         ).get(id=application_id)
         candidate = application.candidate
         org = application.organization
@@ -31,9 +31,9 @@ def simulate_client_submission_email(application_id, client_email):
             'current_profile': candidate.current_profile,
             'experience': candidate.experience,
             'current_location': candidate.current_location,
-            'current_ctc': candidate.current_ctc,
-            'expected_ctc': candidate.expected_ctc,
-            'notice_period': candidate.notice_period,
+            'current_ctc': application.current_ctc,
+            'expected_ctc': application.expected_ctc,
+            'notice_period': application.notice_period,
             'sent_by': getattr(application, 'client_submission', None) and
                        getattr(application.client_submission.sent_by, 'name', 'RecruitSmart'),
             'resume_link': '',  # Set to actual resume URL when hosted

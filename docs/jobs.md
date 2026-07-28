@@ -117,13 +117,15 @@ flowchart TD
         "hiring_for": "self",
         "client_name": "Tech Corp",
         "candidate_count": 5,
+        "budget": "1800000.00",
+        "skill_criteria": "75.00",
         "target_closing_date": "2025-06-30",
         "created_by_name": "Manager One",
         "created_at": "2025-01-01T10:00:00Z"
       }]
     }
     ```
-    For full details (stages array via `get_stages()`, `assigned_recruiters` as UserBrief[], `resume_upload_link`, `description`, `skills`, `created_by` object, etc.) use `GET /api/v1/jobs/{id}/` which uses `JobDetailSerializer`.
+    For full details (stages array via `get_stages()`, `assigned_recruiters` as UserBrief[], `resume_upload_link`, `description`, `skills`, `created_by` object, `skill_criteria` for AI resume parsing threshold, etc.) use `GET /api/v1/jobs/{id}/` which uses `JobDetailSerializer`.
 
 - **Create**: `POST /api/v1/jobs/`
   **Step-by-Step Guide**:

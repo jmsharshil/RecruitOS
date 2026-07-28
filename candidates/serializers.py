@@ -46,7 +46,9 @@ class ClientSubmissionSerializer(serializers.ModelSerializer):
 # ---------------------------------------------------------------------------
 
 class ApplicationListSerializer(serializers.ModelSerializer):
-    """Flat list — candidate name, job title, status, stage. No deep nesting."""
+    """Flat list — candidate name, job title, status, stage. No deep nesting.
+    Updated to include fields moved from Candidate model (ctc, notice_period, etc).
+    """
     candidate_name = serializers.CharField(source='candidate.candidate_name', read_only=True)
     candidate_email = serializers.CharField(source='candidate.email', read_only=True)
     job_title      = serializers.CharField(source='job.title', read_only=True)
@@ -70,6 +72,8 @@ class ApplicationListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'candidate_name', 'candidate_email', 'job_title',
             'status', 'stage_name', 'share_date', 'created_at',
+            'current_ctc', 'expected_ctc', 'notice_period', 'reason_for_change',
+            'preferred_location', 'offer_in_hand', 'feedback', 'dob', 'doc',
             # write-only
             'job_id', 'candidate_id', 'current_stage_id',
         ]
@@ -80,13 +84,17 @@ class ApplicationListSerializer(serializers.ModelSerializer):
 
 
 class ApplicationDetailSerializer(serializers.ModelSerializer):
-    """Full nested detail — candidate, job, stage, interview, submission."""
+    """Full nested detail — candidate, job, stage, interview, submission.
+    Updated for model changes (dob, doc, ctc fields now here).
+    """
     current_stage      = StageBriefSerializer(read_only=True)
     job                = JobBriefSerializer(read_only=True)
     candidate          = CandidateBriefSerializer(read_only=True)
     interview_schedule = serializers.SerializerMethodField()
     client_submission  = serializers.SerializerMethodField()
     share_date         = DateParserField(required=False, allow_null=True)
+    dob                = DateParserField(required=False, allow_null=True)
+    doc                = DateParserField(required=False, allow_null=True)
     created_at         = DateParserDateTimeField(read_only=True)
     updated_at         = DateParserDateTimeField(read_only=True)
     deleted_at         = DateParserDateTimeField(read_only=True, allow_null=True)
@@ -123,7 +131,9 @@ class ApplicationDetailSerializer(serializers.ModelSerializer):
 # ---------------------------------------------------------------------------
 
 class CandidateListSerializer(serializers.ModelSerializer):
-    """Flat list — essential fields only, no nested applications."""
+    """Flat list — essential fields only, no nested applications.
+    Note: CTC, notice_period, reason_for_change moved to per-job Application model.
+    """
     uploaded_by_name    = serializers.SerializerMethodField()
     applications_count  = serializers.SerializerMethodField()
     duplicate_of_name   = serializers.SerializerMethodField()
@@ -134,10 +144,9 @@ class CandidateListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'candidate_name', 'email', 'contact',
             'current_profile', 'current_company', 'experience',
-            'current_location', 'notice_period',
-            'current_ctc', 'expected_ctc',
-            'resume_file_name', 'is_duplicate', 'duplicate_of_name',
-            'applications_count', 'uploaded_by_name', 'created_at',
+            'current_location', 'resume_file_name', 'is_duplicate',
+            'duplicate_of_name', 'applications_count', 'uploaded_by_name',
+            'created_at', 'skills',
         ]
 
     def get_uploaded_by_name(self, obj):
@@ -151,12 +160,12 @@ class CandidateListSerializer(serializers.ModelSerializer):
 
 
 class CandidateDetailSerializer(serializers.ModelSerializer):
-    """Full detail — all fields + nested applications + uploader info."""
+    """Full detail — all fields + nested applications + uploader info.
+    Note: Fields like dob, doc, ctc, notice_period, reason_for_change moved to Application.
+    """
     applications         = ApplicationListSerializer(many=True, read_only=True)
     uploaded_by          = UserBriefSerializer(read_only=True)
     duplicate_of_detail  = CandidateBriefSerializer(source='duplicate_of', read_only=True)
-    dob                  = DateParserField(required=False, allow_null=True)
-    doc                  = DateParserField(required=False, allow_null=True)
     created_at           = DateParserDateTimeField(read_only=True)
     updated_at           = DateParserDateTimeField(read_only=True)
     deleted_at           = DateParserDateTimeField(read_only=True, allow_null=True)

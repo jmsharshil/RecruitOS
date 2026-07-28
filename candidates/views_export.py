@@ -19,8 +19,8 @@ from accounts.models import UserRole
 CANDIDATE_EXPORT_HEADERS = [
     'candidate_name', 'profile_name', 'current_company', 'current_profile',
     'experience', 'current_location', 'preferred_location',
-    'education', 'college', 'contact', 'email', 'dob', 'doc',
-    'current_ctc', 'expected_ctc', 'notice_period',
+    'education', 'contact', 'email', 'dob', 'doc',
+    'current_ctc', 'expected_ctc', 'notice_period', 'offer_in_hand',
     'status', 'share_date', 'feedback', 'job_title',
 ]
 
@@ -49,12 +49,13 @@ class CandidateExportView(APIView):
             export_format = 'csv'
 
         if is_template:
-            # Sample data for template - can be used for pool (job_title empty) or with job_title for application linking
+            # Sample data for template - reflects split Candidate (pool) / Application (per-job) model.
+            # Pool candidates omit per-job fields; job_title links to Application.
             rows = [[
                 'Rahul Sharma', 'Software Engineer', 'Tech Solutions Ltd', 'Senior Backend Dev',
                 '6 years', 'Bangalore', 'Bangalore, Remote',
-                'B.Tech in Computer Science', 'IIT Bombay', '+919876543210', 'rahul.sharma@email.com',
-                '1995-05-15', '2024-01-10', 1200000, 1800000, '30 days',
+                'B.Tech in Computer Science', '+919876543210', 'rahul.sharma@email.com',
+                '1995-05-15', '2024-01-10', 1200000, 1800000, '30 days', 0,
                 'SCREENING', '2024-01-10', 'Strong Python/Django background', 'Senior Python Developer'
             ]]
             ext = 'xlsx' if export_format == 'xlsx' else 'csv'
@@ -105,10 +106,11 @@ class CandidateExportView(APIView):
 
                 rows.append([
                     c.candidate_name, c.profile_name, c.current_company, c.current_profile,
-                    c.experience, c.current_location, c.preferred_location or '',
-                    c.education, c.college or '', c.contact, c.email,
-                    c.dob, c.doc,
-                    float(c.current_ctc or 0), float(c.expected_ctc or 0), c.notice_period,
+                    c.experience, c.current_location, getattr(app, 'preferred_location', ''),
+                    str(c.education or ''), c.contact, c.email,
+                    getattr(app, 'dob', ''), getattr(app, 'doc', ''),
+                    float(getattr(app, 'current_ctc', 0) or 0), float(getattr(app, 'expected_ctc', 0) or 0),
+                    getattr(app, 'notice_period', ''), getattr(app, 'offer_in_hand', 0) or 0,
                     status, share_date, feedback,
                     job_title,
                 ])
@@ -123,13 +125,11 @@ class CandidateExportView(APIView):
 class CandidateImportView(APIView):
     """
     POST /api/v1/candidates/import/
-    Upload CSV or Excel (.xlsx/.xls) for bulk create of candidates (pool or job-linked).
-    All authenticated roles allowed (recruiters can import to pool or jobs they are assigned to via M2M).
-    Required: candidate_name, email, contact (parser validates normalized headers).
-    job_title optional (iexact lookup); creates Application linked to first_stage + status (get_choice).
-    Uses DateParserField for dob/doc/share_date (flexible formats), safe_float->Decimal for CTCs,
-    dedup by (email+org), recruiter RBAC guard. Transaction per record. Row errors indexed from 2.
-    Response: 201 full success or 207 partial with errors list. Logs summary. See docs/candidates.md.
+    Upload CSV or Excel for bulk create of Candidates (pool) + optional Applications (per-job).
+    Per-job fields (ctc, notice, dob, doc, feedback, share_date, status etc) now live on Application.
+    Required: candidate_name, email, contact. job_title optional for linking. Uses DateParser for dates,
+    safe_float for CTCs/offer. Dedup by email+org. RBAC for recruiters on job assignment. Transactions per row.
+    Response 201/207 with errors. Updated for model split. See docs/candidates.md.
     """
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
@@ -173,7 +173,7 @@ class CandidateImportView(APIView):
                     skipped += 1
                     continue
 
-            # Get or create candidate (pool-friendly, dedup by email+org)
+            # Get or create candidate (pool-friendly, dedup by email+org). Only pool fields.
             candidate = Candidate.objects.filter(
                 email=email,
                 organization=user.organization,
@@ -181,23 +181,6 @@ class CandidateImportView(APIView):
             ).first()
             if not candidate:
                 try:
-                    # Flexible date parsing for dob/doc
-                    dob = None
-                    dob_raw = row.get('dob')
-                    if dob_raw and str(dob_raw).strip() not in ('', 'None', 'null'):
-                        try:
-                            dob = date_parser.to_internal_value(str(dob_raw).strip())
-                        except Exception:
-                            dob = None
-
-                    doc = None
-                    doc_raw = row.get('doc')
-                    if doc_raw and str(doc_raw).strip() not in ('', 'None', 'null'):
-                        try:
-                            doc = date_parser.to_internal_value(str(doc_raw).strip())
-                        except Exception:
-                            doc = None
-
                     with transaction.atomic():
                         candidate = Candidate.objects.create(
                             candidate_name=name,
@@ -206,17 +189,9 @@ class CandidateImportView(APIView):
                             current_company=row.get('current_company', 'Not provided'),
                             experience=row.get('experience', '0 years'),
                             current_location=row.get('current_location', 'Not specified'),
-                            preferred_location=row.get('preferred_location', ''),
-                            education=row.get('education', ''),
-                            college=row.get('college', ''),
+                            education=row.get('education', []),
                             contact=contact,
                             email=email,
-                            dob=dob,
-                            doc=doc,
-                            current_ctc=Decimal(safe_float(row.get('current_ctc')) or 0),
-                            expected_ctc=Decimal(safe_float(row.get('expected_ctc')) or 0),
-                            notice_period=row.get('notice_period', 'Not specified'),
-                            reason_for_change=row.get('reason_for_change', 'Imported via file'),
                             resume_file_name=row.get('resume_file_name', ''),
                             uploaded_by=user,
                             organization=user.organization,
@@ -261,7 +236,23 @@ class CandidateImportView(APIView):
                         CandidateStatus.SCREENING.value
                     )
 
-                    # Flexible parsing for share_date
+                    # Flexible date parsing for dob, doc, share_date
+                    dob = None
+                    dob_raw = row.get('dob')
+                    if dob_raw and str(dob_raw).strip() not in ('', 'None', 'null'):
+                        try:
+                            dob = date_parser.to_internal_value(str(dob_raw).strip())
+                        except Exception:
+                            dob = None
+
+                    doc = None
+                    doc_raw = row.get('doc')
+                    if doc_raw and str(doc_raw).strip() not in ('', 'None', 'null'):
+                        try:
+                            doc = date_parser.to_internal_value(str(doc_raw).strip())
+                        except Exception:
+                            doc = None
+
                     share_date = date.today()
                     share_raw = row.get('share_date')
                     if share_raw and str(share_raw).strip() not in ('', 'None', 'null'):
@@ -272,12 +263,24 @@ class CandidateImportView(APIView):
                         except Exception:
                             pass  # fallback to today
 
+                    offer = safe_float(row.get('offer_in_hand'))
+                    if offer is not None:
+                        offer = Decimal(offer)
+
                     with transaction.atomic():
                         Application.objects.create(
                             candidate=candidate,
                             job=job,
                             current_stage=first_stage,
                             status=status_val,
+                            current_ctc=Decimal(safe_float(row.get('current_ctc')) or 0),
+                            expected_ctc=Decimal(safe_float(row.get('expected_ctc')) or 0),
+                            notice_period=row.get('notice_period', 'Not specified'),
+                            reason_for_change=row.get('reason_for_change', 'Imported via file'),
+                            preferred_location=row.get('preferred_location', ''),
+                            offer_in_hand=offer,
+                            dob=dob,
+                            doc=doc,
                             feedback=row.get('feedback', ''),
                             share_date=share_date,
                             organization=user.organization,

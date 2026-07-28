@@ -35,7 +35,7 @@ class Client(BaseModel):
     agreement_date          = models.DateField(null=True, blank=True)
     payment_period_days     = models.PositiveIntegerField(null=True, blank=True)
     replacement_period_days = models.PositiveIntegerField(null=True, blank=True)
-    commercial_decided      = models.BooleanField(default=False)
+    commercial_decided      = models.TextField(blank=True)  # Now text (e.g. "15% margin, net-30") instead of boolean flag
     agreement_document      = models.FileField(
         upload_to='client_agreements/',
         null=True,

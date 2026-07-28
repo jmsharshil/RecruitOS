@@ -32,13 +32,16 @@ class JobListSerializer(serializers.ModelSerializer):
     candidate_count = serializers.SerializerMethodField()
     created_by_name = serializers.SerializerMethodField()
     target_closing_date = DateParserField(read_only=True)
+    budget              = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    skill_criteria      = serializers.DecimalField(max_digits=5, decimal_places=2, read_only=True)
     created_at          = DateParserDateTimeField(read_only=True)
 
     class Meta:
         model = Job
         fields = [
             'id', 'code', 'title', 'status', 'priority', 'job_mode', 'job_type',
-            'location', 'openings', 'min_experience', 'max_experience',
+            'location', 'openings', 'min_experience', 'max_experience', 'budget',
+            'skill_criteria',
             'hiring_for', 'client_name', 'candidate_count',
             'target_closing_date', 'created_by_name', 'created_at',
         ]

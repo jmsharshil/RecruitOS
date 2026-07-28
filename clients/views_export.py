@@ -28,29 +28,31 @@ CLIENT_IMPORT_REQUIRED = [
 
 class ClientExportView(APIView):
     """
-    GET /api/v1/clients/export/?status=active
-    Download role-scoped clients as CSV (ADMIN/MANAGER=full org; RECRUITER=clients with their assigned jobs).
-    Mirrors ClientViewSet RBAC + filterset support. Includes all new fields. Logs action.
+    GET /api/v1/clients/export/?status=active&format=xlsx
+    Download role-scoped clients as CSV/XLSX (ADMIN/MANAGER=full org; RECRUITER=clients linked to their jobs via reverse FK).
+    Mirrors ClientViewSet.get_queryset() RBAC exactly. Supports ?template=1 (sample with text for commercial_decided), ?status= (case-insensitive via get_choice),
+    ?format=xlsx (native types + buffer.seek(0)). commercial_decided changed to TextField.
+    Includes all fields (agreement_document_name, commercial_decided etc). Logs action.
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        """Supports ?template=1 (sample row, no DB hit) + ?format=xlsx.
+        """Supports ?template=1 (sample row, no DB hit) + ?format=xlsx + ?status=.
         Mirrors exact RBAC/QS from ClientViewSet.get_queryset() (ADMIN/MANAGER full, RECRUITER via jobs__assigned_recruiters).
-        Separate log_msg for template. Updated filename per format."""
+        Status filter now uses get_choice for flexibility. Updated XLSX cleaning prevents corruption."""
         is_template = request.query_params.get('template') in ('1', 'true', 'yes')
         export_format = request.query_params.get('format', 'csv').lower()
         if export_format not in ('csv', 'xlsx'):
             export_format = 'csv'
 
         if is_template:
-            # Sample data for template (note bool for commercial_decided)
+            # Sample data for template (commercial_decided now text, e.g. terms or "Yes")
             rows = [[
                 'CLI-001', 'Acme Corp', 'John Doe', 'john@acmecorp.com', 'jane@acmecorp.com',
                 '+1234567890', '+1987654321', 'https://acmecorp.com', 'https://linkedin.com/company/acme',
                 '123 Business St', 'New York', 'NY', 'USA', '10001', 'New York Metro',
                 'Technology', 'GSTIN123456789', 'ACTIVE', '2024-01-15', 30,
-                45, True, 'agreement.pdf', 'Sample client notes for demo purposes.'
+                45, 'Yes - 15% margin, net-30', 'agreement.pdf', 'Sample client notes for demo purposes.'
             ]]
             ext = 'xlsx' if export_format == 'xlsx' else 'csv'
             filename = f'clients_import_template.{ext}'
@@ -74,16 +76,21 @@ class ClientExportView(APIView):
 
             status_filter = request.query_params.get('status')
             if status_filter:
-                qs = qs.filter(status=status_filter)
+                # Use get_choice for case-insensitive match against choices (ACTIVE/active/on-hold)
+                status_val = get_choice(status_filter, ClientStatus.choices, None)
+                if status_val:
+                    qs = qs.filter(status=status_val)
 
             rows = []
             for c in qs:
+                # agreement_date remains date object (or None); util now handles natively for XLSX
+                # commercial_decided is now TextField (string or empty)
                 rows.append([
                     c.client_id, c.company_name, c.client_name, c.email, c.alternative_email or '',
                     c.contact, c.alternative_contact or '', c.website or '', c.linkedin or '', c.street or '',
                     c.city, c.state, c.country, c.postal_code or '', c.client_location or '',
                     c.industry, c.gst_number or '', c.status, c.agreement_date, c.payment_period_days,
-                    c.replacement_period_days, c.commercial_decided, c.agreement_document_name or '',
+                    c.replacement_period_days, c.commercial_decided or '', c.agreement_document_name or '',
                     c.notes or '',
                 ])
             ext = 'xlsx' if export_format == 'xlsx' else 'csv'
@@ -97,8 +104,9 @@ class ClientExportView(APIView):
 class ClientImportView(APIView):
     """
     POST /api/v1/clients/import/
-    Upload a CSV to bulk-create clients (Admin only).
+    Upload a CSV/XLSX to bulk-create clients (Admin only).
     Required columns: company_name, client_name, email, contact, industry
+    commercial_decided now accepts any text (terms decided); no longer bool-coerced.
     """
     permission_classes = [IsAdmin]
     parser_classes = [MultiPartParser, FormParser]
@@ -152,8 +160,8 @@ class ClientImportView(APIView):
                 except (ValueError, TypeError):
                     payment_period_days = replacement_period_days = None
 
-                commercial = row.get('commercial_decided', 'false')
-                commercial_decided = str(commercial).lower().strip() in ('true', '1', 'yes', 'y')
+                # commercial_decided now TextField (free text for terms decided, e.g. "15% margin")
+                commercial_decided = str(row.get('commercial_decided', '')).strip()
 
                 with transaction.atomic():  # atomic per client (consistent with JobImportView)
                     Client.objects.create(

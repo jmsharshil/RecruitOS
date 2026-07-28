@@ -1,6 +1,8 @@
 import csv
 import io
 import re
+from datetime import date, datetime
+from decimal import Decimal
 from django.http import HttpResponse
 import openpyxl
 from openpyxl import Workbook
@@ -9,22 +11,30 @@ from openpyxl import Workbook
 def generate_csv_response(filename, headers, rows, export_format='csv'):
     """
     Unified generator for CSV or XLSX export (called by *ExportView.get()).
-    Defaults to CSV for backward compat. Uses openpyxl for XLSX.
-    Updates filename extension. Supports ?format=xlsx and ?template=1.
-    Cleans bools/None for Excel/CSV compatibility. See docs/*.md.
+    Defaults to CSV for backward compat. Uses openpyxl for XLSX with native Python
+    types (bool, date, None) for proper cell typing in Excel. Updated buffer handling
+    with seek(0) to prevent any truncation/corruption issues that could cause
+    "file format or extension is not valid" errors. Supports ?format=xlsx and ?template=1.
+    Cleans data per-row. See docs/common.md for details.
     """
     if export_format == 'xlsx':
         wb = Workbook()
         ws = wb.active
+        ws.title = "Export"
         ws.append(headers)
         for row in rows:
-            # Clean row for Excel (convert bool/None/date appropriately)
+            # Clean row for Excel: use native types so openpyxl sets correct cell types
+            # (boolean for bool, date serial for date, empty for None). Prevents corruption.
             clean_row = []
             for v in row:
                 if v is None:
-                    clean_row.append('')
+                    clean_row.append(None)
                 elif isinstance(v, bool):
-                    clean_row.append('TRUE' if v else 'FALSE')
+                    clean_row.append(v)
+                elif isinstance(v, (date, datetime)):
+                    clean_row.append(v)
+                elif isinstance(v, Decimal):
+                    clean_row.append(float(v))
                 else:
                     clean_row.append(v)
             ws.append(clean_row)
@@ -35,6 +45,7 @@ def generate_csv_response(filename, headers, rows, export_format='csv'):
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         buffer = io.BytesIO()
         wb.save(buffer)
+        buffer.seek(0)
         response.write(buffer.getvalue())
         return response
     else:
