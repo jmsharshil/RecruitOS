@@ -27,6 +27,8 @@ from audit.utils import log_action
 from candidates.tasks import simulate_client_submission_email, simulate_resume_submission_notification
 from common.permissions import IsAdminOrManager, IsAdmin
 
+logger = logging.getLogger(__name__)
+
 class CandidateViewSet(viewsets.ModelViewSet):
     filter_backends  = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class  = CandidateFilterSet
@@ -119,6 +121,7 @@ class CandidateViewSet(viewsets.ModelViewSet):
         from .utils import background_parse_resume
         TASK_QUEUE.enqueue(
             background_parse_resume,
+            user,
             str(candidate.id),
             str(request.user.organization.id)
         )
@@ -478,21 +481,6 @@ class TalentPoolPublicUploadView(APIView):
         parsed_data = {}
         from candidates.utils import background_parse_resume
 
-        log_action(
-            user,
-            'created',
-            'Candidate',
-            candidate.id,
-            f"Resume upload by {name} {'(AI-parsed)' if ai_parsed else '(form)'}",
-            organization=organization
-        )
-        simulate_resume_submission_notification(candidate.id)
-
-        response_data = {
-            "message": "Resume submitted successfully! We'll be in touch.",
-            "candidate_id": str(candidate.id),
-            "ai_parsed": ai_parsed,
-        }
-        if is_duplicate or parsed_data.get("duplicate"):
-            response_data["note"] = parsed_data.get("message", "Duplicate detected in pool")
+        response_data = { "message": "Resume submitted successfully! We'll be in touch."
+                         }
         return Response(response_data, status=201)

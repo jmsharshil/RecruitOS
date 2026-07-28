@@ -8,6 +8,8 @@ from pathlib import Path
 from django.conf import settings
 from .models import Candidate
 from common.task_queue import TASK_QUEUE
+from audit.utils import log_action
+from candidates.tasks import simulate_client_submission_email, simulate_resume_submission_notification
 
 logger = logging.getLogger(__name__)
 
@@ -349,7 +351,7 @@ def parse_resume_task(resume_file, organization=None):
     return data
 
 
-def background_parse_resume(candidate_id: str, organization_id: str = None):
+def background_parse_resume(user,candidate_id: str, organization_id: str = None):
     """
     Background task for parsing resume using TASK_QUEUE.
     Loads candidate, calls parse_resume_task (which does AI parse + org-scoped dup check),
@@ -445,7 +447,17 @@ def background_parse_resume(candidate_id: str, organization_id: str = None):
                 logger.error(f"[TASK] Error setting duplicate for {candidate_id}: {dup_err}")
 
         if updated_fields:
+            candidate.uploaded_by=user
             candidate.save()
+            log_action(
+                user,
+                'created',
+                'Candidate',
+                candidate.id,
+                f"Resume upload by {name}",
+                organization=organization
+            )
+            simulate_resume_submission_notification(candidate.id)
             logger.info(f"[TASK] Updated candidate {candidate_id} with AI-parsed data. Fields: {updated_fields}")
         else:
             logger.info(f"[TASK] No meaningful AI updates for candidate {candidate_id}")
