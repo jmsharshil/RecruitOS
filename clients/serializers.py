@@ -84,6 +84,15 @@ class ClientDetailSerializer(serializers.ModelSerializer):
             'hired_count':           hired_count,
         }
 
+    def validate_team_members(self, value):
+        import uuid
+        if not isinstance(value, list):
+            return value
+        for member in value:
+            if isinstance(member, dict) and not member.get('id'):
+                member['id'] = str(uuid.uuid4())
+        return value
+
     def to_internal_value(self, data):
         """
         Support nested writable 'pocs' and 'documents' for create while keeping

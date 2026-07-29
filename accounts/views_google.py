@@ -45,30 +45,12 @@ class GoogleLoginView(APIView):
                 logger.info(f"Google Login successful for existing user: {email_clean}")
                 log_action(user, 'logged_in', 'User', user.id, "Logged in via Google SSO", organization=getattr(user, 'organization', None))
             else:
-                # User does NOT exist -> Create new Organization & Admin User
-                logger.info(f"Google Login for new user: {email_clean}. Creating new organization.")
-                
-                # Derive org name from domain or user name
-                domain = email_clean.split('@')[1]
-                org_name = f"{domain.capitalize()} (Auto)"
-                if domain in ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com']:
-                    org_name = f"{name}'s Organization"
-                
-                # Create Org
-                org = Organization.objects.create(name=org_name)
-                
-                # Create User
-                user = User.objects.create_user(
-                    email=email_clean,
-                    name=name,
-                    role=UserRole.ADMIN,
-                    # No password, they use SSO
+                # User does NOT exist -> Block login
+                logger.warning(f"Google Login attempted by unregistered user: {email_clean}")
+                return Response(
+                    {"error": "This email is not registered in our system. Please contact your admin to create an account first."}, 
+                    status=status.HTTP_403_FORBIDDEN
                 )
-                user.organization = org
-                user.save()
-                
-                log_action(user, 'created', 'Organization', org.id, "Auto-created via Google SSO", organization=org)
-                log_action(user, 'created', 'User', user.id, "Auto-created Admin via Google SSO", organization=org)
 
             # 3. Generate JWT Tokens
             refresh = RefreshToken.for_user(user)
