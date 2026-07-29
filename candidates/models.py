@@ -114,3 +114,14 @@ class ClientSubmission(BaseModel):
     status = models.CharField(max_length=20, choices=SubmissionStatus.choices, default=SubmissionStatus.PENDING)
     client_feedback = models.TextField(blank=True)
     client_rating = models.PositiveSmallIntegerField(null=True, blank=True)  # 1-5
+
+
+class ApplicationHistory(BaseModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    application = models.ForeignKey(Application, on_delete=models.CASCADE, related_name='history')
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='application_history_entries')
+    action = models.CharField(max_length=50)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['created_at']
