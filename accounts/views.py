@@ -30,6 +30,7 @@ from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes
 from django.contrib.auth.tokens import default_token_generator
 from accounts.email_utils import send_org_email
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +45,7 @@ def send_set_pin_email(user):
     """
     token = default_token_generator.make_token(user)
     uid = urlsafe_base64_encode(force_bytes(user.pk))
-    domain = 'localhost:5173'  # Update to your frontend domain in production
-    protocol = 'http'
-    url = f"{protocol}://{domain}/set-pin?uid={uid}&token={token}"
+    url = f"{settings.FRONTEND_URL}/set-pin?uid={uid}&token={token}"
 
     org = getattr(user, 'organization', None)
     plain_message = (
@@ -60,8 +59,6 @@ def send_set_pin_email(user):
         'user': user,
         'uid': uid,
         'token': token,
-        'domain': domain,
-        'protocol': protocol,
         'url': url,
         'plain_message': plain_message,
     }
@@ -118,6 +115,39 @@ def send_forgot_password_email(user):
     except Exception as e:
         logger.error(f"Failed to send forgot PIN email to {user.email} (both org and global fallback failed): {str(e)}")
 
+
+def forgot_password_email(user):
+    token = default_token_generator.make_token(user)
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
+    url = f"{settings.FRONTEND_URL}/set-pin?uid={uid}&token={token}"
+
+    org = getattr(user, 'organization', None)
+    plain_message = (
+        f"Hi {user.name},\n\n"
+        f"Your account has been created for {getattr(org, 'name', 'RecruitSmart')}.\n"
+        f"Please set your security PIN by visiting:\n{url}\n\n"
+        "The PIN can be 4-6 digits. You will use it to log in going forward."
+    )
+
+    context = {
+        'user': user,
+        'uid': uid,
+        'token': token,
+        'url': url,
+        'plain_message': plain_message,
+    }
+
+    try:
+        send_org_email(
+            organization=org,
+            subject=f'Change Password',
+            template_name='change_password',
+            context=context,
+            recipient_list=[user.email],
+        )
+        logger.info(f"Password change email sent to {user.email} with link to {url}")
+    except Exception as e:
+        logger.error(f"Failed to send password change email to {user.email} (both org and global fallback failed): {str(e)}")
 
 # --- Auth Views ---
 

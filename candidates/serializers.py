@@ -211,8 +211,8 @@ class CandidateListSerializer(serializers.ModelSerializer):
     Note: CTC, notice_period, reason_for_change moved to per-job Application model.
     """
     uploaded_by_name    = serializers.SerializerMethodField()
-    applications_count  = serializers.SerializerMethodField()
-    duplicate_of_name   = serializers.SerializerMethodField()
+    # applications_count  = serializers.SerializerMethodField()
+    # duplicate_of_name   = serializers.SerializerMethodField()
     created_at          = DateParserDateTimeField(read_only=True)
 
     class Meta:
@@ -220,19 +220,19 @@ class CandidateListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'candidate_name', 'email', 'contact',
             'current_profile', 'current_company', 'experience',
-            'current_location', 'resume_file_name', 'is_duplicate',
-            'duplicate_of_name', 'applications_count', 'uploaded_by_name',
-            'created_at', 'skills',
+            'current_location', 'is_duplicate',
+            'uploaded_by_name', 'created_at',
+            # 'resume_file_name', 'duplicate_of_name', 'applications_count', 'skills',
         ]
 
     def get_uploaded_by_name(self, obj):
         return obj.uploaded_by.name if obj.uploaded_by else None
 
-    def get_applications_count(self, obj):
-        return obj.applications.filter(is_deleted=False).count()
-
-    def get_duplicate_of_name(self, obj):
-        return obj.duplicate_of.candidate_name if obj.duplicate_of_id else None
+    # def get_applications_count(self, obj):
+    #     return obj.applications.filter(is_deleted=False).count()
+    #
+    # def get_duplicate_of_name(self, obj):
+    #     return obj.duplicate_of.candidate_name if obj.duplicate_of_id else None
 
 
 class CandidateDetailSerializer(serializers.ModelSerializer):
@@ -253,3 +253,9 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
             'id', 'created_at', 'updated_at', 'is_deleted', 'deleted_at',
             'organization', 'uploaded_by',
         ]
+
+    def update(self, instance, validated_data):
+        # Automatically keep profile_name synced with candidate_name if it's updated
+        if 'candidate_name' in validated_data and 'profile_name' not in validated_data:
+            validated_data['profile_name'] = validated_data['candidate_name']
+        return super().update(instance, validated_data)
