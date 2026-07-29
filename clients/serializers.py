@@ -54,7 +54,7 @@ class ClientDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Client
-        fields = '__all__'
+        exclude = ['alternative_email', 'alternative_contact', 'website', 'linkedin', 'client_location']
         read_only_fields = ['id', 'client_id', 'created_by', 'is_deleted', 'organization']
 
     def get_pocs(self, obj):

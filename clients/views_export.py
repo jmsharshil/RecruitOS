@@ -13,9 +13,9 @@ from common.permissions import IsAdmin
 from audit.utils import log_action
 
 CLIENT_EXPORT_HEADERS = [
-    'client_id', 'company_name', 'client_name', 'email', 'alternative_email',
-    'contact', 'alternative_contact', 'website', 'linkedin', 'street',
-    'city', 'state', 'country', 'postal_code', 'client_location',
+    'client_id', 'company_name', 'client_name', 'email',
+    'contact', 'street',
+    'city', 'state', 'country', 'postal_code',
     'industry', 'gst_number', 'status', 'agreement_date', 'payment_period_days',
     'replacement_period_days', 'commercial_decided', 'agreement_document_name',
     'notes',
