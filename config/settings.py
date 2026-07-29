@@ -11,7 +11,7 @@ DEBUG = config('DEBUG', default=False, cast=bool)
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv())
 
 # Frontend URLs for emails and CORS
-# FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5173')
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5173')
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
