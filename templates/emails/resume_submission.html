@@ -1,0 +1,47 @@
+{% extends "emails/base_email.html" %}
+{% block title %}Candidate Tracker Update: {{ candidate_name }}{% endblock %}
+
+{% block content %}
+  <p>Dear <strong>{{ recipient_name }}</strong>,</p>
+  <p>
+    A new candidate has been successfully added to your tracker. Here are the details:
+  </p>
+
+  <table style="width: 100%; border-collapse: collapse; margin-top: 15px; border: 1px solid #e2e8f0; font-size: 14px;">
+    <tr style="background-color: #f8fafc;">
+      <th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left; width: 30%;">Name</th>
+      <td style="padding: 10px; border: 1px solid #e2e8f0;">{{ candidate_name }}</td>
+    </tr>
+    <tr>
+      <th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left;">Email</th>
+      <td style="padding: 10px; border: 1px solid #e2e8f0;">{{ candidate_email }}</td>
+    </tr>
+    <tr style="background-color: #f8fafc;">
+      <th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left;">Contact</th>
+      <td style="padding: 10px; border: 1px solid #e2e8f0;">{{ contact }}</td>
+    </tr>
+    <tr>
+      <th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left;">Profile</th>
+      <td style="padding: 10px; border: 1px solid #e2e8f0;">{{ current_profile }}</td>
+    </tr>
+    <tr style="background-color: #f8fafc;">
+      <th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left;">Company</th>
+      <td style="padding: 10px; border: 1px solid #e2e8f0;">{{ current_company }}</td>
+    </tr>
+    <tr>
+      <th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left;">Location</th>
+      <td style="padding: 10px; border: 1px solid #e2e8f0;">{{ current_location }}</td>
+    </tr>
+    <tr style="background-color: #f8fafc;">
+      <th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left;">Education</th>
+      <td style="padding: 10px; border: 1px solid #e2e8f0;">{{ education }}</td>
+    </tr>
+    <tr>
+      <th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left;">Skills</th>
+      <td style="padding: 10px; border: 1px solid #e2e8f0;">{{ skills }}</td>
+    </tr>
+  </table>
+
+  <br/>
+  <p>Please log in to the platform to view the full profile and resume.</p>
+{% endblock %}

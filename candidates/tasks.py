@@ -109,18 +109,65 @@ def simulate_interview_reminder(interview_schedule_id):
 def simulate_resume_submission_notification(obj_id):
     """Notify about new resume submission. Supports Application (job-specific) or pure pool Candidate (obj_id = candidate.id)."""
     try:
-        application = Application.objects.select_related('candidate', 'job').get(id=obj_id)
+        application = Application.objects.select_related('candidate', 'job', 'job__client', 'organization').get(id=obj_id)
         candidate = application.candidate
+        org = application.organization
+        
+        # Prepare context for the email template
+        context = {
+            'candidate_name': candidate.candidate_name,
+            'candidate_email': candidate.email,
+            'contact': candidate.contact,
+            'current_profile': candidate.current_profile or 'N/A',
+            'current_company': candidate.current_company or 'N/A',
+            'current_location': candidate.current_location or 'N/A',
+            'education': ', '.join([e.get('degree', '') for e in candidate.education]) if candidate.education else 'N/A',
+            'skills': ', '.join(candidate.skills) if candidate.skills else 'N/A',
+            'plain_message': f"A new candidate {candidate.candidate_name} has been added to your tracker."
+        }
+        
+        from accounts.email_utils import send_org_email
+        
+        # Notify Recruiters
         for recruiter in application.job.assigned_recruiters.all():
             Notification.objects.create(
                 user=recruiter,
-                organization=application.organization,
+                organization=org,
                 title="New Resume Submitted",
                 message=f"{candidate.candidate_name} submitted a resume for '{application.job.title}'.",
                 type='info',
                 link=f"/candidates/{candidate.id}"
             )
-        logger.info(f"Resume submission notification fired for application {obj_id}")
+            # Send Email to Recruiter
+            recruiter_context = context.copy()
+            recruiter_context['recipient_name'] = recruiter.name
+            try:
+                send_org_email(
+                    organization=org,
+                    subject=f"Candidate Tracker Update: {candidate.candidate_name}",
+                    template_name='resume_submission',
+                    context=recruiter_context,
+                    recipient_list=[recruiter.email],
+                )
+            except Exception as e:
+                logger.error(f"Email error to recruiter: {e}")
+
+        # Send Email to Client (if exists and has email)
+        if application.job.client and application.job.client.email:
+            client_context = context.copy()
+            client_context['recipient_name'] = application.job.client.company_name
+            try:
+                send_org_email(
+                    organization=org,
+                    subject=f"Candidate Tracker Update: {candidate.candidate_name}",
+                    template_name='resume_submission',
+                    context=client_context,
+                    recipient_list=[application.job.client.email],
+                )
+            except Exception as e:
+                logger.error(f"Email error to client: {e}")
+
+        logger.info(f"Resume submission notification and emails fired for application {obj_id}")
         return
     except Application.DoesNotExist:
         pass
@@ -128,22 +175,48 @@ def simulate_resume_submission_notification(obj_id):
         logger.error(f"Notification error: {e}")
         return
 
-    # Fallback for pure pool candidates (no Application — notify all active recruiters in org)
+    # Fallback for pure pool candidates (no Application)
     try:
-        candidate = Candidate.objects.get(id=obj_id, is_deleted=False)
-        for recruiter in User.objects.filter(
-            organization=candidate.organization,
-            role=UserRole.RECRUITER,
-            is_active=True
-        ):
+        candidate = Candidate.objects.select_related('uploaded_by', 'organization').get(id=obj_id, is_deleted=False)
+        org = candidate.organization
+        
+        context = {
+            'candidate_name': candidate.candidate_name,
+            'candidate_email': candidate.email,
+            'contact': candidate.contact,
+            'current_profile': candidate.current_profile or 'N/A',
+            'current_company': candidate.current_company or 'N/A',
+            'current_location': candidate.current_location or 'N/A',
+            'education': ', '.join([e.get('degree', '') for e in candidate.education]) if candidate.education else 'N/A',
+            'skills': ', '.join(candidate.skills) if candidate.skills else 'N/A',
+            'plain_message': f"A new candidate {candidate.candidate_name} has been added to your pool tracker."
+        }
+        
+        # Only notify the recruiter who uploaded it
+        if candidate.uploaded_by:
             Notification.objects.create(
-                user=recruiter,
-                organization=candidate.organization,
+                user=candidate.uploaded_by,
+                organization=org,
                 title="New Resume in Pool",
                 message=f"{candidate.candidate_name} added to talent pool.",
                 type='info',
                 link=f"/candidates/{candidate.id}"
             )
+            
+            from accounts.email_utils import send_org_email
+            recruiter_context = context.copy()
+            recruiter_context['recipient_name'] = candidate.uploaded_by.name
+            try:
+                send_org_email(
+                    organization=org,
+                    subject=f"Candidate Tracker Update: {candidate.candidate_name}",
+                    template_name='resume_submission',
+                    context=recruiter_context,
+                    recipient_list=[candidate.uploaded_by.email],
+                )
+            except Exception as e:
+                logger.error(f"Email error to uploader: {e}")
+                
         logger.info(f"Resume submission notification fired for pool candidate {obj_id}")
     except Candidate.DoesNotExist:
         logger.warning(f"No Application or Candidate found for id={obj_id}")
