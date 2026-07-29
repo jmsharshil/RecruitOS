@@ -516,109 +516,151 @@ class TalentPoolPublicUploadView(APIView):
         except Organization.DoesNotExist:
             raise ValidationError({"error": "Organization not found"})
 
-        # Use AI parsing (via parse_resume_task which does org-scoped duplicate detection
-        # and anti-hallucination). Fallback to form fields on error. Updated for new
-        # Candidate/Application models (profile_name added, CTC/notice moved to Application,
-        # education/skills as JSON lists).
-        ai_parsed = False
-        parsed_data = {}
-        name = request.data.get("name") or request.data.get("candidate_name", "Unnamed Candidate")
-        email = (request.data.get("email", "") or "").strip().lower()
-        phone = request.data.get("phone") or request.data.get("contact", "")
-        current_profile = request.data.get("current_profile", "Not provided")
-        current_company = request.data.get("current_company", "Not provided")
-        experience = request.data.get("experience", "Not specified")
-        current_location = request.data.get("current_location", "Not specified")
-        education = request.data.get("education", [])
-        skills = request.data.get("skills", [])
+        results = []
+        successful_count = 0
+        failed_count = 0
 
-        try:
-            from .utils import parse_resume_task
-            parsed = parse_resume_task(resume, organization=organization)
-            if isinstance(parsed, dict) and "error" not in parsed:
-                ai_parsed = True
-                parsed_data = parsed
-                name = parsed.get("candidate_name") or parsed.get("name") or parsed.get("profile_name") or name
-                email = (parsed.get("email") or email or "").strip().lower()
-                phone = parsed.get("contact") or parsed.get("phone_number") or parsed.get("phone") or phone
-                current_profile = parsed.get("current_profile") or parsed.get("title") or current_profile
-                current_company = parsed.get("current_company") or parsed.get("current_employer") or current_company
-                experience = parsed.get("experience") or experience
-                current_location = parsed.get("current_location") or parsed.get("location") or current_location
-                if isinstance(parsed.get("education"), (list, dict)):
-                    education = parsed.get("education")
-                skills = parsed.get("skills") or skills
-        except Exception as e:
-            parsed_data = {"parse_error": str(e)}
+        for resume in resumes:
+            ai_parsed = False
+            parsed_data = {}
+            # For single uploads, respect form data overrides. For batch, ignore them.
+            if len(resumes) == 1:
+                name = request.data.get("name") or request.data.get("candidate_name", "Unnamed Candidate")
+                email = (request.data.get("email", "") or "").strip().lower()
+                phone = request.data.get("phone") or request.data.get("contact", "")
+                current_profile = request.data.get("current_profile", None)
+                current_company = request.data.get("current_company", None)
+                experience = request.data.get("experience", None)
+                current_location = request.data.get("current_location", None)
+                education = request.data.get("education", [])
+                skills = request.data.get("skills", [])
+            else:
+                name, email, phone = "Unnamed Candidate", "", ""
+                current_profile, current_company, experience, current_location = None, None, None, None
+                education, skills = [], []
 
-        # Rewind file pointer (parse_resume_task reads it to temp file)
-        try:
-            resume.seek(0)
-        except (AttributeError, OSError):
-            pass
-
-        # Normalize for JSONFields in model
-        if not isinstance(skills, list):
-            skills = [s.strip() for s in str(skills).split(",") if s.strip()] if skills else []
-        if not isinstance(education, (list, dict)):
-            education = [education] if education and str(education).strip() else []
-
-        # Duplicate handling (leverage parsed if available, org-scoped)
-        is_duplicate = parsed_data.get("duplicate", False)
-        duplicate_of = None
-        if parsed_data.get("existing_candidate_id"):
             try:
-                duplicate_of = Candidate.objects.get(
-                    id=parsed_data.get("existing_candidate_id"),
+                from .utils import parse_resume_task
+                parsed = parse_resume_task(resume, organization=organization)
+                if isinstance(parsed, dict) and "error" not in parsed:
+                    ai_parsed = True
+                    parsed_data = parsed
+                    name = parsed.get("candidate_name") or parsed.get("name") or parsed.get("profile_name") or name
+                    email = (parsed.get("email") or email or "").strip().lower()
+                    phone = parsed.get("contact") or parsed.get("phone_number") or parsed.get("phone") or phone
+                    current_profile = parsed.get("current_profile") or parsed.get("title") or current_profile
+                    current_company = parsed.get("current_company") or parsed.get("current_employer") or current_company
+                    experience = parsed.get("experience") or experience
+                    current_location = parsed.get("current_location") or parsed.get("location") or current_location
+                    if isinstance(parsed.get("education"), (list, dict)):
+                        education = parsed.get("education")
+                    skills = parsed.get("skills") or skills
+            except Exception as e:
+                parsed_data = {"parse_error": str(e)}
+
+            # If name wasn't found or parsing failed, fallback to the filename (without extension)
+            if name == "Unnamed Candidate" or not name.strip():
+                from pathlib import Path
+                name = Path(getattr(resume, "name", "Unnamed Candidate")).stem
+
+            # Rewind file pointer
+            try:
+                resume.seek(0)
+            except (AttributeError, OSError):
+                pass
+
+            # Normalize for JSONFields in model
+            if not isinstance(skills, list):
+                skills = [s.strip() for s in str(skills).split(",") if s.strip()] if skills else []
+            if not isinstance(education, (list, dict)):
+                education = [education] if education and str(education).strip() else []
+
+            # Duplicate handling
+            is_duplicate = parsed_data.get("duplicate", False)
+            duplicate_of = None
+            if parsed_data.get("existing_candidate_id"):
+                try:
+                    duplicate_of = Candidate.objects.get(
+                        id=parsed_data.get("existing_candidate_id"),
+                        organization=organization,
+                        is_deleted=False
+                    )
+                except (Candidate.DoesNotExist, ValueError, TypeError):
+                    pass
+            elif email:
+                old_candidate = Candidate.objects.filter(
+                    email__iexact=email,
                     organization=organization,
                     is_deleted=False
+                ).first()
+                if old_candidate:
+                    is_duplicate = True
+                    duplicate_of = old_candidate
+
+            try:
+                # Create candidate
+                candidate = Candidate.objects.create(
+                    candidate_name=name,
+                    profile_name=name,
+                    current_profile=current_profile or "Not specified",
+                    current_company=current_company or "Not specified",
+                    experience=experience or "Not specified",
+                    current_location=current_location or "Not specified",
+                    education=education,
+                    contact=phone,
+                    email=email,
+                    skills=skills,
+                    resume=resume,
+                    resume_file_name=getattr(resume, "name", "resume.pdf"),
+                    organization=organization,
+                    uploaded_by=user if user.is_authenticated else None,
+                    is_duplicate=is_duplicate,
+                    duplicate_of=duplicate_of,
                 )
-            except (Candidate.DoesNotExist, ValueError, TypeError):
-                pass
-        elif email:
-            old_candidate = Candidate.objects.filter(
-                email__iexact=email,
-                organization=organization,
-                is_deleted=False
-            ).first()
-            if old_candidate:
-                is_duplicate = True
-                duplicate_of = old_candidate
 
-        candidate = Candidate.objects.create(
-            candidate_name=name,
-            profile_name=name,
-            current_profile=current_profile,
-            current_company=current_company,
-            experience=experience,
-            current_location=current_location,
-            education=education,
-            contact=phone,
-            email=email,
-            skills=skills,
-            resume=resume,
-            resume_file_name=getattr(resume, "name", "resume.pdf"),
-            organization=organization,
-            uploaded_by=None,
-            is_duplicate=is_duplicate,
-            duplicate_of=duplicate_of,
-        )
+                log_action(
+                    user,
+                    'created',
+                    'Candidate',
+                    candidate.id,
+                    f"Resume upload by {name} {'(AI-parsed)' if ai_parsed else '(form)'}",
+                    organization=organization
+                )
+                simulate_resume_submission_notification(candidate.id)
 
-        log_action(
-            user,
-            'created',
-            'Candidate',
-            candidate.id,
-            f"Resume upload by {name} {'(AI-parsed)' if ai_parsed else '(form)'}",
-            organization=organization
-        )
-        simulate_resume_submission_notification(candidate.id)
+                result_item = {
+                    "filename": getattr(resume, "name", "resume.pdf"),
+                    "status": "success",
+                    "candidate_id": str(candidate.id),
+                    "ai_parsed": ai_parsed,
+                    "candidate": CandidateDetailSerializer(candidate).data,
+                }
+                if is_duplicate or parsed_data.get("duplicate"):
+                    result_item["note"] = parsed_data.get("message", "Duplicate detected in pool")
+                
+                results.append(result_item)
+                successful_count += 1
+            except Exception as e:
+                results.append({
+                    "filename": getattr(resume, "name", "resume.pdf"),
+                    "status": "failed",
+                    "error": str(e)
+                })
+                failed_count += 1
+
+        # Response logic
+        any_unparsed = failed_count > 0 or any(not r.get("ai_parsed", False) for r in results if r["status"] == "success")
+        
+        if any_unparsed:
+            final_msg = "Resume is not parsed. Please edit manually in candidate list"
+        else:
+            final_msg = "Resume submitted successfully! please check in candidate list"
 
         response_data = {
-            "message": "Resume submitted successfully! We'll be in touch.",
-            "candidate_id": str(candidate.id),
-            "ai_parsed": ai_parsed,
+            "message": final_msg,
+            "total_processed": len(resumes),
+            "successful": successful_count,
+            "failed": failed_count,
+            "results": results
         }
-        if is_duplicate or parsed_data.get("duplicate"):
-            response_data["note"] = parsed_data.get("message", "Duplicate detected in pool")
         return Response(response_data, status=201)
