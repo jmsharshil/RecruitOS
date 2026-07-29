@@ -32,19 +32,16 @@ class JobListSerializer(serializers.ModelSerializer):
     candidate_count = serializers.SerializerMethodField()
     created_by_name = serializers.SerializerMethodField()
     hiring_manager_name = serializers.SerializerMethodField()
-    target_closing_date = DateParserField(read_only=True)
     budget              = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
-    skill_criteria      = serializers.DecimalField(max_digits=5, decimal_places=2, read_only=True)
     created_at          = DateParserDateTimeField(read_only=True)
 
     class Meta:
         model = Job
         fields = [
-            'id', 'code', 'title', 'status', 'priority', 'job_mode', 'job_type',
+            'id', 'code', 'title', 'status',
             'location', 'openings', 'min_experience', 'max_experience', 'budget',
-            'skill_criteria',
             'hiring_for', 'client_name', 'candidate_count',
-            'target_closing_date', 'created_by_name', 'hiring_manager_name', 'created_at',
+            'created_by_name', 'hiring_manager_name', 'created_at',
         ]
 
     def get_client_name(self, obj):
@@ -70,7 +67,7 @@ class JobDetailSerializer(serializers.ModelSerializer):
     client_name         = serializers.SerializerMethodField()
     created_by          = UserBriefSerializer(read_only=True)
     hiring_manager      = UserBriefSerializer(read_only=True)
-    target_closing_date = DateParserField(required=False, allow_null=True)
+    description         = serializers.CharField(required=False, allow_blank=True)
     created_at          = DateParserDateTimeField(read_only=True)
     updated_at          = DateParserDateTimeField(read_only=True)
     deleted_at          = DateParserDateTimeField(read_only=True, allow_null=True)
@@ -103,8 +100,29 @@ class JobDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Job
-        fields = '__all__'
+        fields = [
+            'id', 'code', 'title', 'description', 'description_file', 'skills', 'education',
+            'min_experience', 'max_experience', 'location', 'openings',
+            'budget', 'hiring_for', 'client', 'client_name', 'status',
+            'assigned_recruiters', 'assigned_recruiter_ids',
+            'created_by', 'hiring_manager', 'hiring_manager_id',
+            'stages', 'candidate_count', 'created_at', 'updated_at',
+            'organization', 'is_deleted', 'deleted_at',
+        ]
         read_only_fields = [
             'id', 'code', 'created_at', 'updated_at',
             'created_by', 'organization', 'is_deleted', 'deleted_at',
         ]
+
+    def validate(self, attrs):
+        attrs['hiring_for'] = 'client'
+        
+        description_file = attrs.get('description_file')
+        description = attrs.get('description')
+
+        if not description and not description_file:
+            raise serializers.ValidationError({"description": "You must either provide a plain text description or upload a description file."})
+
+        if not attrs.get('client'):
+            raise serializers.ValidationError({"client": "Client is required since all positions are client-scoped."})
+        return attrs

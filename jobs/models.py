@@ -32,7 +32,8 @@ class Priority(models.TextChoices):
 class Job(BaseModel):
     id                  = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     title               = models.CharField(max_length=200)
-    description         = models.TextField()
+    description         = models.TextField(blank=True)
+    description_file    = models.FileField(upload_to='job_descriptions/', null=True, blank=True)
     code                = models.CharField(max_length=20, blank=True)  # auto-generated: JOB-000001 (unique per org)
     skills              = models.JSONField(default=list, blank=True)
     education           = models.CharField(max_length=200, blank=True)
@@ -44,7 +45,7 @@ class Job(BaseModel):
     budget              = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     job_mode            = models.CharField(max_length=20, choices=JobModes.choices, default=JobModes.OFFICE)
     job_type            = models.CharField(max_length=20, choices=JobTypes.choices, default=JobTypes.PERMANENT)
-    hiring_for          = models.CharField(max_length=10, choices=HiringFor.choices, default=HiringFor.SELF)
+    hiring_for          = models.CharField(max_length=10, choices=HiringFor.choices, default=HiringFor.CLIENT)
     client              = models.ForeignKey(Client, null=True, blank=True, on_delete=models.SET_NULL, related_name='jobs')
     status              = models.CharField(max_length=20, choices=JobStatus.choices, default=JobStatus.OPEN)
     assigned_recruiters = models.ManyToManyField(User, related_name='assigned_jobs', blank=True, limit_choices_to={'role': 'recruiter'})
