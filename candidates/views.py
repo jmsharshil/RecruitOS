@@ -9,9 +9,12 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 from django.db.models import Q
 
+from django.conf import settings
+from accounts.email_utils import send_org_email
 from candidates.models import (
     Candidate, Application, CandidateStatus,
     ClientSubmission, SubmissionStatus, InterviewSchedule,
+    ManagerReviewStatus,
 )
 from candidates.serializers import (
     CandidateListSerializer, CandidateDetailSerializer,
@@ -60,7 +63,7 @@ class CandidateViewSet(viewsets.ModelViewSet):
             return qs
         elif user.role == UserRole.MANAGER:
             return qs.filter(
-                Q(applications__job__created_by=user) | Q(applications__isnull=True)
+                Q(applications__job__created_by=user) | Q(applications__job__hiring_manager=user) | Q(applications__isnull=True)
             ).distinct()
         elif user.role == UserRole.RECRUITER:
             # Recruiters see full org talent pool + candidates linked to their assigned jobs
@@ -266,13 +269,16 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         if user.role == UserRole.ADMIN:
             return qs
         elif user.role == UserRole.MANAGER:
-            return qs.filter(job__created_by=user)
+            return qs.filter(Q(job__created_by=user) | Q(job__hiring_manager=user))
         elif user.role == UserRole.RECRUITER:
             return qs.filter(job__assigned_recruiters=user)
         return qs.none()
 
     def perform_create(self, serializer):
-        application = serializer.save(organization=self.request.user.organization)
+        application = serializer.save(
+            organization=self.request.user.organization,
+            created_by=self.request.user
+        )
         log_action(
             self.request.user,
             'created',
@@ -350,6 +356,74 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             log_action(request.user, 'updated', 'Application', application.id, f"Scheduled interview for {application.candidate.candidate_name}")
             return Response(InterviewScheduleSerializer(schedule).data, status=201)
         return Response(serializer.errors, status=400)
+
+    @action(detail=True, methods=['post'], url_path='review')
+    def review(self, request, pk=None):
+        application = self.get_object()
+        status = request.data.get('status')
+        notes = request.data.get('notes', '')
+
+        if status not in ManagerReviewStatus.values:
+            raise ValidationError({
+                "error": "Invalid review status",
+                "detail": f"Status must be one of: {ManagerReviewStatus.values}"
+            })
+
+        # Save review details
+        application.manager_review_status = status
+        application.manager_review_notes = notes
+
+        # Map rejection to overall application status
+        if status == ManagerReviewStatus.REJECTED:
+            application.status = CandidateStatus.REJECTED.value
+
+        application.save()
+        log_action(
+            request.user, 'reviewed', 'Application', application.id,
+            f"Manager review action: {status} with notes: '{notes[:60]}'"
+        )
+
+        # Trigger email notification to recruiter
+        try:
+            send_manager_review_email(application)
+        except Exception as e:
+            print(f"Failed to send manager review email: {e}")
+
+        return Response(ApplicationDetailSerializer(application).data)
+
+
+def send_manager_review_email(application):
+    recruiter = application.created_by or application.candidate.uploaded_by
+    if not recruiter:
+        print("No recruiter associated with application. Skipping email.")
+        return
+
+    manager = application.job.hiring_manager or application.job.created_by
+    manager_name = manager.name if manager else "A Manager"
+    manager_email = manager.email if manager else ""
+
+    frontend_base = getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:5173')
+    url = f"{frontend_base}/candidates/{application.candidate.id}"
+
+    context = {
+        "recruiter": recruiter,
+        "candidate": application.candidate,
+        "job": application.job,
+        "manager_name": manager_name,
+        "manager_email": manager_email,
+        "status": application.manager_review_status,
+        "notes": application.manager_review_notes,
+        "url": url,
+        "org_name": application.organization.name if application.organization else "RecruitOS"
+    }
+
+    send_org_email(
+        organization=application.organization,
+        subject=f"Candidate Review: {application.candidate.candidate_name} — {application.manager_review_status.upper()}",
+        template_name="manager_review",
+        context=context,
+        recipient_list=[recruiter.email]
+    )
 
 
 class CalendarEventsView(APIView):

@@ -24,6 +24,12 @@ class SubmissionStatus(models.TextChoices):
     ACCEPTED = 'accepted'
     REJECTED = 'rejected'
 
+class ManagerReviewStatus(models.TextChoices):
+    PENDING  = 'pending'
+    ACCEPTED = 'accepted'
+    REJECTED = 'rejected'
+    RESUBMIT = 'resubmit'
+
 class Candidate(BaseModel):
     id                 = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     profile_name       = models.CharField(max_length=200)
@@ -69,6 +75,13 @@ class Application(BaseModel):
     doc                = models.DateField(null=True, blank=True)
     feedback = models.TextField(blank=True)
     share_date = models.DateField(default=date.today)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_applications'
+    )
+    manager_review_status = models.CharField(
+        max_length=30, choices=ManagerReviewStatus.choices, default=ManagerReviewStatus.PENDING
+    )
+    manager_review_notes = models.TextField(blank=True)
 
     class Meta:
         unique_together = ('organization', 'candidate', 'job')

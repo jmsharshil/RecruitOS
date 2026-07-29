@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from candidates.models import Candidate, Application, InterviewSchedule, ClientSubmission
+from candidates.models import Candidate, Application, InterviewSchedule, ClientSubmission, ManagerReviewStatus
 from jobs.models import Job, Stage
 from jobs.serializers import StageBriefSerializer, JobBriefSerializer
 from accounts.serializers import UserBriefSerializer
@@ -67,20 +67,59 @@ class ApplicationListSerializer(serializers.ModelSerializer):
         required=False, allow_null=True
     )
 
+    submitted_by   = serializers.SerializerMethodField()
+    candidate_cv   = serializers.SerializerMethodField()
+
     class Meta:
         model = Application
         fields = [
             'id', 'candidate_name', 'candidate_email', 'job_title',
             'status', 'stage_name', 'share_date', 'created_at',
-            'current_ctc', 'expected_ctc', 'notice_period', 'reason_for_change',
-            'preferred_location', 'offer_in_hand', 'feedback', 'dob', 'doc',
+            'current_ctc', 'expected_ctc', 'notice_period',
+            'submitted_by', 'candidate_cv',
+            'manager_review_status', 'manager_review_notes',
             # write-only
             'job_id', 'candidate_id', 'current_stage_id',
         ]
-        read_only_fields = ['id', 'organization']
+        read_only_fields = ['id', 'organization', 'manager_review_status', 'manager_review_notes']
 
     def get_stage_name(self, obj):
         return obj.current_stage.name if obj.current_stage else None
+
+    def get_candidate_cv(self, obj):
+        request = self.context.get('request')
+        if obj.candidate.resume:
+            return request.build_absolute_uri(obj.candidate.resume.url) if request else obj.candidate.resume.url
+        return None
+
+    def get_submitted_by(self, obj):
+        user = obj.created_by or obj.candidate.uploaded_by
+        if user:
+            return {
+                "id": str(user.id),
+                "name": user.name,
+                "email": user.email,
+                "role": user.role
+            }
+        return None
+
+    def validate(self, attrs):
+        candidate = attrs.get('candidate')
+        job = attrs.get('job')
+        request = self.context.get('request')
+        if not request or not request.user:
+            return attrs
+        organization = request.user.organization
+        
+        if candidate and job:
+            qs = Application.objects.filter(organization=organization, candidate=candidate, job=job, is_deleted=False)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({
+                    "non_field_errors": ["This candidate is already linked to this job requisition."]
+                })
+        return attrs
 
 
 class ApplicationDetailSerializer(serializers.ModelSerializer):
@@ -92,6 +131,8 @@ class ApplicationDetailSerializer(serializers.ModelSerializer):
     candidate          = CandidateBriefSerializer(read_only=True)
     interview_schedule = serializers.SerializerMethodField()
     client_submission  = serializers.SerializerMethodField()
+    submitted_by       = serializers.SerializerMethodField()
+    candidate_cv       = serializers.SerializerMethodField()
     share_date         = DateParserField(required=False, allow_null=True)
     dob                = DateParserField(required=False, allow_null=True)
     doc                = DateParserField(required=False, allow_null=True)
@@ -112,7 +153,7 @@ class ApplicationDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Application
         fields = '__all__'
-        read_only_fields = ['id', 'organization', 'is_deleted']
+        read_only_fields = ['id', 'organization', 'is_deleted', 'manager_review_status', 'manager_review_notes']
 
     def get_interview_schedule(self, obj):
         try:
@@ -125,6 +166,41 @@ class ApplicationDetailSerializer(serializers.ModelSerializer):
             return ClientSubmissionSerializer(obj.client_submission).data
         except ClientSubmission.DoesNotExist:
             return None
+
+    def get_candidate_cv(self, obj):
+        request = self.context.get('request')
+        if obj.candidate.resume:
+            return request.build_absolute_uri(obj.candidate.resume.url) if request else obj.candidate.resume.url
+        return None
+
+    def get_submitted_by(self, obj):
+        user = obj.created_by or obj.candidate.uploaded_by
+        if user:
+            return {
+                "id": str(user.id),
+                "name": user.name,
+                "email": user.email,
+                "role": user.role
+            }
+        return None
+
+    def validate(self, attrs):
+        candidate = attrs.get('candidate')
+        job = attrs.get('job')
+        request = self.context.get('request')
+        if not request or not request.user:
+            return attrs
+        organization = request.user.organization
+        
+        if candidate and job:
+            qs = Application.objects.filter(organization=organization, candidate=candidate, job=job, is_deleted=False)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({
+                    "non_field_errors": ["This candidate is already linked to this job requisition."]
+                })
+        return attrs
 
 # ---------------------------------------------------------------------------
 # Candidate serializers

@@ -217,8 +217,8 @@ if not DEBUG:
     CSRF_COOKIE_SECURE = True
     SESSION_COOKIE_SECURE = True
 
-CSRF_TRUSTED_ORIGINS = ["https://*.azurewebsites.net", "http://localhost:5173", "http://localhost:3000"]
-CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://localhost:5173,http://localhost:3000', cast=Csv())
+CSRF_TRUSTED_ORIGINS = ["https://*.azurewebsites.net", "http://localhost:5173", "http://localhost:3000","https://app.apidog.com"]
+CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://localhost:5173,http://localhost:3000,https://app.apidog.com', cast=Csv())
 
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = [

@@ -5,6 +5,7 @@ from rest_framework.exceptions import ValidationError, NotFound
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
+from django.db.models import Q
 
 from jobs.models import Job, Stage, DEFAULT_STAGES, JobStatus
 from jobs.serializers import JobListSerializer, JobDetailSerializer, StageSerializer
@@ -32,7 +33,7 @@ class JobViewSet(viewsets.ModelViewSet):
         if user.role == UserRole.ADMIN:
             return qs
         elif user.role == UserRole.MANAGER:
-            return qs.filter(created_by=user)
+            return qs.filter(Q(created_by=user) | Q(hiring_manager=user))
         elif user.role == UserRole.RECRUITER:
             return qs.filter(assigned_recruiters=user)
         return Job.objects.none()

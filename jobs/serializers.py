@@ -31,6 +31,7 @@ class JobListSerializer(serializers.ModelSerializer):
     client_name     = serializers.SerializerMethodField()
     candidate_count = serializers.SerializerMethodField()
     created_by_name = serializers.SerializerMethodField()
+    hiring_manager_name = serializers.SerializerMethodField()
     target_closing_date = DateParserField(read_only=True)
     budget              = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     skill_criteria      = serializers.DecimalField(max_digits=5, decimal_places=2, read_only=True)
@@ -43,7 +44,7 @@ class JobListSerializer(serializers.ModelSerializer):
             'location', 'openings', 'min_experience', 'max_experience', 'budget',
             'skill_criteria',
             'hiring_for', 'client_name', 'candidate_count',
-            'target_closing_date', 'created_by_name', 'created_at',
+            'target_closing_date', 'created_by_name', 'hiring_manager_name', 'created_at',
         ]
 
     def get_client_name(self, obj):
@@ -55,6 +56,9 @@ class JobListSerializer(serializers.ModelSerializer):
     def get_created_by_name(self, obj):
         return obj.created_by.name if obj.created_by else None
 
+    def get_hiring_manager_name(self, obj):
+        return obj.hiring_manager.name if obj.hiring_manager else None
+
 
 # ---------------------------------------------------------------------------
 # Detail serializer — full nested data for single job view
@@ -65,6 +69,7 @@ class JobDetailSerializer(serializers.ModelSerializer):
     candidate_count     = serializers.SerializerMethodField()
     client_name         = serializers.SerializerMethodField()
     created_by          = UserBriefSerializer(read_only=True)
+    hiring_manager      = UserBriefSerializer(read_only=True)
     target_closing_date = DateParserField(required=False, allow_null=True)
     created_at          = DateParserDateTimeField(read_only=True)
     updated_at          = DateParserDateTimeField(read_only=True)
@@ -76,6 +81,15 @@ class JobDetailSerializer(serializers.ModelSerializer):
         queryset=User.objects.filter(role='recruiter'),
         source='assigned_recruiters',
         required=False
+    )
+
+    # Write-only field for assigning hiring manager
+    hiring_manager_id = serializers.PrimaryKeyRelatedField(
+        write_only=True,
+        queryset=User.objects.filter(role__in=['manager', 'admin']),
+        source='hiring_manager',
+        required=False,
+        allow_null=True
     )
 
     def get_stages(self, obj):

@@ -6,8 +6,9 @@ from candidates.views import (
 from candidates.views_export import CandidateExportView, CandidateImportView
 
 router = DefaultRouter()
-router.register(r'', CandidateViewSet, basename='candidate')
+
 router.register(r'applications', ApplicationViewSet, basename='application')
+router.register(r'', CandidateViewSet, basename='candidate')
 
 urlpatterns = [
     path('calendar/events/', CalendarEventsView.as_view(), name='calendar-events'),

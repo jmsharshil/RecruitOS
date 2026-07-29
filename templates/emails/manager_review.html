@@ -1,0 +1,50 @@
+{% extends "emails/base_email.html" %}
+{% block title %}Application Review Decision — {{ org_name }}{% endblock %}
+
+{% block content %}
+  <p>Hi <strong>{{ recruiter.name }}</strong>,</p>
+  <p>
+    Manager <strong>{{ manager_name }}</strong> has reviewed the application of candidate <strong>{{ candidate.candidate_name }}</strong> for the job <strong>{{ job.title }}</strong>.
+  </p>
+
+  {% if status == 'accepted' %}
+    <div class="info-box" style="border-left: 4px solid #10b981;">
+      <p>
+        <strong>Decision:</strong> 
+        <span style="text-transform: uppercase; font-weight: bold; color: #10b981;">
+          ACCEPTED
+        </span>
+      </p>
+  {% elif status == 'rejected' %}
+    <div class="info-box" style="border-left: 4px solid #ef4444;">
+      <p>
+        <strong>Decision:</strong> 
+        <span style="text-transform: uppercase; font-weight: bold; color: #ef4444;">
+          REJECTED
+        </span>
+      </p>
+  {% else %}
+    <div class="info-box" style="border-left: 4px solid #f59e0b;">
+      <p>
+        <strong>Decision:</strong> 
+        <span style="text-transform: uppercase; font-weight: bold; color: #f59e0b;">
+          {{ status }}
+        </span>
+      </p>
+  {% endif %}
+      {% if notes %}
+        <p><strong>Manager Review Comments:</strong></p>
+        <p style="font-style: italic; background-color: #f1f5f9; padding: 10px; border-radius: 4px; color: #334155; margin: 5px 0 0 0;">
+          "{{ notes }}"
+        </p>
+      {% endif %}
+    </div>
+
+  <div class="btn-wrapper">
+    <a href="{{ url }}" class="btn">View Candidate Application</a>
+  </div>
+
+  <div class="divider"></div>
+
+  <p>If you have any questions or need to follow up with the manager, you can reach them at <a href="mailto:{{ manager_email }}">{{ manager_email }}</a>.</p>
+{% endblock %}

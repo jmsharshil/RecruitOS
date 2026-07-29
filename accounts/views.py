@@ -77,6 +77,47 @@ def send_set_pin_email(user):
         logger.info(f"Set PIN email sent to {user.email} with link to {url}")
     except Exception as e:
         logger.error(f"Failed to send set PIN email to {user.email} (both org and global fallback failed): {str(e)}")
+def send_forgot_password_email(user):
+    """
+    Send forgot password/PIN email with magic link for user to reset their PIN.
+    Uses the same link configuration as set_pin but a custom forgot_password template.
+    """
+    token = default_token_generator.make_token(user)
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
+    domain = 'localhost:5173'  # Update to your frontend domain in production
+    protocol = 'http'
+    url = f"{protocol}://{domain}/set-pin?uid={uid}&token={token}"
+
+    org = getattr(user, 'organization', None)
+    plain_message = (
+        f"Hi {user.name},\n\n"
+        f"We received a request to reset your security PIN for your account at {getattr(org, 'name', 'RecruitSmart')}.\n"
+        f"Please reset your PIN by visiting:\n{url}\n\n"
+        "If you did not request a PIN reset, you can safely ignore this email."
+    )
+
+    context = {
+        'user': user,
+        'uid': uid,
+        'token': token,
+        'domain': domain,
+        'protocol': protocol,
+        'url': url,
+        'plain_message': plain_message,
+    }
+
+    try:
+        send_org_email(
+            organization=org,
+            subject=f'Reset Your PIN — {getattr(org, "name", "RecruitSmart")}',
+            template_name='forgot_password',
+            context=context,
+            recipient_list=[user.email],
+        )
+        logger.info(f"Forgot PIN email sent to {user.email} with link to {url}")
+    except Exception as e:
+        logger.error(f"Failed to send forgot PIN email to {user.email} (both org and global fallback failed): {str(e)}")
+
 
 # --- Auth Views ---
 
@@ -104,7 +145,13 @@ class ForgotPasswordView(APIView):
         if not email:
             return Response({"error": "Validation failed", "field_errors": {"email": ["This field is required."]}}, status=400)
         
-        logger.info(f"[SIMULATION] Password reset link sent to {email}")
+        email_clean = str(email).strip().lower()
+        user = User.objects.filter(email__iexact=email_clean).first()
+        if user:
+            send_forgot_password_email(user)
+        else:
+            logger.info(f"Forgot PIN request received for non-existent email: {email_clean}")
+        
         return Response({"message": "If an account with that email exists, we have sent a password reset link."})
 
 
