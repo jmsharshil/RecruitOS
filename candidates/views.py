@@ -16,7 +16,7 @@ from accounts.email_utils import send_org_email
 from candidates.models import (
     Candidate, Application, CandidateStatus,
     ClientSubmission, SubmissionStatus, InterviewSchedule,
-    ManagerReviewStatus, ApplicationHistory,
+    ManagerReviewStatus,
 )
 from candidates.serializers import (
     CandidateListSerializer, CandidateDetailSerializer,
@@ -88,8 +88,8 @@ class CandidateViewSet(viewsets.ModelViewSet):
             organization=self.request.user.organization
         )
         log_action(self.request.user, 'created', 'Candidate', candidate.id, f"Created candidate '{candidate.candidate_name}'")
-        # Notify recruiters for pure pool candidates
-        simulate_resume_submission_notification(candidate.id)
+        # Notifications are now handled by the background parsing task or bulk upload view
+        # after candidate details are actually populated.
 
     def perform_update(self, serializer):
         candidate = serializer.save()
@@ -167,7 +167,7 @@ class CandidateViewSet(viewsets.ModelViewSet):
         from .utils import background_parse_resume
         TASK_QUEUE.enqueue(
             background_parse_resume,
-            user,
+            request.user,
             str(candidate.id),
             str(request.user.organization.id)
         )
@@ -238,7 +238,7 @@ class CandidateViewSet(viewsets.ModelViewSet):
             candidate.id,
             f"Created candidate via parse-resume (background parsing queued)"
         )
-        simulate_resume_submission_notification(candidate.id)
+        # Email notification happens asynchronously in candidates.utils.background_parse_resume
 
         response_data = {
             "message": "Resume parsed and candidate created. AI enrichment queued in background.",
@@ -314,7 +314,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         Destroy restricted to admin. Uses IsAdminOrManager for safety on bulk-like actions.
         """
         if self.action in ['list', 'retrieve', 'create', 'update', 'partial_update',
-                           'move_stage', 'schedule_interview', 'send_to_client', 'resubmit']:
+                           'move_stage', 'schedule_interview', 'send_to_client']:
             return [permissions.IsAuthenticated()]
         if self.action == 'destroy':
             return [IsAdmin()]
@@ -335,14 +335,6 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         application = serializer.save(
             organization=self.request.user.organization,
             created_by=self.request.user
-        )
-        # Create initial history log
-        ApplicationHistory.objects.create(
-            application=application,
-            user=self.request.user,
-            action='submitted',
-            notes='Candidate profile submitted by recruiter.',
-            organization=self.request.user.organization
         )
         log_action(
             self.request.user,
@@ -443,16 +435,6 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             application.status = CandidateStatus.REJECTED.value
 
         application.save()
-
-        # Save review action to history
-        ApplicationHistory.objects.create(
-            application=application,
-            user=request.user,
-            action=f'reviewed_{status}',
-            notes=notes,
-            organization=request.user.organization
-        )
-
         log_action(
             request.user, 'reviewed', 'Application', application.id,
             f"Manager review action: {status} with notes: '{notes[:60]}'"
@@ -463,31 +445,6 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             send_manager_review_email(application)
         except Exception as e:
             print(f"Failed to send manager review email: {e}")
-
-        return Response(ApplicationDetailSerializer(application).data)
-
-    @action(detail=True, methods=['post'], url_path='resubmit')
-    def resubmit(self, request, pk=None):
-        application = self.get_object()
-        notes = request.data.get('notes', '')
-
-        # Set status back to pending
-        application.manager_review_status = ManagerReviewStatus.PENDING
-        application.save()
-
-        # Save resubmission action to history
-        ApplicationHistory.objects.create(
-            application=application,
-            user=request.user,
-            action='resubmitted',
-            notes=notes,
-            organization=request.user.organization
-        )
-
-        log_action(
-            request.user, 'resubmitted', 'Application', application.id,
-            f"Recruiter resubmitted candidate with notes: '{notes[:60]}'"
-        )
 
         return Response(ApplicationDetailSerializer(application).data)
 
@@ -524,9 +481,6 @@ def send_manager_review_email(application):
         context=context,
         recipient_list=[recruiter.email]
     )
-
-
-
 
 
 class CalendarEventsView(APIView):

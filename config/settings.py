@@ -10,6 +10,8 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-dummy-key')
 DEBUG = config('DEBUG', default=False, cast=bool)
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv())
 
+# Frontend URLs for emails and CORS
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5173')
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -294,3 +296,4 @@ if USE_AZURE_MEDIA:
 else:
     MEDIA_URL  = "/media/"
     MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+GOOGLE_OAUTH_CLIENT_ID = config('GOOGLE_OAUTH_CLIENT_ID', default='498002626985-gu6fqr9n3ue8dkfvvkr7qfk91s2nb25n.apps.googleusercontent.com')

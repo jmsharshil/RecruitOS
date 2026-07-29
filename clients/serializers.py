@@ -54,7 +54,7 @@ class ClientDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Client
-        fields = '__all__'
+        exclude = ['alternative_email', 'alternative_contact', 'website', 'linkedin', 'client_location']
         read_only_fields = ['id', 'client_id', 'created_by', 'is_deleted', 'organization']
 
     def get_pocs(self, obj):
@@ -83,6 +83,15 @@ class ClientDetailSerializer(serializers.ModelSerializer):
             'candidates_submitted':  candidates_submitted,
             'hired_count':           hired_count,
         }
+
+    def validate_team_members(self, value):
+        import uuid
+        if not isinstance(value, list):
+            return value
+        for member in value:
+            if isinstance(member, dict) and not member.get('id'):
+                member['id'] = str(uuid.uuid4())
+        return value
 
     def to_internal_value(self, data):
         """

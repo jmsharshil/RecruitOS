@@ -45,7 +45,9 @@ def send_set_pin_email(user):
     """
     token = default_token_generator.make_token(user)
     uid = urlsafe_base64_encode(force_bytes(user.pk))
-    url = f"{settings.FRONTEND_URL}/set-pin?uid={uid}&token={token}"
+    # url = f"{settings.FRONTEND_URL}/set-pin?uid={uid}&token={token}"
+    frontend_url = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:5173'))
+    url = f"{frontend_url}/set-pin?uid={uid}&token={token}"
 
     org = getattr(user, 'organization', None)
     plain_message = (

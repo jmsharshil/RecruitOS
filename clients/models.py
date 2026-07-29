@@ -45,6 +45,8 @@ class Client(BaseModel):
     created_by              = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='created_clients')
     #Internal Notes
     notes                   = models.TextField(blank=True)
+    #Team Members (Custom roles like HR, Development, etc.)
+    team_members            = models.JSONField(default=list, blank=True)
 
     class Meta:
         unique_together = ('organization', 'client_id')

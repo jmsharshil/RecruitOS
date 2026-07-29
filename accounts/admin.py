@@ -17,6 +17,7 @@ class UserAdmin(DefaultUserAdmin):
     list_filter = ['role', 'is_active', 'organization']
     search_fields = ['name', 'email']
     ordering = ['-date_joined']
+    readonly_fields = ['date_joined', 'last_login']
     fieldsets = (
         (None, {'fields': ('email', 'password')}),
         ('Personal info', {'fields': ('name', 'organization', 'role')}),

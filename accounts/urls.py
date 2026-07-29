@@ -7,6 +7,7 @@ from accounts.views import (
     AdminDashboardView, ManagerDashboardView, RecruiterDashboardView,
     OrganizationEmailConfigView, EmailTemplateViewSet,
 )
+from accounts.views_google import GoogleLoginView, GoogleConfigView
 
 router = DefaultRouter()
 router.register(r'', UserViewSet, basename='user')
@@ -17,6 +18,8 @@ email_template_router.register(r'email-templates', EmailTemplateViewSet, basenam
 urlpatterns = [
     # Auth
     path('auth/login/', LoginView.as_view(), name='login'),
+    path('auth/google/', GoogleLoginView.as_view(), name='google-login'),
+    path('auth/google-config/', GoogleConfigView.as_view(), name='google_config'),
     path('auth/register/', RegisterOrganizationView.as_view(), name='register-organization'),
     path('auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('auth/forgot-password/', ForgotPasswordView.as_view(), name='forgot_password'),
