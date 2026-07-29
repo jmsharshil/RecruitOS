@@ -88,8 +88,8 @@ class CandidateViewSet(viewsets.ModelViewSet):
             organization=self.request.user.organization
         )
         log_action(self.request.user, 'created', 'Candidate', candidate.id, f"Created candidate '{candidate.candidate_name}'")
-        # Notify recruiters for pure pool candidates
-        simulate_resume_submission_notification(candidate.id)
+        # Notifications are now handled by the background parsing task or bulk upload view
+        # after candidate details are actually populated.
 
     def perform_update(self, serializer):
         candidate = serializer.save()
@@ -167,7 +167,7 @@ class CandidateViewSet(viewsets.ModelViewSet):
         from .utils import background_parse_resume
         TASK_QUEUE.enqueue(
             background_parse_resume,
-            user,
+            # request.user,
             str(candidate.id),
             str(request.user.organization.id)
         )
@@ -238,7 +238,7 @@ class CandidateViewSet(viewsets.ModelViewSet):
             candidate.id,
             f"Created candidate via parse-resume (background parsing queued)"
         )
-        simulate_resume_submission_notification(candidate.id)
+        # Email notification happens asynchronously in candidates.utils.background_parse_resume
 
         response_data = {
             "message": "Resume parsed and candidate created. AI enrichment queued in background.",
