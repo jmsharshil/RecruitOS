@@ -108,6 +108,7 @@ def simulate_interview_reminder(interview_schedule_id):
 @run_in_thread
 def simulate_resume_submission_notification(obj_id):
     """Notify about new resume submission. Supports Application (job-specific) or pure pool Candidate (obj_id = candidate.id)."""
+    print(f"==========> [DEBUG] simulate_resume_submission_notification called for ID: {obj_id}")
     try:
         application = Application.objects.select_related('candidate', 'job', 'job__client', 'organization').get(id=obj_id)
         candidate = application.candidate
@@ -121,7 +122,7 @@ def simulate_resume_submission_notification(obj_id):
             'current_profile': candidate.current_profile or 'N/A',
             'current_company': candidate.current_company or 'N/A',
             'current_location': candidate.current_location or 'N/A',
-            'education': ', '.join([e.get('degree', '') for e in candidate.education]) if candidate.education else 'N/A',
+            'education': ', '.join([e.get('degree', '') if isinstance(e, dict) else str(e) for e in candidate.education]) if candidate.education and isinstance(candidate.education, list) else 'N/A',
             'skills': ', '.join(candidate.skills) if candidate.skills else 'N/A',
             'plain_message': f"A new candidate {candidate.candidate_name} has been added to your tracker."
         }
@@ -149,6 +150,7 @@ def simulate_resume_submission_notification(obj_id):
                     context=recruiter_context,
                     recipient_list=[recruiter.email],
                 )
+                print(f"==========> [DEBUG] EMAIL SENT TO RECRUITER: {recruiter.email}")
             except Exception as e:
                 logger.error(f"Email error to recruiter: {e}")
 
@@ -164,6 +166,7 @@ def simulate_resume_submission_notification(obj_id):
                     context=client_context,
                     recipient_list=[application.job.client.email],
                 )
+                print(f"==========> [DEBUG] EMAIL SENT TO CLIENT: {application.job.client.email}")
             except Exception as e:
                 logger.error(f"Email error to client: {e}")
 
@@ -187,7 +190,7 @@ def simulate_resume_submission_notification(obj_id):
             'current_profile': candidate.current_profile or 'N/A',
             'current_company': candidate.current_company or 'N/A',
             'current_location': candidate.current_location or 'N/A',
-            'education': ', '.join([e.get('degree', '') for e in candidate.education]) if candidate.education else 'N/A',
+            'education': ', '.join([e.get('degree', '') if isinstance(e, dict) else str(e) for e in candidate.education]) if candidate.education and isinstance(candidate.education, list) else 'N/A',
             'skills': ', '.join(candidate.skills) if candidate.skills else 'N/A',
             'plain_message': f"A new candidate {candidate.candidate_name} has been added to your pool tracker."
         }
@@ -214,11 +217,16 @@ def simulate_resume_submission_notification(obj_id):
                     context=recruiter_context,
                     recipient_list=[candidate.uploaded_by.email],
                 )
+                print(f"==========> [DEBUG] EMAIL SENT TO UPLOADER (Pool): {candidate.uploaded_by.email}")
             except Exception as e:
                 logger.error(f"Email error to uploader: {e}")
+                print(f"==========> [DEBUG] EMAIL ERROR: {e}")
+        else:
+            print(f"==========> [DEBUG] EMAIL SKIPPED: 'uploaded_by' is empty (Nobody was logged in when this was uploaded!)")
                 
         logger.info(f"Resume submission notification fired for pool candidate {obj_id}")
     except Candidate.DoesNotExist:
         logger.warning(f"No Application or Candidate found for id={obj_id}")
     except Exception as e:
         logger.error(f"Pool notification error: {e}")
+        print(f"==========> [DEBUG] Pool notification error: {e}")
