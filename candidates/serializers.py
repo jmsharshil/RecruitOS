@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from candidates.models import Candidate, Application, InterviewSchedule, ClientSubmission, ManagerReviewStatus
+from candidates.models import Candidate, Application, InterviewSchedule, ClientSubmission, ManagerReviewStatus, ApplicationHistory
 from jobs.models import Job, Stage
 from jobs.serializers import StageBriefSerializer, JobBriefSerializer
 from accounts.serializers import UserBriefSerializer
@@ -44,6 +44,14 @@ class ClientSubmissionSerializer(serializers.ModelSerializer):
 # ---------------------------------------------------------------------------
 # Application serializers
 # ---------------------------------------------------------------------------
+
+class ApplicationHistorySerializer(serializers.ModelSerializer):
+    user_details = UserBriefSerializer(source='user', read_only=True)
+    created_at   = DateParserDateTimeField(read_only=True)
+
+    class Meta:
+        model = ApplicationHistory
+        fields = ['id', 'user_details', 'action', 'notes', 'created_at']
 
 class ApplicationListSerializer(serializers.ModelSerializer):
     """Flat list — candidate name, job title, status, stage. No deep nesting.
@@ -133,6 +141,7 @@ class ApplicationDetailSerializer(serializers.ModelSerializer):
     client_submission  = serializers.SerializerMethodField()
     submitted_by       = serializers.SerializerMethodField()
     candidate_cv       = serializers.SerializerMethodField()
+    history            = ApplicationHistorySerializer(many=True, read_only=True)
     share_date         = DateParserField(required=False, allow_null=True)
     dob                = DateParserField(required=False, allow_null=True)
     doc                = DateParserField(required=False, allow_null=True)
