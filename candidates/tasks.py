@@ -205,24 +205,8 @@ def simulate_resume_submission_notification(obj_id):
                 type='info',
                 link=f"/candidates/{candidate.id}"
             )
-            
-            from accounts.email_utils import send_org_email
-            recruiter_context = context.copy()
-            recruiter_context['recipient_name'] = candidate.uploaded_by.name
-            try:
-                send_org_email(
-                    organization=org,
-                    subject=f"Candidate Tracker Update: {candidate.candidate_name}",
-                    template_name='resume_submission',
-                    context=recruiter_context,
-                    recipient_list=[candidate.uploaded_by.email],
-                )
-                print(f"==========> [DEBUG] EMAIL SENT TO UPLOADER (Pool): {candidate.uploaded_by.email}")
-            except Exception as e:
-                logger.error(f"Email error to uploader: {e}")
-                print(f"==========> [DEBUG] EMAIL ERROR: {e}")
         else:
-            print(f"==========> [DEBUG] EMAIL SKIPPED: 'uploaded_by' is empty (Nobody was logged in when this was uploaded!)")
+            print(f"==========> [DEBUG] IN-APP NOTIFICATION SKIPPED: 'uploaded_by' is empty")
                 
         logger.info(f"Resume submission notification fired for pool candidate {obj_id}")
     except Candidate.DoesNotExist:
