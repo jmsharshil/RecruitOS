@@ -16,7 +16,7 @@ from accounts.email_utils import send_org_email
 from candidates.models import (
     Candidate, Application, CandidateStatus,
     ClientSubmission, SubmissionStatus, InterviewSchedule,
-    ManagerReviewStatus,
+    ManagerReviewStatus, ApplicationHistory,
 )
 from candidates.serializers import (
     CandidateListSerializer, CandidateDetailSerializer,
@@ -343,6 +343,16 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             application.id,
             f"Assigned candidate '{application.candidate.candidate_name}' to job '{application.job.title}'"
         )
+        
+        # Save submission to history
+        ApplicationHistory.objects.create(
+            application=application,
+            user=self.request.user,
+            action="submitted",
+            notes=f"Assigned candidate to job '{application.job.title}'",
+            organization=application.organization
+        )
+
         if not application.current_stage:
             first_stage = application.job.stages.filter(
                 is_deleted=False
@@ -372,6 +382,16 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 application.status = CandidateStatus.HIRED.value
             application.save()
             log_action(request.user, 'updated', 'Application', application.id, f"Stage moved to {stage.name}")
+            
+            # Save stage moved to history
+            ApplicationHistory.objects.create(
+                application=application,
+                user=request.user,
+                action="stage_moved",
+                notes=f"Moved candidate to stage '{stage.name}'",
+                organization=application.organization
+            )
+
             return Response(ApplicationDetailSerializer(application).data)
         except Stage.DoesNotExist:
             raise ValidationError({"error": "Invalid stage for this job", "detail": "Stage not found for this job"})
@@ -381,6 +401,23 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         application = self.get_object()
         if application.job.hiring_for != 'client':
             raise ValidationError({"error": "Job is not hiring for a client"})
+
+        # Prevent sharing the same candidate for the same job to the same client within 3 months (90 days)
+        if request.user.role == 'recruiter':
+            from django.utils import timezone
+            from datetime import timedelta
+            three_months_ago = timezone.now() - timedelta(days=90)
+            
+            duplicate_client_sub = ClientSubmission.objects.filter(
+                application__candidate=application.candidate,
+                application__job__client=application.job.client,
+                sent_at__gte=three_months_ago
+            )
+            if duplicate_client_sub.exists():
+                raise ValidationError({
+                    "error": "You have already shared/submitted this candidate profile to this client in the last 3 months."
+                })
+
         if hasattr(application, 'client_submission'):
             raise ValidationError({"error": "Submission already exists"})
 
@@ -393,6 +430,16 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         application.status = CandidateStatus.SENT_TO_CLIENT.value
         application.save()
         log_action(request.user, 'sent', 'Application', application.id, f"Sent {application.candidate.candidate_name} to client")
+
+        # Save send to client to history
+        client_name = application.job.client.company_name if application.job.client else "client"
+        ApplicationHistory.objects.create(
+            application=application,
+            user=request.user,
+            action="sent_to_client",
+            notes=f"Shared candidate profile with client: {client_name}",
+            organization=application.organization
+        )
 
         if application.job.client:
             client_email = application.job.client.email
@@ -421,6 +468,16 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             application.status = CandidateStatus.INTERVIEW_SCHEDULED.value
             application.save()
             log_action(request.user, 'updated', 'Application', application.id, f"Scheduled interview for {application.candidate.candidate_name}")
+            
+            # Save interview scheduled to history
+            ApplicationHistory.objects.create(
+                application=application,
+                user=request.user,
+                action="interview_scheduled",
+                notes=f"Scheduled {schedule.mode} interview on {schedule.date} at {schedule.time}",
+                organization=application.organization
+            )
+
             return Response(InterviewScheduleSerializer(schedule).data, status=201)
         return Response(serializer.errors, status=400)
 
@@ -448,6 +505,15 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         log_action(
             request.user, 'reviewed', 'Application', application.id,
             f"Manager review action: {status} with notes: '{notes[:60]}'"
+        )
+
+        # Save manager review action to history
+        ApplicationHistory.objects.create(
+            application=application,
+            user=request.user,
+            action=status,
+            notes=notes,
+            organization=application.organization
         )
 
         # Trigger email notification to recruiter

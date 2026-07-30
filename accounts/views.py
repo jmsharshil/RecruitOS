@@ -363,8 +363,12 @@ class UserViewSet(viewsets.ModelViewSet):
         )
 
         if self.request.user.role == UserRole.MANAGER:
-            # Managers only see their own recruiters
-            qs = qs.filter(role=UserRole.RECRUITER, created_by=self.request.user)
+            # Managers see their own recruiters OR managers/recruiters created by the Admin
+            qs = qs.filter(
+                Q(role=UserRole.RECRUITER, created_by=self.request.user) |
+                Q(created_by__role=UserRole.ADMIN) |
+                Q(created_by__isnull=True)
+            )
         return qs
 
     def perform_create(self, serializer):
