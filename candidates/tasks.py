@@ -14,7 +14,7 @@ def run_in_thread(func):
     return wrapper
 
 @run_in_thread
-def simulate_client_submission_email(application_id, client_email):
+def simulate_client_submission_email(application_id, client_email, recipient_name=None):
     """Send a real (or simulated) client submission email using org branding."""
     try:
         application = Application.objects.select_related(
@@ -23,9 +23,12 @@ def simulate_client_submission_email(application_id, client_email):
         candidate = application.candidate
         org = application.organization
 
+        if not recipient_name:
+            recipient_name = application.job.client.company_name if application.job.client else client_email
+
         from accounts.email_utils import send_org_email
         context = {
-            'client_name': application.job.client.company_name if application.job.client else client_email,
+            'client_name': recipient_name,
             'job_title': application.job.title,
             'candidate_name': candidate.candidate_name,
             'current_profile': candidate.current_profile,
@@ -35,7 +38,7 @@ def simulate_client_submission_email(application_id, client_email):
             'expected_ctc': application.expected_ctc,
             'notice_period': application.notice_period,
             'sent_by': getattr(application, 'client_submission', None) and
-                       getattr(application.client_submission.sent_by, 'name', 'RecruitSmart'),
+                       getattr(application.client_submission.sent_by, 'name', 'RecruitOS'),
             'resume_link': '',  # Set to actual resume URL when hosted
             'plain_message': f"Please find attached the profile of {candidate.candidate_name} for {application.job.title}.",
         }

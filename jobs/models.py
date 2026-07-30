@@ -54,6 +54,7 @@ class Job(BaseModel):
     skill_criteria      = models.DecimalField(max_digits=5, decimal_places=2, default=70.0)
     created_by          = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='created_jobs')
     hiring_manager      = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='managed_jobs', limit_choices_to=models.Q(role='manager') | models.Q(role='admin'))
+    team_member_id      = models.CharField(max_length=255, blank=True, null=True)
 
     class Meta:
         unique_together = ('organization', 'code')

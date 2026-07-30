@@ -8,6 +8,7 @@ from django.conf import settings
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from accounts.models import User, Organization, UserRole
+from accounts.serializers import UserBriefSerializer
 from audit.utils import log_action
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ class GoogleLoginView(APIView):
             
             email = idinfo.get("email")
             name = idinfo.get("name")
+            picture_url = idinfo.get("picture")
             
             if not email:
                 return Response({"error": "Email not found in Google token"}, status=status.HTTP_400_BAD_REQUEST)
@@ -44,6 +46,17 @@ class GoogleLoginView(APIView):
                 # User exists -> Log them in
                 logger.info(f"Google Login successful for existing user: {email_clean}")
                 log_action(user, 'logged_in', 'User', user.id, "Logged in via Google SSO", organization=getattr(user, 'organization', None))
+
+                # If user doesn't have an avatar, try to download and save their Google picture
+                if not user.avatar and picture_url:
+                    try:
+                        import requests as http_requests
+                        from django.core.files.base import ContentFile
+                        response = http_requests.get(picture_url, timeout=5)
+                        if response.status_code == 200:
+                            user.avatar.save(f"{user.id}_google_avatar.jpg", ContentFile(response.content), save=True)
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch or save Google avatar for {email_clean}: {e}")
             else:
                 # User does NOT exist -> Block login
                 logger.warning(f"Google Login attempted by unregistered user: {email_clean}")
@@ -58,14 +71,7 @@ class GoogleLoginView(APIView):
             return Response({
                 "refresh": str(refresh),
                 "access": str(refresh.access_token),
-                "user": {
-                    "id": str(user.id),
-                    "email": user.email,
-                    "name": user.name,
-                    "role": user.role,
-                    "organization": str(user.organization.id) if user.organization else None,
-                    "organization_name": user.organization.name if user.organization else None,
-                }
+                "user": UserBriefSerializer(user, context={"request": request}).data
             }, status=status.HTTP_200_OK)
 
         except ValueError as e:

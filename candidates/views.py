@@ -394,8 +394,18 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         application.save()
         log_action(request.user, 'sent', 'Application', application.id, f"Sent {application.candidate.candidate_name} to client")
 
-        if application.job.client and application.job.client.email:
-            simulate_client_submission_email(application.id, application.job.client.email)
+        if application.job.client:
+            client_email = application.job.client.email
+            recipient_name = application.job.client.company_name
+            if application.job.team_member_id and isinstance(application.job.client.team_members, list):
+                for tm in application.job.client.team_members:
+                    if isinstance(tm, dict) and str(tm.get('id')) == str(application.job.team_member_id) and tm.get('email'):
+                        client_email = tm.get('email')
+                        recipient_name = tm.get('name', recipient_name)
+                        break
+            
+            if client_email:
+                simulate_client_submission_email(application.id, client_email, recipient_name)
 
         return Response(ApplicationDetailSerializer(application).data)
 

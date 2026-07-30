@@ -1,22 +1,15 @@
 {% extends "emails/base_email.html" %}
-{% block title %}Set Your PIN — {{ org_name }}{% endblock %}
+{% block title %}Welcome to {{ org_name }}{% endblock %}
 
 {% block content %}
   <p>Hi <strong>{{ user.name }}</strong>,</p>
   <p>
-    Your account has been created for <strong>{{ org_name }}</strong>.
-    To get started, please set your security PIN using the button below.
+    You have been added as a <strong>{{ user.role|title }}</strong> for <strong>{{ org_name }}</strong>.
+    To get started, please log in using the button below.
   </p>
 
   <div class="btn-wrapper">
-    <a href="{{ url }}" class="btn">Set My PIN</a>
-  </div>
-
-  <div class="info-box">
-    <p>
-      <strong>Note:</strong> Your PIN must be at least 4 digits long. You will use this PIN every time you log in.
-      This link is valid for 24 hours.
-    </p>
+    <a href="{{ url }}" class="btn">Log In</a>
   </div>
 
   <div class="divider"></div>

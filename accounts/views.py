@@ -43,24 +43,21 @@ def send_set_pin_email(user):
     inactive config, or missing OrganizationEmailConfig. This fixes delivery
     failures (e.g. Outlook 535 auth errors) while preserving per-org branding.
     """
-    token = default_token_generator.make_token(user)
-    uid = urlsafe_base64_encode(force_bytes(user.pk))
+    # token = default_token_generator.make_token(user)
+    # uid = urlsafe_base64_encode(force_bytes(user.pk))
     # url = f"{settings.FRONTEND_URL}/set-pin?uid={uid}&token={token}"
     frontend_url = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:5173'))
-    url = f"{frontend_url}/set-pin?uid={uid}&token={token}"
+    url = f"{frontend_url}/login"
 
     org = getattr(user, 'organization', None)
     plain_message = (
         f"Hi {user.name},\n\n"
-        f"Your account has been created for {getattr(org, 'name', 'RecruitSmart')}.\n"
-        f"Please set your security PIN by visiting:\n{url}\n\n"
-        "The PIN can be 4-6 digits. You will use it to log in going forward."
+        f"You have been added as a {user.role.title()} for {getattr(org, 'name', 'RecruitOS')}.\n"
+        f"Please log in by visiting:\n{url}\n\n"
     )
 
     context = {
         'user': user,
-        'uid': uid,
-        'token': token,
         'url': url,
         'plain_message': plain_message,
     }
@@ -68,14 +65,14 @@ def send_set_pin_email(user):
     try:
         send_org_email(
             organization=org,
-            subject=f'Set Your PIN — {getattr(org, "name", "RecruitSmart")} Account Created',
+            subject=f'Welcome to {getattr(org, "name", "RecruitOS")}',
             template_name='set_pin',
             context=context,
             recipient_list=[user.email],
         )
-        logger.info(f"Set PIN email sent to {user.email} with link to {url}")
+        logger.info(f"Invitation email sent to {user.email} with link to {url}")
     except Exception as e:
-        logger.error(f"Failed to send set PIN email to {user.email} (both org and global fallback failed): {str(e)}")
+        logger.error(f"Failed to send invitation email to {user.email} (both org and global fallback failed): {str(e)}")
 def send_forgot_password_email(user):
     """
     Send forgot password/PIN email with magic link for user to reset their PIN.
@@ -90,7 +87,7 @@ def send_forgot_password_email(user):
     org = getattr(user, 'organization', None)
     plain_message = (
         f"Hi {user.name},\n\n"
-        f"We received a request to reset your security PIN for your account at {getattr(org, 'name', 'RecruitSmart')}.\n"
+        f"We received a request to reset your security PIN for your account at {getattr(org, 'name', 'RecruitOS')}.\n"
         f"Please reset your PIN by visiting:\n{url}\n\n"
         "If you did not request a PIN reset, you can safely ignore this email."
     )
@@ -108,7 +105,7 @@ def send_forgot_password_email(user):
     try:
         send_org_email(
             organization=org,
-            subject=f'Reset Your PIN — {getattr(org, "name", "RecruitSmart")}',
+            subject=f'Reset Your PIN — {getattr(org, "name", "RecruitOS")}',
             template_name='forgot_password',
             context=context,
             recipient_list=[user.email],
@@ -126,7 +123,7 @@ def forgot_password_email(user):
     org = getattr(user, 'organization', None)
     plain_message = (
         f"Hi {user.name},\n\n"
-        f"Your account has been created for {getattr(org, 'name', 'RecruitSmart')}.\n"
+        f"Your account has been created for {getattr(org, 'name', 'RecruitOS')}.\n"
         f"Please set your security PIN by visiting:\n{url}\n\n"
         "The PIN can be 4-6 digits. You will use it to log in going forward."
     )

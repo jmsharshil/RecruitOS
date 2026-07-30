@@ -99,11 +99,22 @@ class ClientDetailSerializer(serializers.ModelSerializer):
         output format (grouped pocs + filtered docs) via method fields.
         This fixes POCs not being saved on client creation.
         """
-        if isinstance(data, dict):
-            pocs_data = data.get('pocs')
-            documents_data = data.get('documents')
-        else:
-            pocs_data = documents_data = None
+        import json
+
+        pocs_data = data.get('pocs') if hasattr(data, 'get') else None
+        documents_data = data.get('documents') if hasattr(data, 'get') else None
+
+        if isinstance(pocs_data, str):
+            try:
+                pocs_data = json.loads(pocs_data)
+            except json.JSONDecodeError:
+                pass
+                
+        if isinstance(documents_data, str):
+            try:
+                documents_data = json.loads(documents_data)
+            except json.JSONDecodeError:
+                pass
 
         internal_value = super().to_internal_value(data)
 

@@ -134,11 +134,11 @@ def get_org_branding(organization, template_key: str) -> dict:
     Always returns a valid dict (defaults if no org template configured).
     """
     defaults = {
-        'org_name': organization.name if organization else 'RecruitSmart',
+        'org_name': organization.name if organization else 'RecruitOS',
         'org_logo': '',
         'primary_color': '#1e40af',
         'secondary_color': '#f8fafc',
-        'footer_text': f'© {organization.name} — Powered by RecruitSmart' if organization else '© RecruitSmart',
+        'footer_text': f'© {organization.name} — Powered by RecruitOS' if organization else '© RecruitOS',
         'custom_html': '',
     }
     if not organization:
