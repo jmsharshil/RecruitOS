@@ -47,22 +47,49 @@ class JobViewSet(viewsets.ModelViewSet):
         # Mutating actions restricted to admin/manager (create, update, status, stages, manage_recruiters)
         return [IsAdminOrManager()]
 
+    def _notify_new_recruiters(self, job, new_recruiters):
+        for recruiter in new_recruiters:
+            try:
+                frontend_base = getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:5173')
+                url = f"{frontend_base}/jobs/{job.id}"
+                context = {
+                    'recruiter_name': recruiter.name,
+                    'job_title': job.title,
+                    'assigner_name': self.request.user.name,
+                    'url': url,
+                    'plain_message': f"You have been assigned to a new job: {job.title} by {self.request.user.name}.",
+                }
+                send_org_email(
+                    organization=job.organization,
+                    subject=f"New Job Assignment: {job.title}",
+                    template_name='job_assigned',
+                    context=context,
+                    recipient_list=[recruiter.email],
+                    from_email_override=self.request.user.email,
+                )
+            except Exception:
+                pass
+
     def perform_create(self, serializer):
         job = serializer.save(created_by=self.request.user, organization=self.request.user.organization)
-
-        # Auto-create default stages
-        # for stage_data in DEFAULT_STAGES:
-        #     Stage.objects.create(
-        #         job=job,
-        #         created_by=self.request.user,
-        #         organization=job.organization,
-        #         **stage_data
-        #     )
+        
+        # Notify if any recruiters were assigned during creation
+        new_recruiters = set(job.assigned_recruiters.all())
+        if new_recruiters:
+            self._notify_new_recruiters(job, new_recruiters)
 
         log_action(self.request.user, 'created', 'Job', job.id, f"Created job '{job.title}'")
 
     def perform_update(self, serializer):
+        job_instance = self.get_object()
+        old_recruiters = set(job_instance.assigned_recruiters.all())
+        
         job = serializer.save()
+        
+        new_recruiters = set(job.assigned_recruiters.all()) - old_recruiters
+        if new_recruiters:
+            self._notify_new_recruiters(job, new_recruiters)
+            
         log_action(self.request.user, 'updated', 'Job', job.id, f"Updated job '{job.title}'")
 
     def perform_destroy(self, instance):
@@ -166,28 +193,8 @@ class JobViewSet(viewsets.ModelViewSet):
         old_recruiters = set(job.assigned_recruiters.all())
         job.assigned_recruiters.set(recruiters_qs)
         new_recruiters = set(recruiters_qs) - old_recruiters
-
-        for recruiter in new_recruiters:
-            try:
-                frontend_base = getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:5173')
-                url = f"{frontend_base}/jobs/{job.id}"
-                context = {
-                    'recruiter_name': recruiter.name,
-                    'job_title': job.title,
-                    'assigner_name': request.user.name,
-                    'url': url,
-                    'plain_message': f"You have been assigned to a new job: {job.title} by {request.user.name}.",
-                }
-                send_org_email(
-                    organization=job.organization,
-                    subject=f"New Job Assignment: {job.title}",
-                    template_name='job_assigned',
-                    context=context,
-                    recipient_list=[recruiter.email],
-                    from_email_override=request.user.email,
-                )
-            except Exception as e:
-                pass
+        if new_recruiters:
+            self._notify_new_recruiters(job, new_recruiters)
 
         log_action(
             request.user, 'updated', 'Job', job.id,

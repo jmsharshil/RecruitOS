@@ -219,7 +219,6 @@ def simulate_resume_submission_notification(obj_id):
             'plain_message': f"A new candidate {candidate.candidate_name} has been added to your pool tracker."
         }
         
-        # Only notify the recruiter who uploaded it
         if candidate.uploaded_by:
             Notification.objects.create(
                 user=candidate.uploaded_by,
@@ -229,6 +228,26 @@ def simulate_resume_submission_notification(obj_id):
                 type='info',
                 link=f"/candidates/{candidate.id}"
             )
+            
+            # Email all managers and admins in the organization
+            try:
+                from accounts.email_utils import send_org_email
+                managers = User.objects.filter(organization=org, role__in=[UserRole.MANAGER, UserRole.ADMIN])
+                for manager in managers:
+                    if manager.email:
+                        manager_context = context.copy()
+                        manager_context['recipient_name'] = manager.name
+                        send_org_email(
+                            organization=org,
+                            subject=f"New Candidate CV Uploaded to Pool: {candidate.candidate_name}",
+                            template_name='resume_submission',
+                            context=manager_context,
+                            recipient_list=[manager.email],
+                            from_email_override=candidate.uploaded_by.email,
+                        )
+                        print(f"==========> [DEBUG] POOL EMAIL SENT TO MANAGER: {manager.email}")
+            except Exception as e:
+                logger.error(f"Pool email error to managers: {e}")
         else:
             print(f"==========> [DEBUG] IN-APP NOTIFICATION SKIPPED: 'uploaded_by' is empty")
                 

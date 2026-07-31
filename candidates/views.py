@@ -27,7 +27,7 @@ from candidates.filters import CandidateFilterSet, ApplicationFilterSet
 from jobs.models import Job, Stage
 from accounts.models import UserRole
 from audit.utils import log_action
-from candidates.tasks import simulate_client_submission_email, simulate_resume_submission_notification
+from candidates.tasks import simulate_client_submission_email, simulate_resume_submission_notification, simulate_interview_reminder
 from common.permissions import IsAdminOrManager, IsAdmin
 
 logger = logging.getLogger(__name__)
@@ -361,6 +361,9 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 application.current_stage = first_stage
                 application.save()
 
+        # Trigger notification to recruiters and the manager that a candidate was added to the job
+        simulate_resume_submission_notification(application.id)
+
     def perform_update(self, serializer):
         application = serializer.save()
         log_action(self.request.user, 'updated', 'Application', application.id, f"Updated application for {application.candidate.candidate_name}")
@@ -488,6 +491,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 notes=f"Scheduled {schedule.mode} interview on {schedule.date} at {schedule.time}",
                 organization=application.organization
             )
+            # Trigger interview notification
+            simulate_interview_reminder(schedule.id)
 
             return Response(InterviewScheduleSerializer(schedule).data, status=201)
         return Response(serializer.errors, status=400)
