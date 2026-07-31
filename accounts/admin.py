@@ -24,6 +24,9 @@ class UserAdmin(DefaultUserAdmin):
         ('Permissions', {
             'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions'),
         }),
+        ('Google OAuth', {
+            'fields': ('google_access_token', 'google_refresh_token', 'google_token_expiry')
+        }),
         ('Important dates', {'fields': ('last_login', 'date_joined')}),
     )
     add_fieldsets = (

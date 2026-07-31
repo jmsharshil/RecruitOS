@@ -392,6 +392,17 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 organization=application.organization
             )
 
+            if request.user.role == UserRole.RECRUITER:
+                try:
+                    send_candidate_status_update_email(
+                        application,
+                        action=f"Stage moved to {stage.name}",
+                        notes="",
+                        recruiter=request.user
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to send status update email: {e}")
+
             return Response(ApplicationDetailSerializer(application).data)
         except Stage.DoesNotExist:
             raise ValidationError({"error": "Invalid stage for this job", "detail": "Stage not found for this job"})
@@ -518,14 +529,31 @@ class ApplicationViewSet(viewsets.ModelViewSet):
 
         # Trigger email notification to recruiter
         try:
-            send_manager_review_email(application)
+            send_manager_review_email(application, from_email=request.user.email)
         except Exception as e:
             print(f"Failed to send manager review email: {e}")
+
+        # Trigger client notification if accepted and client exists
+        if status == ManagerReviewStatus.ACCEPTED and application.job.hiring_for == 'client' and application.job.client:
+            client_email = application.job.client.email
+            recipient_name = application.job.client.company_name
+            if application.job.team_member_id and isinstance(application.job.client.team_members, list):
+                for tm in application.job.client.team_members:
+                    if isinstance(tm, dict) and str(tm.get('id')) == str(application.job.team_member_id) and tm.get('email'):
+                        client_email = tm.get('email')
+                        recipient_name = tm.get('name', recipient_name)
+                        break
+            
+            if client_email:
+                try:
+                    simulate_client_submission_email(application.id, client_email, recipient_name)
+                except Exception as e:
+                    logger.error(f"Failed to send client notification on approval: {e}")
 
         return Response(ApplicationDetailSerializer(application).data)
 
 
-def send_manager_review_email(application):
+def send_manager_review_email(application, from_email=None):
     recruiter = application.created_by or application.candidate.uploaded_by
     if not recruiter:
         print("No recruiter associated with application. Skipping email.")
@@ -555,9 +583,39 @@ def send_manager_review_email(application):
         subject=f"Candidate Review: {application.candidate.candidate_name} — {application.manager_review_status.upper()}",
         template_name="manager_review",
         context=context,
-        recipient_list=[recruiter.email]
+        recipient_list=[recruiter.email],
+        from_email_override=from_email
     )
 
+
+def send_candidate_status_update_email(application, action, notes, recruiter):
+    manager = application.job.hiring_manager or application.job.created_by
+    if not manager or not manager.email:
+        return
+
+    frontend_base = getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:5173')
+    url = f"{frontend_base}/candidates/{application.candidate.id}"
+
+    context = {
+        "manager_name": manager.name,
+        "candidate_name": application.candidate.candidate_name,
+        "job_title": application.job.title,
+        "action": action,
+        "notes": notes,
+        "recruiter_name": recruiter.name,
+        "url": url,
+        "org_name": application.organization.name if application.organization else "RecruitOS",
+        "plain_message": f"Status updated for {application.candidate.candidate_name}: {action}"
+    }
+
+    send_org_email(
+        organization=application.organization,
+        subject=f"Candidate Update: {application.candidate.candidate_name} — {application.job.title}",
+        template_name="candidate_status_update",
+        context=context,
+        recipient_list=[manager.email],
+        from_email_override=recruiter.email
+    )
 
 class CalendarEventsView(APIView):
     permission_classes = [permissions.IsAuthenticated]

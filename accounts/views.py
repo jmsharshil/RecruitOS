@@ -35,7 +35,7 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 
-def send_set_pin_email(user):
+def send_set_pin_email(user, sender_email=None):
     """
     Send invitation email with magic link for user to set their PIN.
     Uses org-aware SMTP via send_org_email(), which now **enforces fallback**
@@ -69,6 +69,7 @@ def send_set_pin_email(user):
             template_name='set_pin',
             context=context,
             recipient_list=[user.email],
+            from_email_override=sender_email,
         )
         logger.info(f"Invitation email sent to {user.email} with link to {url}")
     except Exception as e:
@@ -383,7 +384,7 @@ class UserViewSet(viewsets.ModelViewSet):
         # if 'password' in self.request.data:
         #     user.set_password(self.request.data['password'])
         #     user.save()
-        send_set_pin_email(user)
+        send_set_pin_email(user, self.request.user.email)
         log_action(self.request.user, 'created', 'User', user.id, f"Created {role} '{user.name}'")
 
     def perform_destroy(self, instance):

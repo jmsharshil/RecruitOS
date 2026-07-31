@@ -14,7 +14,8 @@ from common.permissions import IsAdminOrManager, IsAdmin
 from accounts.models import User, UserRole
 from accounts.serializers import UserBriefSerializer
 from audit.utils import log_action
-
+from accounts.email_utils import send_org_email
+from django.conf import settings
 class JobViewSet(viewsets.ModelViewSet):
     filter_backends  = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class  = JobFilterSet
@@ -162,7 +163,32 @@ class JobViewSet(viewsets.ModelViewSet):
                 "invalid_ids": invalid
             })
 
+        old_recruiters = set(job.assigned_recruiters.all())
         job.assigned_recruiters.set(recruiters_qs)
+        new_recruiters = set(recruiters_qs) - old_recruiters
+
+        for recruiter in new_recruiters:
+            try:
+                frontend_base = getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:5173')
+                url = f"{frontend_base}/jobs/{job.id}"
+                context = {
+                    'recruiter_name': recruiter.name,
+                    'job_title': job.title,
+                    'assigner_name': request.user.name,
+                    'url': url,
+                    'plain_message': f"You have been assigned to a new job: {job.title} by {request.user.name}.",
+                }
+                send_org_email(
+                    organization=job.organization,
+                    subject=f"New Job Assignment: {job.title}",
+                    template_name='job_assigned',
+                    context=context,
+                    recipient_list=[recruiter.email],
+                    from_email_override=request.user.email,
+                )
+            except Exception as e:
+                pass
+
         log_action(
             request.user, 'updated', 'Job', job.id,
             f"Set {len(recruiters_qs)} assigned recruiters on job '{job.title}' (IDs: {', '.join(str(i) for i in recruiter_ids)})"

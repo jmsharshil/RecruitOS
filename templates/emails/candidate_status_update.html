@@ -1,0 +1,17 @@
+{% extends "emails/base_email.html" %}
+
+{% block content %}
+<div class="content">
+    <p>Hi {{ manager_name }},</p>
+    
+    <p>The status for <strong>{{ candidate_name }}</strong> for the job <strong>{{ job_title }}</strong> has been updated.</p>
+    
+    <p><strong>Action:</strong> {{ action }}</p>
+    <p><strong>Notes:</strong> {{ notes }}</p>
+    <p><strong>Updated by:</strong> {{ recruiter_name }}</p>
+    
+    <div style="margin-top: 30px;">
+        <a href="{{ url }}" class="button">View Candidate</a>
+    </div>
+</div>
+{% endblock %}

@@ -157,6 +157,27 @@ def simulate_resume_submission_notification(obj_id):
             except Exception as e:
                 logger.error(f"Email error to recruiter: {e}")
 
+        # Notify Manager
+        manager = application.job.hiring_manager or application.job.created_by
+        if manager and manager.email:
+            manager_context = context.copy()
+            manager_context['recipient_name'] = manager.name
+            try:
+                from_email = None
+                if candidate.uploaded_by:
+                    from_email = candidate.uploaded_by.email
+                send_org_email(
+                    organization=org,
+                    subject=f"New Candidate CV Uploaded: {candidate.candidate_name}",
+                    template_name='resume_submission',
+                    context=manager_context,
+                    recipient_list=[manager.email],
+                    from_email_override=from_email,
+                )
+                print(f"==========> [DEBUG] EMAIL SENT TO MANAGER: {manager.email}")
+            except Exception as e:
+                logger.error(f"Email error to manager: {e}")
+
         # Send Email to Client (if exists and has email)
         if application.job.client and application.job.client.email:
             client_context = context.copy()

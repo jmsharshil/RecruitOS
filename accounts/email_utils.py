@@ -14,6 +14,11 @@ import base64
 import logging
 import smtplib
 from django.conf import settings
+from accounts.models import OrganizationEmailConfig, User
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
 from django.core.mail import EmailMultiAlternatives, get_connection
 from django.core.mail.backends.smtp import EmailBackend as SMTPBackend
 from django.template.loader import render_to_string
@@ -165,7 +170,7 @@ def get_org_branding(organization, template_key: str) -> dict:
 # Main send helper
 # ---------------------------------------------------------------------------
 
-def send_org_email(organization, subject: str, template_name: str, context: dict, recipient_list: list):
+def send_org_email(organization, subject: str, template_name: str, context: dict, recipient_list: list, from_email_override: str = None):
     """
     Render an email template with org branding and send via the org's SMTP
     (or Django default if not configured). **Enforces fallback to global
@@ -178,6 +183,7 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
     :param template_name: Template key / file name (e.g. 'set_pin')
     :param context: Template context dict (branding vars are auto-injected)
     :param recipient_list: List of recipient email strings
+    :param from_email_override: Optional email to use in the From header
     """
     branding = get_org_branding(organization, template_name)
     context.update(branding)
@@ -193,7 +199,48 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
         html_message = render_to_string(f'emails/{template_name}.html', context)
 
     plain_message = context.get('plain_message', subject)
-    from_email = get_org_from_email(organization)
+    
+    if from_email_override:
+        org_name = branding.get('org_name', getattr(organization, 'name', 'RecruitOS'))
+        from_email = f"{org_name} <{from_email_override}>"
+        
+        # --- NEW: Check if the override user has Google API Tokens ---
+        try:
+            sender_user = User.objects.get(email=from_email_override)
+            if sender_user.google_access_token:
+                logger.info(f"Attempting to send email via Gmail API for {from_email_override}")
+                # Create a MIME message
+                message = MIMEMultipart('alternative')
+                message['to'] = ", ".join(recipient_list)
+                message['from'] = from_email
+                message['subject'] = subject
+
+                part1 = MIMEText(plain_message, 'plain')
+                part2 = MIMEText(html_message, 'html')
+                message.attach(part1)
+                message.attach(part2)
+
+                raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+
+                creds = Credentials(
+                    token=sender_user.google_access_token,
+                    refresh_token=sender_user.google_refresh_token,
+                    token_uri="https://oauth2.googleapis.com/token",
+                    client_id=getattr(settings, 'GOOGLE_OAUTH_CLIENT_ID', None),
+                    client_secret=getattr(settings, 'GOOGLE_OAUTH_CLIENT_SECRET', None),
+                )
+                service = build('gmail', 'v1', credentials=creds)
+                
+                try:
+                    sent_msg = service.users().messages().send(userId='me', body={'raw': raw_message}).execute()
+                    logger.info(f"Successfully sent via Gmail API! Message ID: {sent_msg['id']}")
+                    return  # Exit early, we sent it successfully via API
+                except Exception as e:
+                    logger.error(f"Gmail API send failed: {e}. Falling back to standard SMTP.")
+        except User.DoesNotExist:
+            pass
+    else:
+        from_email = get_org_from_email(organization)
 
     # Try org-specific connection first (may raise SMTP auth errors at send time)
     connection = get_org_email_connection(organization)
@@ -229,7 +276,7 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
         msg = EmailMultiAlternatives(
             subject=subject,
             body=plain_message,
-            from_email=settings.DEFAULT_FROM_EMAIL or from_email,
+            from_email=from_email,
             to=recipient_list,
             connection=global_conn,
         )

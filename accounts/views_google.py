@@ -22,6 +22,48 @@ class GoogleLoginView(APIView):
 
     def post(self, request):
         token = request.data.get("id_token")
+        access_token = request.data.get("access_token")
+        refresh_token = request.data.get("refresh_token")
+        expires_in = request.data.get("expires_in")  # seconds
+
+        auth_code = request.data.get("code")
+
+        if auth_code:
+            try:
+                from google_auth_oauthlib.flow import Flow
+                client_config = {
+                    "web": {
+                        "client_id": getattr(settings, 'GOOGLE_OAUTH_CLIENT_ID', ''),
+                        "client_secret": getattr(settings, 'GOOGLE_OAUTH_CLIENT_SECRET', ''),
+                        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                        "token_uri": "https://oauth2.googleapis.com/token",
+                    }
+                }
+                flow = Flow.from_client_config(
+                    client_config,
+                    scopes=['openid', 'email', 'profile', 'https://www.googleapis.com/auth/gmail.send'],
+                    redirect_uri='postmessage'
+                )
+                
+                # Google rewrites basic scopes to full URLs, which causes OAuthLib to throw an error
+                # Relaxing token scope enforcement prevents this error.
+                import os
+                os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
+                
+                flow.fetch_token(code=auth_code)
+                credentials = flow.credentials
+                
+                token = credentials.id_token
+                access_token = credentials.token
+                refresh_token = credentials.refresh_token
+                
+                if credentials.expiry:
+                    import datetime
+                    expires_in = (credentials.expiry - datetime.datetime.utcnow()).total_seconds()
+            except Exception as e:
+                logger.error(f"Google code exchange failed: {e}")
+                return Response({"error": "Failed to exchange auth code"}, status=status.HTTP_400_BAD_REQUEST)
+
         if not token:
             return Response({"error": "id_token is required"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -57,6 +99,17 @@ class GoogleLoginView(APIView):
                             user.avatar.save(f"{user.id}_google_avatar.jpg", ContentFile(response.content), save=True)
                     except Exception as e:
                         logger.warning(f"Failed to fetch or save Google avatar for {email_clean}: {e}")
+
+                # Save Google Tokens if provided
+                if access_token:
+                    user.google_access_token = access_token
+                    if refresh_token:
+                        user.google_refresh_token = refresh_token
+                    if expires_in:
+                        from django.utils import timezone
+                        from datetime import timedelta
+                        user.google_token_expiry = timezone.now() + timedelta(seconds=int(expires_in))
+                    user.save(update_fields=['google_access_token', 'google_refresh_token', 'google_token_expiry'])
             else:
                 # User does NOT exist -> Block login
                 logger.warning(f"Google Login attempted by unregistered user: {email_clean}")

@@ -53,6 +53,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     created_by  = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='created_users')
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='users', null=True, blank=True)
 
+    # Google OAuth fields for Gmail API
+    google_access_token = models.TextField(blank=True, null=True)
+    google_refresh_token = models.TextField(blank=True, null=True)
+    google_token_expiry = models.DateTimeField(blank=True, null=True)
+
     objects = CustomUserManager()
 
     USERNAME_FIELD  = 'email'
