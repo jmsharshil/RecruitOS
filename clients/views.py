@@ -1,4 +1,4 @@
-from rest_framework import viewsets, permissions
+from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError, NotFound
@@ -7,12 +7,13 @@ from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
-from clients.models import Client, POC, ClientDocument, ClientStatus
-from clients.serializers import ClientListSerializer, ClientDetailSerializer, POCSerializer, ClientDocumentSerializer
+from clients.models import Client, POC, ClientDocument, ClientStatus, TeamMemberTrackerFormat
+from clients.serializers import ClientListSerializer, ClientDetailSerializer, POCSerializer, ClientDocumentSerializer, TeamMemberTrackerFormatSerializer
 from clients.filters import ClientFilterSet
 from common.permissions import IsAdminOrManager, IsAdmin
 from accounts.models import UserRole
 from audit.utils import log_action
+from candidates.models import Application
 
 class ClientViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -157,6 +158,306 @@ class ClientViewSet(viewsets.ModelViewSet):
             doc.deleted_at = timezone.now()
             doc.save()
             log_action(self.request.user, 'deleted', 'ClientDocument', doc.id, f"Deleted document for client '{client.company_name}'")
-            return Response(status=204)
+            return Response(status=status.HTTP_204_NO_CONTENT)
         except ClientDocument.DoesNotExist:
-            raise NotFound({"error": "Document not found"})
+            return Response({"error": "Document not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=False, methods=['get'], url_path='general-dropdown')
+    def general_dropdown(self, request):
+        """
+        Returns a simplified list of clients and their team members for dropdowns.
+        """
+        clients = self.get_queryset()
+        data = []
+        for client in clients:
+            data.append({
+                "client": {
+                    "client_id": str(client.id),
+                    "name": client.company_name,
+                    "email": client.email
+                },
+                "team_members": client.team_members if isinstance(client.team_members, list) else []
+            })
+        return Response({"clients_details": data}, status=status.HTTP_200_OK)
+
+class TeamMemberTrackerFormatViewSet(viewsets.ModelViewSet):
+    """
+    CRUD for Tracker Formats specific to a client team member.
+    Filter by ?client=<client_id>&team_member_id=<uuid>
+    """
+    serializer_class = TeamMemberTrackerFormatSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = TeamMemberTrackerFormat.objects.filter(
+            organization=self.request.user.organization,
+            is_deleted=False
+        )
+        client_id = self.request.query_params.get('client')
+        team_member_id = self.request.query_params.get('team_member_id')
+        
+        if client_id:
+            qs = qs.filter(client_id=client_id)
+        if team_member_id:
+            qs = qs.filter(team_member_id=team_member_id)
+            
+        return qs
+
+    def perform_create(self, serializer):
+        tracker = serializer.save(organization=self.request.user.organization, created_by=self.request.user)
+        log_action(self.request.user, 'created', 'TeamMemberTrackerFormat', tracker.id, f"Created tracker format for team member {tracker.team_member_id}")
+
+    def perform_update(self, serializer):
+        tracker = serializer.save()
+        log_action(self.request.user, 'updated', 'TeamMemberTrackerFormat', tracker.id, f"Updated tracker format for team member {tracker.team_member_id}")
+
+    def perform_destroy(self, instance):
+        instance.is_deleted = True
+        instance.save()
+        log_action(self.request.user, 'deleted', 'TeamMemberTrackerFormat', instance.id, f"Deleted tracker format for team member {instance.team_member_id}")
+
+    @action(detail=False, methods=['post'], url_path='preview')
+    def preview(self, request):
+        """
+        Expects:
+        {
+          "application_ids": ["id1", "id2"]
+        }
+        Returns the data for the requested applications formatted according to the saved tracker format.
+        """
+        app_ids = request.data.get('application_ids', [])
+
+        if not app_ids:
+            return Response({"error": "application_ids are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Get applications
+        apps = Application.objects.filter(id__in=app_ids, is_deleted=False).select_related('job', 'candidate')
+        if not apps.exists():
+            return Response({"error": "No valid applications found."}, status=status.HTTP_404_NOT_FOUND)
+            
+        first_app = apps.first()
+        client_id = first_app.job.client_id
+        team_member_id = first_app.job.team_member_id
+        
+        if not client_id or not team_member_id:
+            return Response({"error": "The job associated with these applications does not have a client or team member assigned."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Get team member details for tracker_receiver
+        tracker_receiver = None
+        if first_app.job.client and isinstance(first_app.job.client.team_members, list):
+            for tm in first_app.job.client.team_members:
+                if isinstance(tm, dict) and str(tm.get('id')) == str(team_member_id):
+                    tracker_receiver = {
+                        "id": tm.get('id'),
+                        "name": tm.get('name'),
+                        "email": tm.get('email')
+                    }
+                    break
+
+        # Get the format
+        try:
+            tracker_format = TeamMemberTrackerFormat.objects.get(
+                client_id=client_id, 
+                team_member_id=team_member_id, 
+                is_deleted=False
+            )
+            columns = tracker_format.columns
+        except TeamMemberTrackerFormat.DoesNotExist:
+            return Response({"error": "Tracker format not found for this team member."}, status=status.HTTP_404_NOT_FOUND)
+        
+        tracker_preview = []
+        for app in apps:
+            candidate = app.candidate
+            row = {
+                "application_id": str(app.id)
+            }
+            for col in columns:
+                if col == 'candidate_name':
+                    row[col] = candidate.candidate_name
+                elif col == 'email':
+                    row[col] = candidate.email
+                elif col == 'phone':
+                    row[col] = candidate.contact
+                elif col == 'total_experience' or col == 'experience':
+                    row[col] = candidate.experience if candidate.experience else ""
+                elif col == 'current_company':
+                    row[col] = candidate.current_company
+                elif col == 'current_designation':
+                    row[col] = candidate.current_profile
+                elif col == 'current_ctc' or col == 'ctc':
+                    row[col] = str(app.current_ctc) if app.current_ctc else ""
+                elif col == 'expected_ctc' or col == 'expected ctc':
+                    row[col] = str(app.expected_ctc) if app.expected_ctc else ""
+                elif col == 'notice_period':
+                    row[col] = app.notice_period
+                elif col == 'current_location' or col == 'address':
+                    row[col] = candidate.current_location
+                elif col == 'preferred_location':
+                    row[col] = candidate.preferred_location
+                elif col == 'hike':
+                    row[col] = app.hike if hasattr(app, 'hike') else ""
+                elif col == 'skills':
+                    row[col] = ", ".join(candidate.skills) if isinstance(candidate.skills, list) else candidate.skills
+                elif col == 'education':
+                    row[col] = candidate.education
+                else:
+                    custom_fields = app.tracker_custom_fields if isinstance(app.tracker_custom_fields, dict) else {}
+                    row[col] = custom_fields.get(col, "")
+                
+                # Replace 'Not specified' with blank
+                if isinstance(row.get(col), str) and row.get(col).strip().lower() == "not specified":
+                    row[col] = ""
+                    
+            tracker_preview.append(row)
+
+        return Response({
+            "tracker_preview": tracker_preview, 
+            "columns": columns,
+            "tracker_receiver": tracker_receiver
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['patch'], url_path='preview-update')
+    def preview_update(self, request):
+        """
+        Expects:
+        {
+            "updates": [
+                {
+                    "application_id": "uuid1",
+                    "candidate_name": "New Name",
+                    "current_ctc": "1500000"
+                }
+            ]
+        }
+        Updates the Candidate and Application records permanently.
+        """
+        updates = request.data.get('tracker_update', [])
+        
+        if not isinstance(updates, list):
+            return Response({"error": "tracker_update must be a list of objects."}, status=status.HTTP_400_BAD_REQUEST)
+
+        updated_count = 0
+        new_columns = set()
+        
+        for item in updates:
+            app_id = item.get('application_id')
+            if not app_id:
+                continue
+
+            try:
+                app = Application.objects.get(id=app_id, is_deleted=False)
+                candidate = app.candidate
+                
+                app_modified = False
+                cand_modified = False
+
+                standard_keys = {
+                    'application_id', 'candidate_name', 'email', 'phone', 
+                    'total_experience', 'experience', 'current_company', 
+                    'current_designation', 'current_ctc', 'ctc', 
+                    'expected_ctc', 'expected ctc', 'notice_period', 
+                    'current_location', 'address', 'preferred_location', 'hike', 'skills', 'education'
+                }
+
+                # Handle all dynamic fields
+                if not isinstance(app.tracker_custom_fields, dict):
+                    app.tracker_custom_fields = {}
+                    
+                for key, val in item.items():
+                    if key not in standard_keys:
+                        app.tracker_custom_fields[key] = val
+                        app_modified = True
+                        new_columns.add(key)
+
+                # Application fields
+                if 'current_ctc' in item or 'ctc' in item:
+                    ctc_val = item.get('current_ctc') or item.get('ctc')
+                    try:
+                        app.current_ctc = float(ctc_val) if ctc_val else None
+                        app_modified = True
+                    except ValueError: pass
+                if 'expected_ctc' in item or 'expected ctc' in item:
+                    val = item.get('expected_ctc') or item.get('expected ctc')
+                    try:
+                        app.expected_ctc = float(val) if val else None
+                        app_modified = True
+                    except ValueError: pass
+                if 'hike' in item and hasattr(app, 'hike'):
+                    app.hike = item['hike']
+                    app_modified = True
+                if 'notice_period' in item:
+                    app.notice_period = item['notice_period']
+                    app_modified = True
+
+                # Candidate fields
+                if 'candidate_name' in item:
+                    candidate.candidate_name = item['candidate_name']
+                    cand_modified = True
+                if 'email' in item:
+                    candidate.email = item['email']
+                    cand_modified = True
+                if 'phone' in item:
+                    candidate.contact = item['phone']
+                    cand_modified = True
+                if 'total_experience' in item or 'experience' in item:
+                    candidate.experience = item.get('total_experience') or item.get('experience')
+                    cand_modified = True
+                if 'current_company' in item:
+                    candidate.current_company = item['current_company']
+                    cand_modified = True
+                if 'current_designation' in item:
+                    candidate.current_profile = item['current_designation']
+                    cand_modified = True
+                if 'current_location' in item or 'address' in item:
+                    candidate.current_location = item.get('current_location') or item.get('address')
+                    cand_modified = True
+                if 'preferred_location' in item:
+                    candidate.preferred_location = item['preferred_location']
+                    cand_modified = True
+                if 'skills' in item:
+                    # Depending on how skills are stored, simple split if it's a string
+                    skills_val = item['skills']
+                    if isinstance(skills_val, str):
+                        candidate.skills = [s.strip() for s in skills_val.split(',') if s.strip()]
+                    elif isinstance(skills_val, list):
+                        candidate.skills = skills_val
+                    cand_modified = True
+                if 'education' in item:
+                    candidate.education = item['education']
+                    cand_modified = True
+
+                if app_modified:
+                    app.save()
+                if cand_modified:
+                    candidate.save()
+                
+                if app_modified or cand_modified:
+                    updated_count += 1
+            except Application.DoesNotExist:
+                continue
+
+        # Auto-sync columns to exactly match the keys sent in the payload
+        if updates:
+            first_item = updates[0]
+            if first_item.get('application_id'):
+                try:
+                    first_app = Application.objects.select_related('job').get(id=first_item['application_id'])
+                    client_id = first_app.job.client_id
+                    team_member_id = first_app.job.team_member_id
+                    
+                    if client_id and team_member_id:
+                        tracker_format = TeamMemberTrackerFormat.objects.get(
+                            client_id=client_id,
+                            team_member_id=team_member_id,
+                            is_deleted=False
+                        )
+                        # Exact columns from frontend
+                        desired_columns = [k for k in first_item.keys() if k != 'application_id']
+                        
+                        if tracker_format.columns != desired_columns:
+                            tracker_format.columns = desired_columns
+                            tracker_format.save()
+                except (Application.DoesNotExist, TeamMemberTrackerFormat.DoesNotExist):
+                    pass
+
+        return Response({"message": f"Successfully updated {updated_count} applications."}, status=status.HTTP_200_OK)

@@ -88,6 +88,7 @@ class ApplicationFilterSet(django_filters.FilterSet):
     current_ctc_max    = django_filters.NumberFilter(field_name='current_ctc', lookup_expr='lte')
     expected_ctc_min   = django_filters.NumberFilter(field_name='expected_ctc', lookup_expr='gte')
     expected_ctc_max   = django_filters.NumberFilter(field_name='expected_ctc', lookup_expr='lte')
+    manager_review_status = django_filters.CharFilter(field_name='manager_review_status', lookup_expr='exact')
     created_after      = django_filters.DateFilter(field_name='created_at', lookup_expr='date__gte')
     created_before     = django_filters.DateFilter(field_name='created_at', lookup_expr='date__lte')
 
@@ -96,5 +97,5 @@ class ApplicationFilterSet(django_filters.FilterSet):
         fields = [
             'status', 'job', 'candidate_name', 'stage_name', 'notice_period',
             'current_ctc_min', 'current_ctc_max', 'expected_ctc_min',
-            'expected_ctc_max', 'created_after', 'created_before',
+            'expected_ctc_max', 'created_after', 'created_before', 'manager_review_status'
         ]

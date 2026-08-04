@@ -410,65 +410,81 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         except Stage.DoesNotExist:
             raise ValidationError({"error": "Invalid stage for this job", "detail": "Stage not found for this job"})
 
-    @action(detail=True, methods=['post'], url_path='send-to-client')
-    def send_to_client(self, request, pk=None):
-        application = self.get_object()
-        if application.job.hiring_for != 'client':
-            raise ValidationError({"error": "Job is not hiring for a client"})
 
-        # Prevent sharing the same candidate for the same job to the same client within 3 months (90 days)
-        if request.user.role == 'recruiter':
-            from django.utils import timezone
-            from datetime import timedelta
-            three_months_ago = timezone.now() - timedelta(days=90)
-            
-            duplicate_client_sub = ClientSubmission.objects.filter(
-                application__candidate=application.candidate,
-                application__job__client=application.job.client,
-                sent_at__gte=three_months_ago
+
+    @action(detail=False, methods=['post'], url_path='send-to-client')
+    def send_to_client(self, request):
+        """Bulk send applications to client."""
+        application_ids = request.data.get('application_ids', [])
+        
+        if not isinstance(application_ids, list) or not application_ids:
+            raise ValidationError({"error": "Provide a list of application_ids"})
+
+        applications = self.get_queryset().filter(id__in=application_ids).select_related('job', 'candidate', 'job__client')
+        updated_count = 0
+        errors = []
+
+        from django.utils import timezone
+        from datetime import timedelta
+        three_months_ago = timezone.now() - timedelta(days=90)
+
+        for application in applications:
+            if application.job.hiring_for != 'client':
+                errors.append(f"{application.candidate.candidate_name}: Job is not hiring for a client")
+                continue
+                
+            if request.user.role == 'recruiter':
+                duplicate_client_sub = ClientSubmission.objects.filter(
+                    application__candidate=application.candidate,
+                    application__job__client=application.job.client,
+                    sent_at__gte=three_months_ago
+                )
+                if duplicate_client_sub.exists():
+                    errors.append(f"{application.candidate.candidate_name}: Profile already shared to this client in last 3 months.")
+                    continue
+
+            if hasattr(application, 'client_submission'):
+                errors.append(f"{application.candidate.candidate_name}: Submission already exists")
+                continue
+
+            submission = ClientSubmission.objects.create(
+                application=application,
+                sent_by=request.user,
+                status=SubmissionStatus.PENDING,
+                organization=request.user.organization
             )
-            if duplicate_client_sub.exists():
-                raise ValidationError({
-                    "error": "You have already shared/submitted this candidate profile to this client in the last 3 months."
-                })
+            application.status = CandidateStatus.SENT_TO_CLIENT.value
+            application.save()
+            log_action(request.user, 'sent', 'Application', application.id, f"Sent {application.candidate.candidate_name} to client")
 
-        if hasattr(application, 'client_submission'):
-            raise ValidationError({"error": "Submission already exists"})
+            client_name = application.job.client.company_name if application.job.client else "client"
+            ApplicationHistory.objects.create(
+                application=application,
+                user=request.user,
+                action="sent_to_client",
+                notes=f"Shared candidate profile with client: {client_name}",
+                organization=application.organization
+            )
 
-        submission = ClientSubmission.objects.create(
-            application=application,
-            sent_by=request.user,
-            status=SubmissionStatus.PENDING,
-            organization=request.user.organization
-        )
-        application.status = CandidateStatus.SENT_TO_CLIENT.value
-        application.save()
-        log_action(request.user, 'sent', 'Application', application.id, f"Sent {application.candidate.candidate_name} to client")
-
-        # Save send to client to history
-        client_name = application.job.client.company_name if application.job.client else "client"
-        ApplicationHistory.objects.create(
-            application=application,
-            user=request.user,
-            action="sent_to_client",
-            notes=f"Shared candidate profile with client: {client_name}",
-            organization=application.organization
-        )
-
-        if application.job.client:
-            client_email = application.job.client.email
-            recipient_name = application.job.client.company_name
-            if application.job.team_member_id and isinstance(application.job.client.team_members, list):
-                for tm in application.job.client.team_members:
-                    if isinstance(tm, dict) and str(tm.get('id')) == str(application.job.team_member_id) and tm.get('email'):
-                        client_email = tm.get('email')
-                        recipient_name = tm.get('name', recipient_name)
-                        break
+            if application.job.client:
+                client_email = application.job.client.email
+                recipient_name = application.job.client.company_name
+                if application.job.team_member_id and isinstance(application.job.client.team_members, list):
+                    for tm in application.job.client.team_members:
+                        if isinstance(tm, dict) and str(tm.get('id')) == str(application.job.team_member_id) and tm.get('email'):
+                            client_email = tm.get('email')
+                            recipient_name = tm.get('name', recipient_name)
+                            break
+                
+                if client_email:
+                    simulate_client_submission_email(application.id, client_email, recipient_name)
             
-            if client_email:
-                simulate_client_submission_email(application.id, client_email, recipient_name)
+            updated_count += 1
 
-        return Response(ApplicationDetailSerializer(application).data)
+        return Response({
+            "message": f"Successfully sent {updated_count} applications to client.",
+            "errors": errors
+        }, status=200)
 
     @action(detail=True, methods=['post'], url_path='schedule-interview')
     def schedule_interview(self, request, pk=None):
@@ -538,25 +554,135 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         except Exception as e:
             print(f"Failed to send manager review email: {e}")
 
-        # Trigger client notification if accepted and client exists
-        if status == ManagerReviewStatus.ACCEPTED and application.job.hiring_for == 'client' and application.job.client:
-            client_email = application.job.client.email
-            recipient_name = application.job.client.company_name
-            if application.job.team_member_id and isinstance(application.job.client.team_members, list):
-                for tm in application.job.client.team_members:
-                    if isinstance(tm, dict) and str(tm.get('id')) == str(application.job.team_member_id) and tm.get('email'):
-                        client_email = tm.get('email')
-                        recipient_name = tm.get('name', recipient_name)
-                        break
-            
-            if client_email:
-                try:
-                    simulate_client_submission_email(application.id, client_email, recipient_name)
-                except Exception as e:
-                    logger.error(f"Failed to send client notification on approval: {e}")
+
 
         return Response(ApplicationDetailSerializer(application).data)
 
+    @action(detail=False, methods=['get'], url_path='grouped-approval-queue')
+    def grouped_approval_queue(self, request):
+        """Returns applications grouped by job, specifically for the approval queue."""
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = ApplicationListSerializer(queryset, many=True, context={'request': request})
+        
+        grouped_data = {}
+        for app, app_data in zip(queryset, serializer.data):
+            if not app.job:
+                continue
+                
+            job_id = str(app.job.id)
+            job_title = app.job.title
+            
+            if job_id not in grouped_data:
+                grouped_data[job_id] = {
+                    "job_id": job_id,
+                    "job_title": job_title,
+                    "applications": []
+                }
+            grouped_data[job_id]["applications"].append(app_data)
+            
+        return Response(list(grouped_data.values()))
+
+    @action(detail=False, methods=['post'], url_path='bulk-review')
+    def bulk_review(self, request):
+        """Bulk approve/reject multiple applications."""
+        application_ids = request.data.get('application_ids', [])
+        status = request.data.get('status')
+        notes = request.data.get('notes', '')
+
+        if status not in ManagerReviewStatus.values:
+            raise ValidationError({
+                "error": "Invalid review status",
+                "detail": f"Status must be one of: {ManagerReviewStatus.values}"
+            })
+
+        if not isinstance(application_ids, list) or not application_ids:
+            raise ValidationError({"error": "Provide a list of application_ids"})
+
+        applications = self.get_queryset().filter(id__in=application_ids)
+        updated_count = 0
+
+        recruiter_apps = {}
+        for app in applications:
+            app.manager_review_status = status
+            app.manager_review_notes = notes
+            if status == ManagerReviewStatus.REJECTED:
+                app.status = CandidateStatus.REJECTED.value
+            app.save()
+
+            log_action(
+                request.user, 'reviewed', 'Application', app.id,
+                f"Manager bulk review action: {status} with notes: '{notes[:60]}'"
+            )
+            ApplicationHistory.objects.create(
+                application=app,
+                user=request.user,
+                action=status,
+                notes=notes,
+                organization=app.organization
+            )
+
+            recruiter = app.created_by or app.candidate.uploaded_by
+            if recruiter and recruiter.email:
+                if recruiter.email not in recruiter_apps:
+                    recruiter_apps[recruiter.email] = {
+                        "recruiter": recruiter,
+                        "manager": app.job.hiring_manager or app.job.created_by,
+                        "org": app.organization,
+                        "apps": []
+                    }
+                recruiter_apps[recruiter.email]["apps"].append(app)
+            
+            updated_count += 1
+
+        # Send bulk grouped emails to each recruiter
+        for email, data in recruiter_apps.items():
+            try:
+                send_manager_bulk_review_email(
+                    recruiter=data["recruiter"],
+                    manager=data["manager"],
+                    apps=data["apps"],
+                    status=status,
+                    notes=notes,
+                    from_email=request.user.email,
+                    org=data["org"]
+                )
+            except Exception as e:
+                print(f"Failed to send bulk manager review email to {email}: {e}")
+
+        return Response({"message": f"Successfully updated {updated_count} applications", "status": status})
+
+
+def send_manager_bulk_review_email(recruiter, manager, apps, status, notes, from_email, org):
+    manager_name = manager.name if manager else "A Manager"
+    manager_email = manager.email if manager else ""
+    frontend_base = getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:5173')
+    
+    app_list = []
+    for app in apps:
+        app_list.append({
+            "candidate_name": app.candidate.candidate_name,
+            "job_title": app.job.title,
+            "url": f"{frontend_base}/candidates/{app.candidate.id}"
+        })
+        
+    context = {
+        "recruiter": recruiter,
+        "manager_name": manager_name,
+        "manager_email": manager_email,
+        "status": status,
+        "notes": notes,
+        "app_list": app_list,
+        "org_name": org.name if org else "RecruitOS"
+    }
+
+    send_org_email(
+        organization=org,
+        subject=f"Bulk Candidate Review: {len(apps)} applications {status.upper()}",
+        template_name="manager_bulk_review",
+        context=context,
+        recipient_list=[recruiter.email],
+        from_email_override=from_email
+    )
 
 def send_manager_review_email(application, from_email=None):
     recruiter = application.created_by or application.candidate.uploaded_by

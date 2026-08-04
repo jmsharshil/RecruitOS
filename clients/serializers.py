@@ -1,12 +1,13 @@
 from rest_framework import serializers
-from clients.models import Client, POC, ClientDocument
+from clients.models import Client, POC, ClientDocument, TeamMemberTrackerFormat
 from accounts.serializers import UserBriefSerializer
 from common.serializers import DateParserField, DateParserDateTimeField
 
 class POCSerializer(serializers.ModelSerializer):
+    poc_type = serializers.CharField(write_only=True, default='hiring')
     class Meta:
         model = POC
-        fields = '__all__'
+        exclude = ['poc_type']
         read_only_fields = ['id', 'client', 'created_at', 'updated_at', 'organization', 'is_deleted', 'deleted_at']
 
 class ClientDocumentSerializer(serializers.ModelSerializer):
@@ -14,6 +15,40 @@ class ClientDocumentSerializer(serializers.ModelSerializer):
         model = ClientDocument
         fields = '__all__'
         read_only_fields = ['id', 'client', 'uploaded_at', 'created_at', 'updated_at', 'organization', 'is_deleted', 'deleted_at']
+
+class TeamMemberTrackerFormatSerializer(serializers.ModelSerializer):
+    team_member_details = serializers.SerializerMethodField()
+    created_by = UserBriefSerializer(read_only=True)
+
+    class Meta:
+        model = TeamMemberTrackerFormat
+        fields = '__all__'
+        read_only_fields = ['id', 'created_by', 'created_at', 'updated_at', 'organization', 'is_deleted', 'deleted_at']
+
+    def get_team_member_details(self, obj):
+        details = {
+            'id': obj.team_member_id,
+            'name': None,
+            'email': None
+        }
+        if not obj.client or not obj.client.team_members:
+            return details
+        
+        for tm in obj.client.team_members:
+            if isinstance(tm, dict) and str(tm.get('id')) == str(obj.team_member_id):
+                details['name'] = tm.get('name')
+                details['email'] = tm.get('email')
+                break
+        return details
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret.pop('client', None)
+        ret.pop('organization', None)
+        ret.pop('team_member_id', None)
+        ret.pop('is_deleted', None)
+        ret.pop('deleted_at', None)
+        return ret
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +77,6 @@ class ClientListSerializer(serializers.ModelSerializer):
 # Detail serializer — full data including POCs, documents, stats
 # ---------------------------------------------------------------------------
 class ClientDetailSerializer(serializers.ModelSerializer):
-    pocs           = serializers.SerializerMethodField()
     documents      = serializers.SerializerMethodField()
     created_by     = UserBriefSerializer(read_only=True)
     stats          = serializers.SerializerMethodField()
@@ -56,13 +90,6 @@ class ClientDetailSerializer(serializers.ModelSerializer):
         model = Client
         exclude = ['alternative_email', 'alternative_contact', 'website', 'linkedin', 'client_location']
         read_only_fields = ['id', 'client_id', 'created_by', 'is_deleted', 'organization']
-
-    def get_pocs(self, obj):
-        pocs = obj.pocs.filter(is_deleted=False)
-        return {
-            'hiring':  POCSerializer(pocs.filter(poc_type='hiring'),  many=True).data,
-            'payment': POCSerializer(pocs.filter(poc_type='payment'), many=True).data,
-        }
 
     def get_documents(self, obj):
         return ClientDocumentSerializer(obj.documents.filter(is_deleted=False), many=True).data

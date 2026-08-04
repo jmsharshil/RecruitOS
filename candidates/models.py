@@ -12,6 +12,11 @@ class CandidateStatus(models.TextChoices):
     HIRED               = 'hired'
     REJECTED            = 'rejected'
     ON_HOLD             = 'on-hold'
+    INTERVIEW_ALIGN     = 'interview-align'
+    SELECT              = 'select'
+    OFFERED             = 'offered'
+    JOINED              = 'joined'
+    BACKOUT             = 'backout'
 
 class InterviewMode(models.TextChoices):
     ONLINE     = 'online'
@@ -73,6 +78,7 @@ class Application(BaseModel):
     preferred_location = models.CharField(max_length=150, blank=True)
     current_ctc        = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     expected_ctc       = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    hike               = models.CharField(max_length=50, blank=True)
     offer_in_hand      = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     notice_period      = models.CharField(max_length=50,blank=True)
     reason_for_change  = models.TextField(blank=True)
@@ -87,6 +93,7 @@ class Application(BaseModel):
         max_length=30, choices=ManagerReviewStatus.choices, default=ManagerReviewStatus.PENDING
     )
     manager_review_notes = models.TextField(blank=True)
+    tracker_custom_fields = models.JSONField(default=dict, blank=True)
 
     class Meta:
         unique_together = ('organization', 'candidate', 'job')

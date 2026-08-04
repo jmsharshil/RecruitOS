@@ -19,7 +19,7 @@ from django.conf import settings
 class JobViewSet(viewsets.ModelViewSet):
     filter_backends  = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class  = JobFilterSet
-    search_fields    = ['title', 'description', 'location', 'code']
+    search_fields    = ['title', 'description', 'location', 'code', 'status']
     ordering_fields  = ['title', 'created_at', 'target_closing_date', 'priority', 'status']
     ordering         = ['-created_at']
 
@@ -206,3 +206,38 @@ class JobViewSet(viewsets.ModelViewSet):
             "status": "updated",
             "assigned_recruiters": recruiter_data
         })
+
+    @action(detail=True, methods=['get'], url_path='pipeline')
+    def pipeline(self, request, pk=None):
+        """
+        Returns all applications for this job grouped by their status (stage).
+        """
+        job = self.get_object()
+        from candidates.models import Application, CandidateStatus
+        
+        apps = Application.objects.filter(job=job, is_deleted=False).select_related('candidate')
+        
+        pipeline_data = {
+            choice[0]: [] for choice in CandidateStatus.choices
+        }
+        
+        for app in apps:
+            app_data = {
+                "application_id": str(app.id),
+                "candidate_id": str(app.candidate.id),
+                "candidate_name": app.candidate.candidate_name,
+                "current_company": app.candidate.current_company,
+                "experience": app.candidate.experience,
+                "current_ctc": str(app.current_ctc) if app.current_ctc else "",
+                "expected_ctc": str(app.expected_ctc) if app.expected_ctc else "",
+                "notice_period": app.notice_period,
+                "notes": app.manager_review_notes or app.feedback or app.reason_for_change,
+                "status": app.status
+            }
+            
+            if app.status in pipeline_data:
+                pipeline_data[app.status].append(app_data)
+            else:
+                pipeline_data[app.status] = [app_data]
+                
+        return Response(pipeline_data)

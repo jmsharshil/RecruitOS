@@ -38,7 +38,7 @@ class JobListSerializer(serializers.ModelSerializer):
         model = Job
         fields = [
             'id', 'code', 'title', 'status',
-            'location', 'openings', 'min_experience', 'max_experience', 'budget',
+            'location', 'min_experience', 'max_experience', 'budget',
             'hiring_for', 'candidate_count',
             'created_by_name', 'hiring_manager_name', 'created_at',
         ]
@@ -143,7 +143,7 @@ class JobDetailSerializer(serializers.ModelSerializer):
         model = Job
         fields = [
             'id', 'code', 'title', 'description', 'description_file', 'skills', 'education',
-            'min_experience', 'max_experience', 'location', 'openings',
+            'min_experience', 'max_experience', 'location',
             'budget', 'hiring_for', 'client', 'status',
             'assigned_recruiters', 'assigned_recruiter_ids',
             'created_by', 'hiring_manager', 'hiring_manager_id',

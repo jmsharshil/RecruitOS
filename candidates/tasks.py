@@ -142,57 +142,9 @@ def simulate_resume_submission_notification(obj_id):
                 type='info',
                 link=f"/candidates/{candidate.id}"
             )
-            # Send Email to Recruiter
-            recruiter_context = context.copy()
-            recruiter_context['recipient_name'] = recruiter.name
-            try:
-                send_org_email(
-                    organization=org,
-                    subject=f"Candidate Tracker Update: {candidate.candidate_name}",
-                    template_name='resume_submission',
-                    context=recruiter_context,
-                    recipient_list=[recruiter.email],
-                )
-                print(f"==========> [DEBUG] EMAIL SENT TO RECRUITER: {recruiter.email}")
-            except Exception as e:
-                logger.error(f"Email error to recruiter: {e}")
 
-        # Notify Manager
-        manager = application.job.hiring_manager or application.job.created_by
-        if manager and manager.email:
-            manager_context = context.copy()
-            manager_context['recipient_name'] = manager.name
-            try:
-                from_email = None
-                if candidate.uploaded_by:
-                    from_email = candidate.uploaded_by.email
-                send_org_email(
-                    organization=org,
-                    subject=f"New Candidate CV Uploaded: {candidate.candidate_name}",
-                    template_name='resume_submission',
-                    context=manager_context,
-                    recipient_list=[manager.email],
-                    from_email_override=from_email,
-                )
-                print(f"==========> [DEBUG] EMAIL SENT TO MANAGER: {manager.email}")
-            except Exception as e:
-                logger.error(f"Email error to manager: {e}")
 
-        # Send Email to Client (if exists and has email)
-        if application.job.client and application.job.client.email:
-            client_context = context.copy()
-            client_context['recipient_name'] = application.job.client.company_name
-            try:
-                send_org_email(
-                    organization=org,
-                    subject=f"Candidate Tracker Update: {candidate.candidate_name}",
-                    template_name='resume_submission',
-                    context=client_context,
-                    recipient_list=[application.job.client.email],
-                )
-                print(f"==========> [DEBUG] EMAIL SENT TO CLIENT: {application.job.client.email}")
-            except Exception as e:
-                logger.error(f"Email error to client: {e}")
+
 
         logger.info(f"Resume submission notification and emails fired for application {obj_id}")
         return
@@ -228,26 +180,7 @@ def simulate_resume_submission_notification(obj_id):
                 type='info',
                 link=f"/candidates/{candidate.id}"
             )
-            
-            # Email all managers and admins in the organization
-            try:
-                from accounts.email_utils import send_org_email
-                managers = User.objects.filter(organization=org, role__in=[UserRole.MANAGER, UserRole.ADMIN])
-                for manager in managers:
-                    if manager.email:
-                        manager_context = context.copy()
-                        manager_context['recipient_name'] = manager.name
-                        send_org_email(
-                            organization=org,
-                            subject=f"New Candidate CV Uploaded to Pool: {candidate.candidate_name}",
-                            template_name='resume_submission',
-                            context=manager_context,
-                            recipient_list=[manager.email],
-                            from_email_override=candidate.uploaded_by.email,
-                        )
-                        print(f"==========> [DEBUG] POOL EMAIL SENT TO MANAGER: {manager.email}")
-            except Exception as e:
-                logger.error(f"Pool email error to managers: {e}")
+
         else:
             print(f"==========> [DEBUG] IN-APP NOTIFICATION SKIPPED: 'uploaded_by' is empty")
                 

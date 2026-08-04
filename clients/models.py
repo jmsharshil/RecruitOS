@@ -80,3 +80,17 @@ class POC(BaseModel):
     contact     = models.CharField(max_length=20)
     linkedin    = models.URLField(blank=True)
     description = models.TextField(blank=True)
+
+class TeamMemberTrackerFormat(BaseModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='tracker_formats')
+    team_member_id = models.CharField(max_length=255)
+    
+    # Store a list of column names e.g. ["candidate_name", "ctc", "experience"]
+    columns = models.JSONField(default=list)
+    created_by = models.ForeignKey(
+        'accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='created_tracker_formats'
+    )
+
+    class Meta:
+        unique_together = ('client', 'team_member_id')
