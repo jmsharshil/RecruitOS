@@ -314,7 +314,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         Destroy restricted to admin. Uses IsAdminOrManager for safety on bulk-like actions.
         """
         if self.action in ['list', 'retrieve', 'create', 'update', 'partial_update',
-                           'move_stage', 'schedule_interview', 'send_to_client']:
+                           'move_stage', 'schedule_interview', 'send_to_client',
+                           'submit_for_review', 'review', 'bulk_review', 'grouped_approval_queue']:
             return [permissions.IsAuthenticated()]
         if self.action == 'destroy':
             return [IsAdmin()]

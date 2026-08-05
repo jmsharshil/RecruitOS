@@ -59,6 +59,21 @@ class ApplicationListSerializer(serializers.ModelSerializer):
     """
     candidate_name = serializers.CharField(source='candidate.candidate_name', read_only=True)
     candidate_email = serializers.CharField(source='candidate.email', read_only=True)
+    candidate_contact = serializers.CharField(source='candidate.contact', read_only=True)
+    candidate_experience = serializers.CharField(source='candidate.experience', read_only=True)
+    candidate_current_profile = serializers.CharField(source='candidate.current_profile', read_only=True)
+    candidate_current_company = serializers.CharField(source='candidate.current_company', read_only=True)
+    candidate_current_location = serializers.CharField(source='candidate.current_location', read_only=True)
+    
+    current_ctc = serializers.DecimalField(source='candidate.current_ctc', max_digits=12, decimal_places=2, read_only=True)
+    expected_ctc = serializers.DecimalField(source='candidate.expected_ctc', max_digits=12, decimal_places=2, read_only=True)
+    notice_period = serializers.CharField(source='candidate.notice_period', read_only=True)
+    hike = serializers.CharField(source='candidate.hike', read_only=True)
+    preferred_location = serializers.CharField(source='candidate.preferred_location', read_only=True)
+    offer_in_hand = serializers.DecimalField(source='candidate.offer_in_hand', max_digits=12, decimal_places=2, read_only=True)
+    reason_for_change = serializers.CharField(source='candidate.reason_for_change', read_only=True)
+    dob = serializers.DateField(source='candidate.dob', read_only=True)
+    
     job_title      = serializers.CharField(source='job.title', read_only=True)
     stage_name     = serializers.SerializerMethodField()
     share_date     = DateParserField(required=False, allow_null=True)
@@ -81,9 +96,12 @@ class ApplicationListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Application
         fields = [
-            'id', 'candidate_name', 'candidate_email', 'job_title',
-            'status', 'stage_name', 'share_date', 'created_at',
-            'current_ctc', 'expected_ctc', 'notice_period',
+            'id', 'candidate_name', 'candidate_email', 'candidate_contact',
+            'candidate_experience', 'candidate_current_profile',
+            'candidate_current_company', 'candidate_current_location',
+            'job_title', 'status', 'stage_name', 'share_date', 'created_at',
+            'current_ctc', 'expected_ctc', 'notice_period', 'hike',
+            'preferred_location', 'offer_in_hand', 'reason_for_change', 'dob',
             'submitted_by', 'candidate_cv',
             'manager_review_status', 'manager_review_notes',
             # write-only

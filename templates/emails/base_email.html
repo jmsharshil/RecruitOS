@@ -34,13 +34,7 @@
 
     /* Header */
     .header {
-      background: {
-          {
-          primary_color|default: "#1e40af"
-        }
-      }
-
-      ;
+      background: {{ primary_color|default:"#1e40af" }};
       padding: 32px 40px;
       text-align: center;
     }
@@ -91,14 +85,7 @@
     .btn {
       display: inline-block;
       padding: 14px 36px;
-
-      background: {
-          {
-          primary_color|default: "#1e40af"
-        }
-      }
-
-      ;
+      background: {{ primary_color|default:"#1e40af" }};
       color: #ffffff !important;
       text-decoration: none;
       border-radius: 8px;
@@ -118,23 +105,9 @@
       margin: 24px 0;
     }
 
-    /* Info box */
     .info-box {
-      background: {
-          {
-          secondary_color|default: "#f8fafc"
-        }
-      }
-
-      ;
-
-      border-left: 4px solid {
-          {
-          primary_color|default: "#1e40af"
-        }
-      }
-
-      ;
+      background: {{ secondary_color|default:"#f8fafc" }};
+      border-left: 4px solid {{ primary_color|default:"#1e40af" }};
       padding: 16px 20px;
       border-radius: 4px;
       margin-bottom: 20px;
@@ -153,15 +126,8 @@
       color: #6b7280;
     }
 
-    /* Footer */
     .footer {
-      background: {
-          {
-          secondary_color|default: "#f8fafc"
-        }
-      }
-
-      ;
+      background: {{ secondary_color|default:"#f8fafc" }};
       padding: 20px 40px;
       text-align: center;
       border-top: 1px solid #e5e7eb;
@@ -174,13 +140,7 @@
     }
 
     .footer a {
-      color: {
-          {
-          primary_color|default: "#1e40af"
-        }
-      }
-
-      ;
+      color: {{ primary_color|default:"#1e40af" }};
       text-decoration: none;
     }
   </style>

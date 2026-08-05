@@ -22,7 +22,7 @@ from accounts.serializers import (
 from common.permissions import IsAdmin, IsAdminOrManager, IsManager, IsRecruiter, IsOwnerOrAdmin
 from audit.utils import log_action
 from audit.models import AuditLog
-from audit.serializers import AuditLogSerializer
+from audit.serializers import AuditLogListSerializer
 from jobs.models import Job, JobStatus
 from clients.models import Client, ClientStatus
 from candidates.models import Application, Candidate, CandidateStatus, InterviewSchedule
@@ -349,7 +349,7 @@ class UserViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = User.objects.filter(
-            role__in=[UserRole.MANAGER, UserRole.RECRUITER],
+            role__in=[UserRole.ADMIN, UserRole.MANAGER, UserRole.RECRUITER],
             organization=self.request.user.organization
         ).select_related('created_by')
 
@@ -426,7 +426,7 @@ class AdminDashboardView(APIView):
         top_recruiters = User.objects.filter(
             role=UserRole.RECRUITER, organization=org
         )[:5].values('id', 'name', 'avatar')
-        recent_audit_logs = AuditLogSerializer(
+        recent_audit_logs = AuditLogListSerializer(
             AuditLog.objects.filter(organization=org).order_by('-timestamp')[:5], 
             many=True
         ).data

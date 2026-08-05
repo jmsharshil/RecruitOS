@@ -1,6 +1,6 @@
 from audit.models import AuditLog
 
-def log_action(user, action, entity, entity_id, details, organization=None):
+def log_action(user, action, entity, entity_id, details, organization=None, old_value=None, new_value=None):
     """Log an action to the audit trail. organization can be explicitly provided for system/public actions (user=None)."""
     if organization is None and user is not None:
         organization = getattr(user, 'organization', None)
@@ -13,5 +13,7 @@ def log_action(user, action, entity, entity_id, details, organization=None):
         action=action,
         entity=entity,
         entity_id=str(entity_id),
-        details=details
+        details=details,
+        old_value=old_value,
+        new_value=new_value
     )

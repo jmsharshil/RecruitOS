@@ -42,15 +42,93 @@ def simulate_client_submission_email(application_id, client_email, recipient_nam
             'resume_link': '',  # Set to actual resume URL when hosted
             'plain_message': f"Please find attached the profile of {candidate.candidate_name} for {application.job.title}.",
         }
+        
+        # Build dynamic tracker fields based on assigned team member format
+        tracker_fields = []
+        if application.job.team_member_id:
+            try:
+                from clients.models import TeamMemberTrackerFormat
+                tracker_format = TeamMemberTrackerFormat.objects.get(
+                    client_id=application.job.client_id, 
+                    team_member_id=application.job.team_member_id, 
+                    is_deleted=False
+                )
+                for col in tracker_format.columns:
+                    val = ""
+                    if col == 'candidate_name': val = candidate.candidate_name
+                    elif col == 'email': val = candidate.email
+                    elif col == 'phone': val = candidate.contact
+                    elif col in ['total_experience', 'experience']: val = candidate.experience
+                    elif col == 'current_company': val = candidate.current_company
+                    elif col == 'current_designation': val = candidate.current_profile
+                    elif col in ['current_ctc', 'ctc']: val = f"₹{candidate.current_ctc}" if candidate.current_ctc else ""
+                    elif col in ['expected_ctc', 'expected ctc']: val = f"₹{candidate.expected_ctc}" if candidate.expected_ctc else ""
+                    elif col == 'notice_period': val = candidate.notice_period
+                    elif col in ['current_location', 'address']: val = candidate.current_location
+                    elif col == 'preferred_location': val = candidate.preferred_location
+                    elif col == 'hike': val = candidate.hike
+                    elif col == 'skills': val = ", ".join(candidate.skills) if isinstance(candidate.skills, list) else candidate.skills
+                    elif col == 'education': val = ", ".join([e.get('degree', '') if isinstance(e, dict) else str(e) for e in candidate.education]) if isinstance(candidate.education, list) else candidate.education
+                    else:
+                        custom_fields = application.tracker_custom_fields if isinstance(application.tracker_custom_fields, dict) else {}
+                        val = custom_fields.get(col, "")
+                    
+                    if isinstance(val, str) and val.strip().lower() == "not specified":
+                        val = ""
+                        
+                    label = col.replace('_', ' ').title()
+                    tracker_fields.append({'label': label, 'value': val})
+            except Exception as e:
+                logger.warning(f"Could not load tracker format for team member {application.job.team_member_id}: {e}")
+        
+        # Fallback to standard fields if no format found
+        if not tracker_fields:
+            tracker_fields = [
+                {'label': 'Candidate Name', 'value': candidate.candidate_name},
+                {'label': 'Current Role', 'value': candidate.current_profile},
+                {'label': 'Experience', 'value': candidate.experience},
+                {'label': 'Location', 'value': candidate.current_location},
+            ]
+            if candidate.current_ctc: tracker_fields.append({'label': 'Current CTC', 'value': f"₹{candidate.current_ctc}"})
+            if candidate.expected_ctc: tracker_fields.append({'label': 'Expected CTC', 'value': f"₹{candidate.expected_ctc}"})
+            if candidate.notice_period: tracker_fields.append({'label': 'Notice Period', 'value': candidate.notice_period})
+
+        context['tracker_fields'] = tracker_fields
+        
+        attachments = []
+        if candidate.resume:
+            try:
+                candidate.resume.seek(0)
+                resume_content = candidate.resume.read()
+                import os
+                resume_filename = os.path.basename(candidate.resume.name)
+                mimetype = 'application/pdf' if resume_filename.lower().endswith('.pdf') else 'application/octet-stream'
+                attachments.append((resume_filename, resume_content, mimetype))
+            except Exception as e:
+                logger.error(f"Could not read resume for client attachment: {e}")
+
+        print(f"==========> [DEBUG] Starting client submission email to: {client_email}")
+        
+        # Determine who sent it to set as the "From" address
+        from_email = None
+        if hasattr(application, 'client_submission') and application.client_submission.sent_by:
+            from_email = application.client_submission.sent_by.email
+        elif application.job.hiring_manager:
+            from_email = application.job.hiring_manager.email
+            
         send_org_email(
             organization=org,
             subject=f"Candidate Profile: {candidate.candidate_name} — {application.job.title}",
             template_name='client_submission',
             context=context,
             recipient_list=[client_email],
+            attachments=attachments,
+            from_email_override=from_email
         )
+        print(f"==========> [DEBUG] Client submission email SUCCESS for application {application_id} to {client_email}")
         logger.info(f"Client submission email sent for application {application_id} to {client_email}")
     except Exception as e:
+        print(f"==========> [DEBUG] Client submission email FAILED: {e}")
         logger.error(f"Client submission email failed for application {application_id}: {e}")
 
 
@@ -117,8 +195,11 @@ def simulate_resume_submission_notification(obj_id):
         candidate = application.candidate
         org = application.organization
         
+        manager = application.job.hiring_manager or application.job.created_by
+        
         # Prepare context for the email template
         context = {
+            'recipient_name': manager.name if manager else 'Manager',
             'candidate_name': candidate.candidate_name,
             'candidate_email': candidate.email,
             'contact': candidate.contact,
@@ -143,8 +224,38 @@ def simulate_resume_submission_notification(obj_id):
                 link=f"/candidates/{candidate.id}"
             )
 
+        # Notify the Manager (Hiring Manager or the Creator of the Job)
+        manager = application.job.hiring_manager or application.job.created_by
+        if manager and manager.email:
+            attachments = []
+            if candidate.resume:
+                try:
+                    candidate.resume.seek(0)
+                    resume_content = candidate.resume.read()
+                    import os
+                    resume_filename = os.path.basename(candidate.resume.name)
+                    # Use application/pdf for PDFs, but fallback for others
+                    mimetype = 'application/pdf' if resume_filename.lower().endswith('.pdf') else 'application/octet-stream'
+                    attachments.append((resume_filename, resume_content, mimetype))
+                except Exception as e:
+                    logger.error(f"Could not read resume for attachment: {e}")
 
+            try:
+                recruiter = application.created_by or application.candidate.uploaded_by
+                from_email = recruiter.email if recruiter else None
 
+                send_org_email(
+                    organization=org,
+                    subject=f"New CV Uploaded: {candidate.candidate_name} for '{application.job.title}'",
+                    template_name='resume_submission',
+                    context=context,
+                    recipient_list=[manager.email],
+                    from_email_override=from_email,
+                    attachments=attachments
+                )
+                logger.info(f"CV review email sent to manager {manager.email} for application {obj_id}")
+            except Exception as e:
+                logger.error(f"Failed to send CV review email to manager: {e}")
 
         logger.info(f"Resume submission notification and emails fired for application {obj_id}")
         return

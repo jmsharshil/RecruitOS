@@ -63,6 +63,18 @@ class Candidate(BaseModel):
     duplicate_of       = models.ForeignKey(
         'self', null=True, blank=True, on_delete=models.SET_NULL, related_name='duplicates'
     )
+    
+    # Salary & Availability fields on candidate level
+    current_ctc        = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    expected_ctc       = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    notice_period      = models.CharField(max_length=50, blank=True)
+    hike               = models.CharField(max_length=50, blank=True)
+    
+    # Additional common ATS fields
+    preferred_location = models.CharField(max_length=150, blank=True, null=True)
+    offer_in_hand      = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    reason_for_change  = models.TextField(blank=True, null=True)
+    dob                = models.DateField(null=True, blank=True)
 
 
 class Application(BaseModel):

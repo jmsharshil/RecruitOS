@@ -8,21 +8,14 @@
     <strong>{{ job_title }}</strong> position.
   </p>
 
-  <div class="info-box">
-    <p><strong>Candidate:</strong> {{ candidate_name }}</p>
-    <p><strong>Current Role:</strong> {{ current_profile }}</p>
-    <p><strong>Experience:</strong> {{ experience }}</p>
-    <p><strong>Location:</strong> {{ current_location }}</p>
-    {% if current_ctc %}
-      <p><strong>Current CTC:</strong> ₹{{ current_ctc }}</p>
-    {% endif %}
-    {% if expected_ctc %}
-      <p><strong>Expected CTC:</strong> ₹{{ expected_ctc }}</p>
-    {% endif %}
-    {% if notice_period %}
-      <p><strong>Notice Period:</strong> {{ notice_period }}</p>
-    {% endif %}
-  </div>
+  <table style="width: 100%; border-collapse: collapse; margin-top: 15px; border: 1px solid #e2e8f0; font-size: 14px;">
+    {% for field in tracker_fields %}
+    <tr {% if forloop.counter|divisibleby:2 %}style="background-color: #f8fafc;"{% endif %}>
+      <th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left; width: 30%;">{{ field.label }}</th>
+      <td style="padding: 10px; border: 1px solid #e2e8f0;">{{ field.value }}</td>
+    </tr>
+    {% endfor %}
+  </table>
 
   {% if resume_link %}
     <div class="btn-wrapper">

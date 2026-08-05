@@ -170,7 +170,7 @@ def get_org_branding(organization, template_key: str) -> dict:
 # Main send helper
 # ---------------------------------------------------------------------------
 
-def send_org_email(organization, subject: str, template_name: str, context: dict, recipient_list: list, from_email_override: str = None):
+def send_org_email(organization, subject: str, template_name: str, context: dict, recipient_list: list, from_email_override: str = None, attachments: list = None):
     """
     Render an email template with org branding and send via the org's SMTP
     (or Django default if not configured). **Enforces fallback to global
@@ -184,6 +184,7 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
     :param context: Template context dict (branding vars are auto-injected)
     :param recipient_list: List of recipient email strings
     :param from_email_override: Optional email to use in the From header
+    :param attachments: Optional list of tuples (filename, content, mimetype)
     """
     branding = get_org_branding(organization, template_name)
     context.update(branding)
@@ -220,6 +221,17 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
                 message.attach(part1)
                 message.attach(part2)
 
+                if attachments:
+                    from email.mime.base import MIMEBase
+                    from email import encoders
+                    for filename, content, mimetype in attachments:
+                        maintype, subtype = mimetype.split('/', 1)
+                        part = MIMEBase(maintype, subtype)
+                        part.set_payload(content)
+                        encoders.encode_base64(part)
+                        part.add_header('Content-Disposition', f'attachment; filename="{filename}"')
+                        message.attach(part)
+
                 raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
 
                 creds = Credentials(
@@ -254,13 +266,20 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
             connection=connection,
         )
         msg.attach_alternative(html_message, 'text/html')
+        
+        if attachments:
+            for filename, content, mimetype in attachments:
+                msg.attach(filename, content, mimetype)
+                
         msg.send()
+        print(f"==========> [DEBUG] Org SMTP send SUCCESS to {recipient_list}")
         logger.info(
             f"Email '{template_name}' sent to {recipient_list} "
             f"via org={getattr(organization, 'name', 'default')}"
         )
         return
     except (smtplib.SMTPAuthenticationError, smtplib.SMTPException, OSError) as exc:
+        print(f"==========> [DEBUG] Org SMTP FAILED (Auth/Connection): {exc}")
         logger.warning(
             f"Org SMTP failed for '{template_name}' to {recipient_list} "
             f"(org={getattr(organization, 'name', 'N/A')}): {exc}. "
@@ -281,12 +300,19 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
             connection=global_conn,
         )
         msg.attach_alternative(html_message, 'text/html')
+        
+        if attachments:
+            for filename, content, mimetype in attachments:
+                msg.attach(filename, content, mimetype)
+                
         msg.send()
+        print(f"==========> [DEBUG] Global Fallback SMTP send SUCCESS to {recipient_list}")
         logger.info(
             f"Email '{template_name}' sent to {recipient_list} "
             f"via GLOBAL fallback credentials (settings.EMAIL_*)"
         )
     except Exception as fallback_exc:
+        print(f"==========> [DEBUG] Global Fallback SMTP FAILED: {fallback_exc}")
         logger.error(
             f"Global fallback ALSO failed for '{template_name}' to {recipient_list}: {fallback_exc}"
         )
