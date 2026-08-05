@@ -109,7 +109,14 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / config('STATIC_ROOT', default='staticfiles')
 STATICFILES_DIRS = [BASE_DIR / 'static']
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / config('MEDIA_ROOT', default='media')
@@ -265,21 +272,15 @@ if USE_AZURE_MEDIA:
     AZURE_URL_EXPIRATION_SECS = int(os.environ.get("AZURE_URL_EXPIRATION_SECS", "3600"))
     AZURE_OVERWRITE_FILES = False
 
-    STORAGES = {
-        "default": {
-            "BACKEND": "storages.backends.azure_storage.AzureStorage",
-            "OPTIONS": {
-                "account_name": AZURE_ACCOUNT_NAME,
-                "account_key": AZURE_ACCOUNT_KEY,
-                "azure_container": AZURE_CONTAINER,
-                "overwrite_files": AZURE_OVERWRITE_FILES,
-                "expiration_secs": None,
-            }
-        },
-        "staticfiles": {
-            # keep whatever you use for static files (example with WhiteNoise)
-            "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
-        },
+    STORAGES["default"] = {
+        "BACKEND": "storages.backends.azure_storage.AzureStorage",
+        "OPTIONS": {
+            "account_name": AZURE_ACCOUNT_NAME,
+            "account_key": AZURE_ACCOUNT_KEY,
+            "azure_container": AZURE_CONTAINER,
+            "overwrite_files": AZURE_OVERWRITE_FILES,
+            "expiration_secs": None,
+        }
     }
 
     WHITENOISE_USE_FINDERS = True
