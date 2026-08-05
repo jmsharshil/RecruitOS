@@ -377,8 +377,11 @@ def background_parse_resume(user,candidate_id: str, organization_id: str = None)
             logger.warning(f"[TASK] No resume file for candidate {candidate_id}")
             return
 
-        resume_path = candidate.resume.path
-        parsed = parse_resume_task(resume_path, organization=organization)
+        candidate.resume.open('rb')
+        try:
+            parsed = parse_resume_task(candidate.resume, organization=organization)
+        finally:
+            candidate.resume.close()
 
         if isinstance(parsed, dict) and "error" in parsed:
             logger.warning(f"[TASK] Background parse returned error for candidate {candidate_id}: {parsed}")

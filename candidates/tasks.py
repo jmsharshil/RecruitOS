@@ -98,8 +98,8 @@ def simulate_client_submission_email(application_id, client_email, recipient_nam
         attachments = []
         if candidate.resume:
             try:
-                candidate.resume.seek(0)
-                resume_content = candidate.resume.read()
+                with candidate.resume.open('rb') as f:
+                    resume_content = f.read()
                 import os
                 resume_filename = os.path.basename(candidate.resume.name)
                 mimetype = 'application/pdf' if resume_filename.lower().endswith('.pdf') else 'application/octet-stream'
@@ -230,8 +230,8 @@ def simulate_resume_submission_notification(obj_id):
             attachments = []
             if candidate.resume:
                 try:
-                    candidate.resume.seek(0)
-                    resume_content = candidate.resume.read()
+                    with candidate.resume.open('rb') as f:
+                        resume_content = f.read()
                     import os
                     resume_filename = os.path.basename(candidate.resume.name)
                     # Use application/pdf for PDFs, but fallback for others
