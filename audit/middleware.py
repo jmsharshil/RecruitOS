@@ -101,6 +101,12 @@ class AuditLogMiddleware(MiddlewareMixin):
         else:
             ip_address = request.META.get('REMOTE_ADDR')
 
+        if ip_address:
+            if ip_address.startswith('['):
+                ip_address = ip_address.split(']')[0][1:]
+            elif ip_address.count(':') == 1:
+                ip_address = ip_address.split(':')[0]
+
         # User Agent
         user_agent = request.META.get('HTTP_USER_AGENT', '')
         
