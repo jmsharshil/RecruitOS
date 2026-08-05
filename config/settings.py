@@ -11,7 +11,7 @@ DEBUG = config('DEBUG', default=False, cast=bool)
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,recruitos-c9bga4b9d9hjc3gh.centralindia-01.azurewebsites.net', cast=Csv())
 
 # Frontend URLs for emails and CORS
-FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5173')
+FRONTEND_URL = config('FRONTEND_URL', default='https://recruitos.jmstech.co')
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -166,7 +166,7 @@ SPECTACULAR_SETTINGS = {
     },
 }
 
-FRONTEND_BASE_URL = os.getenv('FRONTEND_BASE_URL', 'http://localhost:5173')
+FRONTEND_BASE_URL = os.getenv('FRONTEND_BASE_URL', 'https://recruitos.jmstech.co')
 BASE_URL = os.getenv('BASE_URL', 'http://localhost:8000')
 
 # ═══════════════════════════════════════════════════════════════════════════════
