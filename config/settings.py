@@ -8,7 +8,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-dummy-key')
 DEBUG = config('DEBUG', default=False, cast=bool)
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv())
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,recruitos-c9bga4b9d9hjc3gh.centralindia-01.azurewebsites.net', cast=Csv())
 
 # Frontend URLs for emails and CORS
 FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5173')
