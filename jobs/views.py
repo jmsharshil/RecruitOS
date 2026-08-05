@@ -50,7 +50,7 @@ class JobViewSet(viewsets.ModelViewSet):
     def _notify_new_recruiters(self, job, new_recruiters):
         for recruiter in new_recruiters:
             try:
-                frontend_base = getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:5173')
+                frontend_base = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))
                 url = f"{frontend_base}/jobs/{job.id}"
                 context = {
                     'recruiter_name': recruiter.name,

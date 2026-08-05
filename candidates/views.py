@@ -656,7 +656,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
 def send_manager_bulk_review_email(recruiter, manager, apps, status, notes, from_email, org):
     manager_name = manager.name if manager else "A Manager"
     manager_email = manager.email if manager else ""
-    frontend_base = getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:5173')
+    frontend_base = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))
     
     app_list = []
     for app in apps:
@@ -695,7 +695,7 @@ def send_manager_review_email(application, from_email=None):
     manager_name = manager.name if manager else "A Manager"
     manager_email = manager.email if manager else ""
 
-    frontend_base = getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:5173')
+    frontend_base = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))
     url = f"{frontend_base}/candidates/{application.candidate.id}"
 
     context = {
@@ -725,7 +725,7 @@ def send_candidate_status_update_email(application, action, notes, recruiter):
     if not manager or not manager.email:
         return
 
-    frontend_base = getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:5173')
+    frontend_base = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))
     url = f"{frontend_base}/candidates/{application.candidate.id}"
 
     context = {

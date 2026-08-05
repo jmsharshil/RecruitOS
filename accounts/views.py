@@ -46,7 +46,7 @@ def send_set_pin_email(user, sender_email=None):
     # token = default_token_generator.make_token(user)
     # uid = urlsafe_base64_encode(force_bytes(user.pk))
     # url = f"{settings.FRONTEND_URL}/set-pin?uid={uid}&token={token}"
-    frontend_url = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:5173'))
+    frontend_url = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))
     url = f"{frontend_url}/login"
 
     org = getattr(user, 'organization', None)
@@ -81,9 +81,8 @@ def send_forgot_password_email(user):
     """
     token = default_token_generator.make_token(user)
     uid = urlsafe_base64_encode(force_bytes(user.pk))
-    domain = 'localhost:5173'  # Update to your frontend domain in production
-    protocol = 'http'
-    url = f"{protocol}://{domain}/set-pin?uid={uid}&token={token}"
+    frontend_url = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))
+    url = f"{frontend_url}/set-pin?uid={uid}&token={token}"
 
     org = getattr(user, 'organization', None)
     plain_message = (
@@ -97,8 +96,7 @@ def send_forgot_password_email(user):
         'user': user,
         'uid': uid,
         'token': token,
-        'domain': domain,
-        'protocol': protocol,
+        'domain': frontend_url,
         'url': url,
         'plain_message': plain_message,
     }
