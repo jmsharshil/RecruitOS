@@ -190,27 +190,16 @@ if not DEBUG:
             },
         },
         'handlers': {
-            # stdout → Azure Log Stream / App Service Diagnostics / local console
-            'console': {
-                'class': 'logging.StreamHandler',
-                'formatter': 'verbose',
-                'level': 'ERROR',
-            },
             'file': {
                 'level': 'ERROR',
                 'class': 'logging.FileHandler',
-                'filename': os.getenv('DJANGO_LOG_FILE', os.path.join(BASE_DIR, 'django_errors.log')),
+                'filename': '/home/site/wwwroot/django_errors.log',
                 'formatter': 'verbose',
             },
         },
         'loggers': {
-            '': {
-                'handlers': ['console', 'file'],
-                'level': 'ERROR',
-                'propagate': True,
-            },
             'django': {
-                'handlers': ['console', 'file'],
+                'handlers': ['file'],
                 'level': 'ERROR',
                 'propagate': False,
             },
