@@ -55,23 +55,25 @@ def simulate_client_submission_email(application_id, client_email, recipient_nam
                 )
                 for col in tracker_format.columns:
                     val = ""
-                    if col == 'candidate_name': val = candidate.candidate_name
-                    elif col == 'email': val = candidate.email
-                    elif col == 'phone': val = candidate.contact
-                    elif col in ['total_experience', 'experience']: val = candidate.experience
-                    elif col == 'current_company': val = candidate.current_company
-                    elif col == 'current_designation': val = candidate.current_profile
-                    elif col in ['current_ctc', 'ctc']: val = f"₹{candidate.current_ctc}" if candidate.current_ctc else ""
-                    elif col in ['expected_ctc', 'expected ctc']: val = f"₹{candidate.expected_ctc}" if candidate.expected_ctc else ""
-                    elif col == 'notice_period': val = candidate.notice_period
-                    elif col in ['current_location', 'address']: val = candidate.current_location
-                    elif col == 'preferred_location': val = candidate.preferred_location
-                    elif col == 'hike': val = candidate.hike
-                    elif col == 'skills': val = ", ".join(candidate.skills) if isinstance(candidate.skills, list) else candidate.skills
-                    elif col == 'education': val = ", ".join([e.get('degree', '') if isinstance(e, dict) else str(e) for e in candidate.education]) if isinstance(candidate.education, list) else candidate.education
+                    col_norm = col.strip().lower().replace(' ', '_')
+                    
+                    if col_norm == 'candidate_name': val = candidate.candidate_name
+                    elif col_norm == 'email': val = candidate.email
+                    elif col_norm in ['phone', 'contact']: val = candidate.contact
+                    elif col_norm in ['total_experience', 'experience']: val = candidate.experience
+                    elif col_norm == 'current_company': val = candidate.current_company
+                    elif col_norm in ['current_designation', 'current_profile']: val = candidate.current_profile
+                    elif col_norm in ['current_ctc', 'ctc']: val = f"₹{application.current_ctc}" if application.current_ctc else ""
+                    elif col_norm in ['expected_ctc', 'expected_ctc']: val = f"₹{application.expected_ctc}" if application.expected_ctc else ""
+                    elif col_norm == 'notice_period': val = application.notice_period
+                    elif col_norm in ['current_location', 'address']: val = candidate.current_location
+                    elif col_norm == 'preferred_location': val = candidate.preferred_location
+                    elif col_norm == 'hike': val = application.hike
+                    elif col_norm == 'skills': val = ", ".join(candidate.skills) if isinstance(candidate.skills, list) else candidate.skills
+                    elif col_norm == 'education': val = ", ".join([e.get('degree', '') if isinstance(e, dict) else str(e) for e in candidate.education]) if isinstance(candidate.education, list) else candidate.education
                     else:
                         custom_fields = application.tracker_custom_fields if isinstance(application.tracker_custom_fields, dict) else {}
-                        val = custom_fields.get(col, "")
+                        val = custom_fields.get(col, custom_fields.get(col_norm, ""))
                     
                     if isinstance(val, str) and val.strip().lower() == "not specified":
                         val = ""
@@ -89,9 +91,9 @@ def simulate_client_submission_email(application_id, client_email, recipient_nam
                 {'label': 'Experience', 'value': candidate.experience},
                 {'label': 'Location', 'value': candidate.current_location},
             ]
-            if candidate.current_ctc: tracker_fields.append({'label': 'Current CTC', 'value': f"₹{candidate.current_ctc}"})
-            if candidate.expected_ctc: tracker_fields.append({'label': 'Expected CTC', 'value': f"₹{candidate.expected_ctc}"})
-            if candidate.notice_period: tracker_fields.append({'label': 'Notice Period', 'value': candidate.notice_period})
+            if application.current_ctc: tracker_fields.append({'label': 'Current CTC', 'value': f"₹{application.current_ctc}"})
+            if application.expected_ctc: tracker_fields.append({'label': 'Expected CTC', 'value': f"₹{application.expected_ctc}"})
+            if application.notice_period: tracker_fields.append({'label': 'Notice Period', 'value': application.notice_period})
 
         context['tracker_fields'] = tracker_fields
         
@@ -107,7 +109,7 @@ def simulate_client_submission_email(application_id, client_email, recipient_nam
             except Exception as e:
                 logger.error(f"Could not read resume for client attachment: {e}")
 
-        print(f"==========> [DEBUG] Starting client submission email to: {client_email}")
+        # print(f"==========> [DEBUG] Starting client submission email to: {client_email}")
         
         # Determine who sent it to set as the "From" address
         from_email = None
@@ -116,6 +118,11 @@ def simulate_client_submission_email(application_id, client_email, recipient_nam
         elif application.job.hiring_manager:
             from_email = application.job.hiring_manager.email
             
+        # print(f"==========> [DEBUG] EMAIL ROUTING INFO:")
+        # print(f"==========> [DEBUG]   FROM (override): {from_email or 'Default Org Email'}")
+        # print(f"==========> [DEBUG]   TO (recipient): {client_email}")
+        # print(f"==========> [DEBUG]   ORG: {org.name}")
+
         send_org_email(
             organization=org,
             subject=f"Candidate Profile: {candidate.candidate_name} — {application.job.title}",
@@ -125,10 +132,10 @@ def simulate_client_submission_email(application_id, client_email, recipient_nam
             attachments=attachments,
             from_email_override=from_email
         )
-        print(f"==========> [DEBUG] Client submission email SUCCESS for application {application_id} to {client_email}")
+        # print(f"==========> [DEBUG] Client submission email SUCCESS for application {application_id} to {client_email}")
         logger.info(f"Client submission email sent for application {application_id} to {client_email}")
     except Exception as e:
-        print(f"==========> [DEBUG] Client submission email FAILED: {e}")
+        # print(f"==========> [DEBUG] Client submission email FAILED: {e}")
         logger.error(f"Client submission email failed for application {application_id}: {e}")
 
 
