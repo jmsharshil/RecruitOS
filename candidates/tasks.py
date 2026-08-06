@@ -57,16 +57,16 @@ def simulate_client_submission_email(application_id, client_email, recipient_nam
                     val = ""
                     col_norm = col.strip().lower().replace(' ', '_')
                     
-                    if col_norm == 'candidate_name': val = candidate.candidate_name
+                    if col_norm in ['candidate_name', 'name']: val = candidate.candidate_name
                     elif col_norm == 'email': val = candidate.email
-                    elif col_norm in ['phone', 'contact']: val = candidate.contact
-                    elif col_norm in ['total_experience', 'experience']: val = candidate.experience
+                    elif col_norm in ['phone', 'contact', 'contacts']: val = candidate.contact
+                    elif col_norm in ['total_experience', 'experience', 'total_exp']: val = candidate.experience
                     elif col_norm == 'current_company': val = candidate.current_company
-                    elif col_norm in ['current_designation', 'current_profile']: val = candidate.current_profile
-                    elif col_norm in ['current_ctc', 'ctc']: val = f"₹{application.current_ctc}" if application.current_ctc else ""
-                    elif col_norm in ['expected_ctc', 'expected_ctc']: val = f"₹{application.expected_ctc}" if application.expected_ctc else ""
+                    elif col_norm in ['current_designation', 'current_profile', 'designation', 'role']: val = candidate.current_profile
+                    elif col_norm in ['current_ctc', 'ctc', 'cctc']: val = f"₹{application.current_ctc}" if application.current_ctc else ""
+                    elif col_norm in ['expected_ctc', 'expected_ctc', 'ectc']: val = f"₹{application.expected_ctc}" if application.expected_ctc else ""
                     elif col_norm == 'notice_period': val = application.notice_period
-                    elif col_norm in ['current_location', 'address']: val = candidate.current_location
+                    elif col_norm in ['current_location', 'address', 'location']: val = candidate.current_location
                     elif col_norm == 'preferred_location': val = candidate.preferred_location
                     elif col_norm == 'hike': val = application.hike
                     elif col_norm == 'skills': val = ", ".join(candidate.skills) if isinstance(candidate.skills, list) else candidate.skills

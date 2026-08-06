@@ -272,37 +272,39 @@ class TeamMemberTrackerFormatViewSet(viewsets.ModelViewSet):
                 "application_id": str(app.id)
             }
             for col in columns:
-                if col == 'candidate_name':
+                col_norm = col.strip().lower().replace(' ', '_')
+                
+                if col_norm in ['candidate_name', 'name']:
                     row[col] = candidate.candidate_name
-                elif col == 'email':
+                elif col_norm == 'email':
                     row[col] = candidate.email
-                elif col == 'phone':
+                elif col_norm in ['phone', 'contact', 'contacts']:
                     row[col] = candidate.contact
-                elif col == 'total_experience' or col == 'experience':
+                elif col_norm in ['total_experience', 'experience', 'total_exp']:
                     row[col] = candidate.experience if candidate.experience else ""
-                elif col == 'current_company':
+                elif col_norm == 'current_company':
                     row[col] = candidate.current_company
-                elif col == 'current_designation':
+                elif col_norm in ['current_designation', 'current_profile', 'designation', 'role']:
                     row[col] = candidate.current_profile
-                elif col == 'current_ctc' or col == 'ctc':
+                elif col_norm in ['current_ctc', 'ctc', 'cctc']:
                     row[col] = str(app.current_ctc) if app.current_ctc else ""
-                elif col == 'expected_ctc' or col == 'expected ctc':
+                elif col_norm in ['expected_ctc', 'ectc']:
                     row[col] = str(app.expected_ctc) if app.expected_ctc else ""
-                elif col == 'notice_period':
+                elif col_norm == 'notice_period':
                     row[col] = app.notice_period
-                elif col == 'current_location' or col == 'address':
+                elif col_norm in ['current_location', 'address', 'location']:
                     row[col] = candidate.current_location
-                elif col == 'preferred_location':
+                elif col_norm == 'preferred_location':
                     row[col] = candidate.preferred_location
-                elif col == 'hike':
+                elif col_norm == 'hike':
                     row[col] = app.hike if hasattr(app, 'hike') else ""
-                elif col == 'skills':
+                elif col_norm == 'skills':
                     row[col] = ", ".join(candidate.skills) if isinstance(candidate.skills, list) else candidate.skills
-                elif col == 'education':
-                    row[col] = candidate.education
+                elif col_norm == 'education':
+                    row[col] = ", ".join([e.get('degree', '') if isinstance(e, dict) else str(e) for e in candidate.education]) if isinstance(candidate.education, list) else candidate.education
                 else:
                     custom_fields = app.tracker_custom_fields if isinstance(app.tracker_custom_fields, dict) else {}
-                    row[col] = custom_fields.get(col, "")
+                    row[col] = custom_fields.get(col, custom_fields.get(col_norm, ""))
                 
                 # Replace 'Not specified' with blank
                 if isinstance(row.get(col), str) and row.get(col).strip().lower() == "not specified":
@@ -352,78 +354,81 @@ class TeamMemberTrackerFormatViewSet(viewsets.ModelViewSet):
                 cand_modified = False
 
                 standard_keys = {
-                    'application_id', 'candidate_name', 'email', 'phone', 
-                    'total_experience', 'experience', 'current_company', 
-                    'current_designation', 'current_ctc', 'ctc', 
-                    'expected_ctc', 'expected ctc', 'notice_period', 
-                    'current_location', 'address', 'preferred_location', 'hike', 'skills', 'education'
+                    'application_id', 'candidate_name', 'name', 'email', 'phone', 'contact', 'contacts', 
+                    'total_experience', 'experience', 'total_exp', 'current_company', 
+                    'current_designation', 'current_profile', 'designation', 'role', 'current_ctc', 'ctc', 'cctc', 
+                    'expected_ctc', 'ectc', 'notice_period', 
+                    'current_location', 'address', 'location', 'preferred_location', 'hike', 'skills', 'education'
                 }
+                
+                normalized_item = {k.strip().lower().replace(' ', '_'): v for k, v in item.items()}
 
                 # Handle all dynamic fields
                 if not isinstance(app.tracker_custom_fields, dict):
                     app.tracker_custom_fields = {}
                     
                 for key, val in item.items():
-                    if key not in standard_keys:
+                    key_norm = key.strip().lower().replace(' ', '_')
+                    if key_norm not in standard_keys:
                         app.tracker_custom_fields[key] = val
                         app_modified = True
                         new_columns.add(key)
 
                 # Application fields
-                if 'current_ctc' in item or 'ctc' in item:
-                    ctc_val = item.get('current_ctc') or item.get('ctc')
+                if 'current_ctc' in normalized_item or 'ctc' in normalized_item or 'cctc' in normalized_item:
+                    ctc_val = normalized_item.get('current_ctc') or normalized_item.get('ctc') or normalized_item.get('cctc')
                     try:
                         app.current_ctc = float(ctc_val) if ctc_val else None
                         app_modified = True
                     except ValueError: pass
-                if 'expected_ctc' in item or 'expected ctc' in item:
-                    val = item.get('expected_ctc') or item.get('expected ctc')
+                if 'expected_ctc' in normalized_item or 'ectc' in normalized_item:
+                    val = normalized_item.get('expected_ctc') or normalized_item.get('ectc')
                     try:
                         app.expected_ctc = float(val) if val else None
                         app_modified = True
                     except ValueError: pass
-                if 'hike' in item and hasattr(app, 'hike'):
-                    app.hike = item['hike']
+                if 'hike' in normalized_item and hasattr(app, 'hike'):
+                    app.hike = normalized_item['hike']
                     app_modified = True
-                if 'notice_period' in item:
-                    app.notice_period = item['notice_period']
+                if 'notice_period' in normalized_item:
+                    app.notice_period = normalized_item['notice_period']
                     app_modified = True
 
                 # Candidate fields
-                if 'candidate_name' in item:
-                    candidate.candidate_name = item['candidate_name']
+                if 'candidate_name' in normalized_item or 'name' in normalized_item:
+                    candidate.candidate_name = normalized_item.get('candidate_name') or normalized_item.get('name')
                     cand_modified = True
-                if 'email' in item:
-                    candidate.email = item['email']
+                if 'email' in normalized_item:
+                    candidate.email = normalized_item['email']
                     cand_modified = True
-                if 'phone' in item:
-                    candidate.contact = item['phone']
+                if 'phone' in normalized_item or 'contact' in normalized_item or 'contacts' in normalized_item:
+                    candidate.contact = normalized_item.get('phone') or normalized_item.get('contact') or normalized_item.get('contacts')
                     cand_modified = True
-                if 'total_experience' in item or 'experience' in item:
-                    candidate.experience = item.get('total_experience') or item.get('experience')
+                if 'total_experience' in normalized_item or 'experience' in normalized_item or 'total_exp' in normalized_item:
+                    candidate.experience = normalized_item.get('total_experience') or normalized_item.get('experience') or normalized_item.get('total_exp')
                     cand_modified = True
-                if 'current_company' in item:
-                    candidate.current_company = item['current_company']
+                if 'current_company' in normalized_item:
+                    candidate.current_company = normalized_item['current_company']
                     cand_modified = True
-                if 'current_designation' in item:
-                    candidate.current_profile = item['current_designation']
+                if 'current_designation' in normalized_item or 'current_profile' in normalized_item or 'designation' in normalized_item or 'role' in normalized_item:
+                    candidate.current_profile = normalized_item.get('current_designation') or normalized_item.get('current_profile') or normalized_item.get('designation') or normalized_item.get('role')
                     cand_modified = True
-                if 'current_location' in item or 'address' in item:
-                    candidate.current_location = item.get('current_location') or item.get('address')
+                if 'current_location' in normalized_item or 'address' in normalized_item or 'location' in normalized_item:
+                    candidate.current_location = normalized_item.get('current_location') or normalized_item.get('address') or normalized_item.get('location')
                     cand_modified = True
-                if 'preferred_location' in item:
-                    candidate.preferred_location = item['preferred_location']
+                if 'preferred_location' in normalized_item:
+                    candidate.preferred_location = normalized_item['preferred_location']
                     cand_modified = True
-                if 'skills' in item:
+                if 'skills' in normalized_item:
                     # Depending on how skills are stored, simple split if it's a string
-                    skills_val = item['skills']
+                    skills_val = normalized_item['skills']
                     if isinstance(skills_val, str):
                         candidate.skills = [s.strip() for s in skills_val.split(',') if s.strip()]
                     elif isinstance(skills_val, list):
                         candidate.skills = skills_val
                     cand_modified = True
-                if 'education' in item:
-                    candidate.education = item['education']
+                if 'education' in normalized_item:
+                    candidate.education = normalized_item['education']
                     cand_modified = True
 
                 if app_modified:
