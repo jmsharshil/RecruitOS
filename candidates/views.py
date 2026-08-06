@@ -94,6 +94,18 @@ class CandidateViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         candidate = serializer.save()
         log_action(self.request.user, 'updated', 'Candidate', candidate.id, f"Updated candidate '{candidate.candidate_name}'")
+        
+        # Sync fields to all related applications so the tracker stays updated
+        candidate.applications.update(
+            current_ctc=candidate.current_ctc,
+            expected_ctc=candidate.expected_ctc,
+            notice_period=candidate.notice_period,
+            hike=candidate.hike,
+            offer_in_hand=candidate.offer_in_hand,
+            reason_for_change=candidate.reason_for_change,
+            preferred_location=candidate.preferred_location,
+            dob=candidate.dob
+        )
 
     def perform_destroy(self, instance):
         instance.is_deleted = True

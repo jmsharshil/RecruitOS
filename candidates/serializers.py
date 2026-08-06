@@ -281,6 +281,17 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
             'organization', 'uploaded_by',
         ]
 
+    def to_internal_value(self, data):
+        # Handle empty strings for Decimal fields sent by the frontend
+        mutable_data = data.copy() if hasattr(data, 'copy') else dict(data)
+        for field in ['current_ctc', 'expected_ctc']:
+            if field in mutable_data and mutable_data[field] in ["", None]:
+                mutable_data[field] = 0
+        if 'offer_in_hand' in mutable_data and mutable_data['offer_in_hand'] in ["", None]:
+            mutable_data['offer_in_hand'] = None
+            
+        return super().to_internal_value(mutable_data)
+
     def update(self, instance, validated_data):
         # Automatically keep profile_name synced with candidate_name if it's updated
         if 'candidate_name' in validated_data and 'profile_name' not in validated_data:
