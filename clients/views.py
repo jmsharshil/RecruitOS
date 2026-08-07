@@ -287,17 +287,22 @@ class TeamMemberTrackerFormatViewSet(viewsets.ModelViewSet):
                 elif col_norm in ['current_designation', 'current_profile', 'designation', 'role']:
                     row[col] = candidate.current_profile
                 elif col_norm in ['current_ctc', 'ctc', 'cctc']:
-                    row[col] = str(app.current_ctc) if app.current_ctc else ""
+                    val = app.current_ctc if app.current_ctc else candidate.current_ctc
+                    row[col] = str(val) if val else ""
                 elif col_norm in ['expected_ctc', 'ectc']:
-                    row[col] = str(app.expected_ctc) if app.expected_ctc else ""
+                    val = app.expected_ctc if app.expected_ctc else candidate.expected_ctc
+                    row[col] = str(val) if val else ""
                 elif col_norm == 'notice_period':
-                    row[col] = app.notice_period
+                    row[col] = app.notice_period if app.notice_period else candidate.notice_period
                 elif col_norm in ['current_location', 'address', 'location']:
                     row[col] = candidate.current_location
                 elif col_norm == 'preferred_location':
-                    row[col] = candidate.preferred_location
+                    row[col] = app.preferred_location if app.preferred_location else candidate.preferred_location
                 elif col_norm == 'hike':
-                    row[col] = app.hike if hasattr(app, 'hike') else ""
+                    val = app.hike if app.hike else candidate.hike
+                    row[col] = val if val else ""
+                elif col_norm in ['position_applied_for', 'position', 'job_title']:
+                    row[col] = app.job.title if app.job else ""
                 elif col_norm == 'skills':
                     row[col] = ", ".join(candidate.skills) if isinstance(candidate.skills, list) else candidate.skills
                 elif col_norm == 'education':
