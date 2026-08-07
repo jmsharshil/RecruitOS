@@ -240,4 +240,8 @@ class JobViewSet(viewsets.ModelViewSet):
             else:
                 pipeline_data[app.status] = [app_data]
                 
-        return Response(pipeline_data)
+        job_data = JobDetailSerializer(job, context={'request': request}).data
+        return Response({
+            "job": job_data,
+            "pipeline": pipeline_data
+        })
