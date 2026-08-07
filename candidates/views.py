@@ -63,24 +63,10 @@ class CandidateViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = Candidate.objects.filter(
+        return Candidate.objects.filter(
             is_deleted=False,
             organization=user.organization
         )
-        if user.role == UserRole.ADMIN:
-            return qs
-        elif user.role == UserRole.MANAGER:
-            return qs.filter(
-                Q(applications__job__created_by=user) | Q(applications__job__hiring_manager=user) | Q(applications__isnull=True)
-            ).distinct()
-        elif user.role == UserRole.RECRUITER:
-            # Recruiters see full org talent pool + candidates linked to their assigned jobs
-            # (consistent with ApplicationViewSet and export)
-            return qs.filter(
-                Q(applications__isnull=True) |
-                Q(applications__job__assigned_recruiters=user)
-            ).distinct()
-        return qs.none()
 
     def perform_create(self, serializer):
         candidate = serializer.save(
