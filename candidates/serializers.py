@@ -176,11 +176,17 @@ class ApplicationDetailSerializer(serializers.ModelSerializer):
         write_only=True, queryset=Stage.objects.all(), source='current_stage',
         required=False, allow_null=True
     )
+    notes = serializers.CharField(source='feedback', required=False, allow_blank=True)
 
     class Meta:
         model = Application
         fields = '__all__'
         read_only_fields = ['id', 'organization', 'is_deleted', 'manager_review_status', 'manager_review_notes']
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret.pop('feedback', None)
+        return ret
 
     def get_interview_schedule(self, obj):
         try:

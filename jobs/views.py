@@ -215,10 +215,21 @@ class JobViewSet(viewsets.ModelViewSet):
         job = self.get_object()
         from candidates.models import Application, CandidateStatus
         
-        apps = Application.objects.filter(job=job, is_deleted=False).select_related('candidate')
+        allowed_stages = [
+            CandidateStatus.SENT_TO_CLIENT,
+            CandidateStatus.INTERVIEW_ALIGN,
+            CandidateStatus.SELECT,
+            CandidateStatus.OFFERED,
+            CandidateStatus.JOINED,
+            CandidateStatus.ON_HOLD,
+            CandidateStatus.REJECTED,
+            CandidateStatus.BACKOUT,
+        ]
+        
+        apps = Application.objects.filter(job=job, is_deleted=False, status__in=allowed_stages).select_related('candidate')
         
         pipeline_data = {
-            choice[0]: [] for choice in CandidateStatus.choices
+            stage: [] for stage in allowed_stages
         }
         
         for app in apps:
@@ -235,10 +246,7 @@ class JobViewSet(viewsets.ModelViewSet):
                 "status": app.status
             }
             
-            if app.status in pipeline_data:
-                pipeline_data[app.status].append(app_data)
-            else:
-                pipeline_data[app.status] = [app_data]
+            pipeline_data[app.status].append(app_data)
                 
         job_data = JobDetailSerializer(job, context={'request': request}).data
         return Response({
