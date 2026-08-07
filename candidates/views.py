@@ -331,9 +331,25 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         return qs.none()
 
     def perform_create(self, serializer):
+        # We fetch candidate to inherit default values
+        candidate = serializer.validated_data.get('candidate')
+        
+        # Pull defaults from candidate if not provided in the payload
+        defaults = {}
+        if candidate:
+            if 'current_ctc' not in serializer.validated_data: defaults['current_ctc'] = candidate.current_ctc
+            if 'expected_ctc' not in serializer.validated_data: defaults['expected_ctc'] = candidate.expected_ctc
+            if 'notice_period' not in serializer.validated_data: defaults['notice_period'] = candidate.notice_period
+            if 'hike' not in serializer.validated_data: defaults['hike'] = candidate.hike
+            if 'offer_in_hand' not in serializer.validated_data: defaults['offer_in_hand'] = candidate.offer_in_hand
+            if 'reason_for_change' not in serializer.validated_data: defaults['reason_for_change'] = candidate.reason_for_change
+            if 'preferred_location' not in serializer.validated_data: defaults['preferred_location'] = candidate.preferred_location
+            if 'dob' not in serializer.validated_data: defaults['dob'] = candidate.dob
+
         application = serializer.save(
             organization=self.request.user.organization,
-            created_by=self.request.user
+            created_by=self.request.user,
+            **defaults
         )
         log_action(
             self.request.user,
