@@ -263,7 +263,7 @@ class TeamMemberTrackerFormatViewSet(viewsets.ModelViewSet):
             )
             columns = tracker_format.columns
         except TeamMemberTrackerFormat.DoesNotExist:
-            return Response({"error": "Tracker format not found for this team member."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "Tracker format not found for this team member , please create tracker for this team member first "}, status=status.HTTP_404_NOT_FOUND)
         
         tracker_preview = []
         for app in apps:
