@@ -387,6 +387,17 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         instance.save()
         log_action(self.request.user, 'deleted', 'Application', instance.id, f"Deleted application for {instance.candidate.candidate_name}")
 
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        
+        if serializer.is_valid():
+            self.perform_update(serializer)
+            return Response({"message": "Stage changed successfully"})
+            
+        return Response(serializer.errors, status=400)
+
     @action(detail=True, methods=['post'], url_path='move-stage')
     def move_stage(self, request, pk=None):
         application = self.get_object()
