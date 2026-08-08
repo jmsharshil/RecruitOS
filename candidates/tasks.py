@@ -140,6 +140,132 @@ def simulate_client_submission_email(application_id, client_email, recipient_nam
 
 
 @run_in_thread
+def simulate_bulk_client_submission_email(application_ids, client_email, recipient_name=None):
+    """Send a bulk client submission email containing a tracker of multiple candidates."""
+    try:
+        if not application_ids:
+            return
+
+        applications = Application.objects.select_related(
+            'candidate', 'job', 'job__client', 'client_submission__sent_by', 'organization'
+        ).filter(id__in=application_ids)
+
+        if not applications.exists():
+            return
+
+        first_app = applications.first()
+        org = first_app.organization
+        job = first_app.job
+
+        if not recipient_name:
+            recipient_name = job.client.company_name if job.client else client_email
+
+        from accounts.email_utils import send_org_email
+        
+        context = {
+            'client_name': recipient_name,
+            'job_title': job.title,
+            'org_name': org.name,
+            'sent_by': getattr(first_app, 'client_submission', None) and
+                       getattr(first_app.client_submission.sent_by, 'name', 'RecruitOS') or 'RecruitOS',
+        }
+
+        # Build headers
+        tracker_headers = []
+        columns_to_extract = []
+        
+        if job.team_member_id:
+            try:
+                from clients.models import TeamMemberTrackerFormat
+                tracker_format = TeamMemberTrackerFormat.objects.get(
+                    client_id=job.client_id, 
+                    team_member_id=job.team_member_id, 
+                    is_deleted=False
+                )
+                columns_to_extract = tracker_format.columns
+                tracker_headers = [col.replace('_', ' ').title() for col in columns_to_extract]
+            except Exception as e:
+                logger.warning(f"Could not load tracker format for team member {job.team_member_id}: {e}")
+
+        if not tracker_headers:
+            columns_to_extract = ['candidate_name', 'current_profile', 'experience', 'current_location', 'current_ctc', 'expected_ctc', 'notice_period']
+            tracker_headers = ['Candidate Name', 'Current Role', 'Experience', 'Location', 'Current CTC', 'Expected CTC', 'Notice Period']
+
+        candidates_data = []
+        attachments = []
+
+        for app in applications:
+            candidate = app.candidate
+            row = []
+            
+            for col in columns_to_extract:
+                val = ""
+                col_norm = col.strip().lower().replace(' ', '_')
+                
+                if col_norm in ['candidate_name', 'name']: val = candidate.candidate_name
+                elif col_norm == 'email': val = candidate.email
+                elif col_norm in ['phone', 'contact', 'contacts']: val = candidate.contact
+                elif col_norm in ['total_experience', 'experience', 'total_exp']: val = candidate.experience
+                elif col_norm == 'current_company': val = candidate.current_company
+                elif col_norm in ['current_designation', 'current_profile', 'designation', 'role']: val = candidate.current_profile
+                elif col_norm in ['current_ctc', 'ctc', 'cctc']: val = f"₹{app.current_ctc}" if app.current_ctc else ""
+                elif col_norm in ['expected_ctc', 'ectc']: val = f"₹{app.expected_ctc}" if app.expected_ctc else ""
+                elif col_norm == 'notice_period': val = app.notice_period
+                elif col_norm in ['current_location', 'address', 'location']: val = candidate.current_location
+                elif col_norm == 'preferred_location': val = candidate.preferred_location
+                elif col_norm == 'hike': val = app.hike
+                elif col_norm == 'skills': val = ", ".join(candidate.skills) if isinstance(candidate.skills, list) else candidate.skills
+                elif col_norm == 'education': val = ", ".join([e.get('degree', '') if isinstance(e, dict) else str(e) for e in candidate.education]) if isinstance(candidate.education, list) else candidate.education
+                else:
+                    custom_fields = app.tracker_custom_fields if isinstance(app.tracker_custom_fields, dict) else {}
+                    val = custom_fields.get(col, custom_fields.get(col_norm, ""))
+                
+                if isinstance(val, str) and val.strip().lower() == "not specified":
+                    val = ""
+                    
+                row.append(val)
+            
+            candidates_data.append(row)
+
+            if candidate.resume:
+                try:
+                    with candidate.resume.open('rb') as f:
+                        resume_content = f.read()
+                    import os
+                    resume_filename = os.path.basename(candidate.resume.name)
+                    safe_name = candidate.candidate_name.replace(' ', '_')
+                    resume_filename = f"{safe_name}_{resume_filename}"
+                    mimetype = 'application/pdf' if resume_filename.lower().endswith('.pdf') else 'application/octet-stream'
+                    attachments.append((resume_filename, resume_content, mimetype))
+                except Exception as e:
+                    logger.error(f"Could not read resume for candidate {candidate.id}: {e}")
+
+        context['tracker_headers'] = tracker_headers
+        context['candidates_data'] = candidates_data
+
+        from_email = None
+        if hasattr(first_app, 'client_submission') and first_app.client_submission.sent_by:
+            from_email = first_app.client_submission.sent_by.email
+        elif first_app.job.hiring_manager:
+            from_email = first_app.job.hiring_manager.email
+
+        subject_count = f"{len(applications)} Candidate Profiles" if len(applications) > 1 else "1 Candidate Profile"
+        
+        send_org_email(
+            organization=org,
+            subject=f"{subject_count} for {job.title}",
+            template_name='bulk_client_submission',
+            context=context,
+            recipient_list=[client_email],
+            attachments=attachments,
+            from_email_override=from_email
+        )
+        logger.info(f"Bulk client submission email sent for {len(applications)} apps to {client_email}")
+    except Exception as e:
+        logger.error(f"Bulk client submission email failed: {e}")
+
+
+@run_in_thread
 def simulate_interview_reminder(interview_schedule_id):
     """Send interview reminder notification (in-app) + email via org SMTP."""
     try:

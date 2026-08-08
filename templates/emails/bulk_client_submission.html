@@ -1,0 +1,42 @@
+{% extends "emails/base_email.html" %}
+{% block title %}Candidate Profiles — {{ job_title }}{% endblock %}
+
+{% block content %}
+  <p>Dear <strong>{{ client_name }}</strong>,</p>
+  <p>
+    We are pleased to share shortlisted candidate profiles for the
+    <strong>{{ job_title }}</strong> position.
+  </p>
+
+  <div style="overflow-x: auto;">
+    <table style="width: 100%; border-collapse: collapse; margin-top: 15px; border: 1px solid #e2e8f0; font-size: 13px;">
+      <thead>
+        <tr style="background-color: #f1f5f9;">
+          {% for header in tracker_headers %}
+          <th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left; white-space: nowrap;">{{ header }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in candidates_data %}
+        <tr {% if forloop.counter|divisibleby:2 %}style="background-color: #f8fafc;"{% endif %}>
+          {% for value in row %}
+          <td style="padding: 10px; border: 1px solid #e2e8f0;">{{ value }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="divider" style="margin: 20px 0; border-top: 1px solid #e2e8f0;"></div>
+
+  <p>
+    Please find the candidates' resumes attached to this email.
+    Review the profiles at your earliest convenience and share your feedback.
+    Our team is available to arrange interviews at your preferred time.
+  </p>
+  <p>
+    Submitted by: <strong>{{ sent_by }}</strong> from <strong>{{ org_name }}</strong>
+  </p>
+{% endblock %}

@@ -453,6 +453,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         from django.utils import timezone
         from datetime import timedelta
         three_months_ago = timezone.now() - timedelta(days=90)
+        
+        valid_applications_by_client = {}
 
         for application in applications:
             if application.job.hiring_for != 'client':
@@ -503,9 +505,17 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                             break
                 
                 if client_email:
-                    simulate_client_submission_email(application.id, client_email, recipient_name)
+                    group_key = (application.job.id, client_email, recipient_name)
+                    if group_key not in valid_applications_by_client:
+                        valid_applications_by_client[group_key] = []
+                    valid_applications_by_client[group_key].append(application.id)
             
             updated_count += 1
+
+        if valid_applications_by_client:
+            from candidates.tasks import simulate_bulk_client_submission_email
+            for (job_id, client_email, recipient_name), app_ids in valid_applications_by_client.items():
+                simulate_bulk_client_submission_email(app_ids, client_email, recipient_name)
 
         return Response({
             "message": f"Successfully sent {updated_count} applications to client.",
