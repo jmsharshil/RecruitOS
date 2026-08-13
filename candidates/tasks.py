@@ -436,12 +436,20 @@ def simulate_resume_submission_notification(obj_id):
         print(f"==========> [DEBUG] Pool notification error: {e}")
 
 @run_in_thread
-def send_interview_approval_request_email(schedule_id):
+def send_interview_approval_request_email(schedule_id, action_user_id=None):
     try:
         schedule = InterviewSchedule.objects.select_related('application__candidate', 'application__job', 'organization').get(id=schedule_id)
         manager = schedule.application.job.hiring_manager or schedule.application.job.created_by
         if manager and manager.email:
             from accounts.email_utils import send_org_email
+            
+            from_email = None
+            if action_user_id:
+                from accounts.models import User
+                action_user = User.objects.filter(id=action_user_id).first()
+                if action_user:
+                    from_email = action_user.email
+
             context = {
                 'manager_name': manager.name,
                 'candidate_name': schedule.application.candidate.candidate_name,
@@ -456,17 +464,26 @@ def send_interview_approval_request_email(schedule_id):
                 template_name='generic_email',
                 context=context,
                 recipient_list=[manager.email],
+                from_email_override=from_email,
             )
     except Exception as e:
         logger.error(f"Failed to send interview approval request email: {e}")
 
 @run_in_thread
-def send_interview_approval_result_email(schedule_id):
+def send_interview_approval_result_email(schedule_id, action_user_id=None):
     try:
         schedule = InterviewSchedule.objects.select_related('application__candidate', 'application__job', 'organization').get(id=schedule_id)
         recruiter = schedule.application.created_by or schedule.application.candidate.uploaded_by
         if recruiter and recruiter.email:
             from accounts.email_utils import send_org_email
+
+            from_email = None
+            if action_user_id:
+                from accounts.models import User
+                action_user = User.objects.filter(id=action_user_id).first()
+                if action_user:
+                    from_email = action_user.email
+
             context = {
                 'recruiter_name': recruiter.name,
                 'candidate_name': schedule.application.candidate.candidate_name,
@@ -479,17 +496,26 @@ def send_interview_approval_result_email(schedule_id):
                 template_name='generic_email',
                 context=context,
                 recipient_list=[recruiter.email],
+                from_email_override=from_email,
             )
     except Exception as e:
         logger.error(f"Failed to send interview approval result email: {e}")
 
 @run_in_thread
-def simulate_client_interview_details_email(schedule_id):
+def simulate_client_interview_details_email(schedule_id, action_user_id=None):
     try:
         schedule = InterviewSchedule.objects.select_related('application__candidate', 'application__job', 'organization').get(id=schedule_id)
         client = schedule.application.job.client
         if client and client.email:
             from accounts.email_utils import send_org_email
+
+            from_email = None
+            if action_user_id:
+                from accounts.models import User
+                action_user = User.objects.filter(id=action_user_id).first()
+                if action_user:
+                    from_email = action_user.email
+
             context = {
                 'client_name': client.company_name,
                 'candidate_name': schedule.application.candidate.candidate_name,
@@ -504,17 +530,26 @@ def simulate_client_interview_details_email(schedule_id):
                 template_name='generic_email',
                 context=context,
                 recipient_list=[client.email],
+                from_email_override=from_email,
             )
     except Exception as e:
         logger.error(f"Failed to send client interview details email: {e}")
 
 @run_in_thread
-def send_attendance_update_email(schedule_id):
+def send_attendance_update_email(schedule_id, action_user_id=None):
     try:
         schedule = InterviewSchedule.objects.select_related('application__candidate', 'application__job', 'organization').get(id=schedule_id)
         manager = schedule.application.job.hiring_manager or schedule.application.job.created_by
         if manager and manager.email:
             from accounts.email_utils import send_org_email
+
+            from_email = None
+            if action_user_id:
+                from accounts.models import User
+                action_user = User.objects.filter(id=action_user_id).first()
+                if action_user:
+                    from_email = action_user.email
+
             context = {
                 'manager_name': manager.name,
                 'candidate_name': schedule.application.candidate.candidate_name,
@@ -527,6 +562,7 @@ def send_attendance_update_email(schedule_id):
                 template_name='generic_email',
                 context=context,
                 recipient_list=[manager.email],
+                from_email_override=from_email,
             )
     except Exception as e:
         logger.error(f"Failed to send attendance update email: {e}")

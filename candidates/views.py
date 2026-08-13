@@ -585,7 +585,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             )
             
             # Send approval request to manager instead of immediate reminder
-            send_interview_approval_request_email(schedule.id)
+            send_interview_approval_request_email(schedule.id, action_user_id=request.user.id)
 
             return Response(InterviewScheduleSerializer(schedule).data, status=201)
         return Response(serializer.errors, status=400)
@@ -608,7 +608,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 notes=f"Manager {status} the interview schedule.",
                 organization=application.organization
             )
-            send_interview_approval_result_email(schedule.id)
+            send_interview_approval_result_email(schedule.id, action_user_id=request.user.id)
             if status == 'approved':
                 simulate_interview_reminder(schedule.id)
             return Response({"message": f"Interview schedule {status}"})
@@ -620,7 +620,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         application = self.get_object()
         try:
             schedule = application.interview_schedule
-            simulate_client_interview_details_email(schedule.id)
+            simulate_client_interview_details_email(schedule.id, action_user_id=request.user.id)
             log_action(request.user, 'sent', 'InterviewSchedule', schedule.id, f"Sent interview details to client for {application.candidate.candidate_name}")
             return Response({"message": "Interview details sent to client successfully"})
         except InterviewSchedule.DoesNotExist:
@@ -645,7 +645,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 notes=f"Interview attendance updated to {status}.",
                 organization=application.organization
             )
-            send_attendance_update_email(schedule.id)
+            send_attendance_update_email(schedule.id, action_user_id=request.user.id)
             return Response({"message": f"Attendance status updated to {status}"})
         except InterviewSchedule.DoesNotExist:
             raise ValidationError({"error": "No interview schedule found for this application"})
