@@ -385,7 +385,53 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         simulate_resume_submission_notification(application.id)
 
     def perform_update(self, serializer):
+        # Capture old status before saving
+        old_status = self.get_object().status
         application = serializer.save()
+        
+        # Check if status changed
+        if old_status != application.status:
+            if self.request.user.role in [UserRole.MANAGER, UserRole.ADMIN]:
+                try:
+                    frontend_base = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))
+                    url = f"{frontend_base}/candidates/{application.candidate.id}"
+                    
+                    for recruiter in application.job.assigned_recruiters.all():
+                        if not recruiter.email:
+                            continue
+                            
+                        context = {
+                            "recruiter_name": recruiter.name,
+                            "candidate_name": application.candidate.candidate_name,
+                            "job_title": application.job.title,
+                            "status": application.status.replace('-', ' ').title(),
+                            "url": url,
+                            "org_name": application.organization.name if application.organization else "RecruitOS",
+                            "plain_message": f"{self.request.user.role.capitalize()} ({self.request.user.name}) has moved {application.candidate.candidate_name} to a new stage: {application.status.replace('-', ' ').title()} for the job {application.job.title}.\n\nView Candidate: {url}"
+                        }
+                        
+                        send_org_email(
+                            organization=application.organization,
+                            subject=f"Stage Update: {application.candidate.candidate_name} — {application.job.title}",
+                            template_name="generic_email",
+                            context=context,
+                            recipient_list=[recruiter.email],
+                            from_email_override=self.request.user.email
+                        )
+                except Exception as e:
+                    logger.error(f"Failed to notify recruiters of status change: {e}")
+                    
+            elif self.request.user.role == UserRole.RECRUITER:
+                try:
+                    send_candidate_status_update_email(
+                        application,
+                        action=f"Stage moved to {application.status.replace('-', ' ').title()}",
+                        notes="",
+                        recruiter=self.request.user
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to send status update email: {e}")
+
         log_action(self.request.user, 'updated', 'Application', application.id, f"Updated application for {application.candidate.candidate_name}")
 
     def perform_destroy(self, instance):
@@ -397,11 +443,23 @@ class ApplicationViewSet(viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
+        
+        # If candidate data is provided, manually update the Candidate model
+        # since it's marked as read_only in the ApplicationDetailSerializer.
+        candidate_data = request.data.get('candidate')
+        if candidate_data and isinstance(candidate_data, dict):
+            from candidates.serializers import CandidateDetailSerializer
+            candidate_serializer = CandidateDetailSerializer(instance.candidate, data=candidate_data, partial=True)
+            if candidate_serializer.is_valid():
+                candidate_serializer.save()
+            else:
+                return Response({"candidate_errors": candidate_serializer.errors}, status=400)
+                
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         
         if serializer.is_valid():
             self.perform_update(serializer)
-            return Response({"message": "Stage changed successfully"})
+            return Response(serializer.data)
             
         return Response(serializer.errors, status=400)
 
@@ -412,8 +470,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         try:
             stage = Stage.objects.get(id=stage_id, job=application.job)
             application.current_stage = stage
-            if stage.name.lower() == "hired":
-                application.status = CandidateStatus.HIRED.value
+            if stage.name.lower() in ["hired", "joined"]:
+                application.status = CandidateStatus.JOINED.value
             application.save()
             log_action(request.user, 'updated', 'Application', application.id, f"Stage moved to {stage.name}")
             
@@ -599,7 +657,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 manager_approval_status='pending', # Reset to pending on resubmit
                 attendance_status='pending'        # Reset attendance status on resubmit
             )
-            application.status = CandidateStatus.INTERVIEW_SCHEDULED.value
+            application.status = CandidateStatus.INTERVIEW_ALIGN.value
             application.save()
             log_action(request.user, 'updated', 'Application', application.id, f"Scheduled interview for {application.candidate.candidate_name}")
             
