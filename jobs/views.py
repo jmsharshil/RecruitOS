@@ -226,13 +226,19 @@ class JobViewSet(viewsets.ModelViewSet):
             CandidateStatus.BACKOUT,
         ]
         
-        apps = Application.objects.filter(job=job, is_deleted=False, status__in=allowed_stages).select_related('candidate')
+        apps = Application.objects.filter(job=job, is_deleted=False, status__in=allowed_stages).select_related('candidate', 'interview_schedule')
         
         pipeline_data = {
             stage: [] for stage in allowed_stages
         }
         
+        from candidates.serializers import InterviewScheduleSerializer
+        
         for app in apps:
+            interview_schedule_data = None
+            if hasattr(app, 'interview_schedule'):
+                interview_schedule_data = InterviewScheduleSerializer(app.interview_schedule).data
+
             app_data = {
                 "application_id": str(app.id),
                 "candidate_id": str(app.candidate.id),
@@ -243,7 +249,8 @@ class JobViewSet(viewsets.ModelViewSet):
                 "expected_ctc": str(app.expected_ctc) if app.expected_ctc else "",
                 "notice_period": app.notice_period,
                 "notes": app.manager_review_notes or app.feedback or app.reason_for_change,
-                "status": app.status
+                "status": app.status,
+                "interview_schedule": interview_schedule_data
             }
             
             pipeline_data[app.status].append(app_data)
