@@ -27,7 +27,11 @@ from candidates.filters import CandidateFilterSet, ApplicationFilterSet
 from jobs.models import Job, Stage
 from accounts.models import UserRole
 from audit.utils import log_action
-from candidates.tasks import simulate_client_submission_email, simulate_resume_submission_notification, simulate_interview_reminder
+from candidates.tasks import (
+    simulate_client_submission_email, simulate_resume_submission_notification, simulate_interview_reminder,
+    send_interview_approval_request_email, send_interview_approval_result_email,
+    simulate_client_interview_details_email, send_attendance_update_email
+)
 from common.permissions import IsAdminOrManager, IsAdmin
 
 logger = logging.getLogger(__name__)
@@ -432,6 +436,32 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 except Exception as e:
                     logger.error(f"Failed to send status update email: {e}")
 
+            if "interview" in stage.name.lower():
+                from notifications.models import Notification
+                for recruiter in application.job.assigned_recruiters.all():
+                    Notification.objects.create(
+                        user=recruiter,
+                        organization=application.organization,
+                        title="Candidate Moved to Interview Stage",
+                        message=f"{application.candidate.candidate_name} has been moved to {stage.name}.",
+                        type='info',
+                        link=f"/candidates/{application.candidate.id}"
+                    )
+                    # Also send email alert to the recruiter
+                    try:
+                        from accounts.email_utils import send_org_email
+                        send_org_email(
+                            organization=application.organization,
+                            subject=f"Candidate Moved to Interview Stage: {application.candidate.candidate_name}",
+                            template_name='generic_email',
+                            context={
+                                'plain_message': f"Candidate {application.candidate.candidate_name} has been moved to the '{stage.name}' stage for the job '{application.job.title}'."
+                            },
+                            recipient_list=[recruiter.email],
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to send interview stage alert email to recruiter: {e}")
+
             return Response(ApplicationDetailSerializer(application).data)
         except Stage.DoesNotExist:
             raise ValidationError({"error": "Invalid stage for this job", "detail": "Stage not found for this job"})
@@ -525,29 +555,99 @@ class ApplicationViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='schedule-interview')
     def schedule_interview(self, request, pk=None):
         application = self.get_object()
-        serializer = InterviewScheduleSerializer(data=request.data)
+        
+        # Check if a schedule already exists to allow for resubmissions
+        existing_schedule = None
+        if hasattr(application, 'interview_schedule'):
+            existing_schedule = application.interview_schedule
+            
+        serializer = InterviewScheduleSerializer(existing_schedule, data=request.data)
         if serializer.is_valid():
             schedule = serializer.save(
                 application=application,
-                organization=request.user.organization
+                organization=request.user.organization,
+                manager_approval_status='pending', # Reset to pending on resubmit
+                attendance_status='pending'        # Reset attendance status on resubmit
             )
             application.status = CandidateStatus.INTERVIEW_SCHEDULED.value
             application.save()
             log_action(request.user, 'updated', 'Application', application.id, f"Scheduled interview for {application.candidate.candidate_name}")
             
             # Save interview scheduled to history
+            action_verb = "Updated" if existing_schedule else "Proposed"
             ApplicationHistory.objects.create(
                 application=application,
                 user=request.user,
                 action="interview_scheduled",
-                notes=f"Scheduled {schedule.mode} interview on {schedule.date} at {schedule.time}",
+                notes=f"{action_verb} {schedule.mode} interview on {schedule.date} at {schedule.time}. Pending manager approval.",
                 organization=application.organization
             )
-            # Trigger interview notification
-            simulate_interview_reminder(schedule.id)
+            
+            # Send approval request to manager instead of immediate reminder
+            send_interview_approval_request_email(schedule.id)
 
             return Response(InterviewScheduleSerializer(schedule).data, status=201)
         return Response(serializer.errors, status=400)
+
+    @action(detail=True, methods=['post'], url_path='approve-interview-schedule')
+    def approve_interview_schedule(self, request, pk=None):
+        application = self.get_object()
+        status = request.data.get('status')
+        if status not in ['approved', 'rejected']:
+            raise ValidationError({"error": "Status must be 'approved' or 'rejected'"})
+        try:
+            schedule = application.interview_schedule
+            schedule.manager_approval_status = status
+            schedule.save()
+            log_action(request.user, 'updated', 'InterviewSchedule', schedule.id, f"Manager {status} interview schedule for {application.candidate.candidate_name}")
+            ApplicationHistory.objects.create(
+                application=application,
+                user=request.user,
+                action=f"interview_{status}",
+                notes=f"Manager {status} the interview schedule.",
+                organization=application.organization
+            )
+            send_interview_approval_result_email(schedule.id)
+            if status == 'approved':
+                simulate_interview_reminder(schedule.id)
+            return Response({"message": f"Interview schedule {status}"})
+        except InterviewSchedule.DoesNotExist:
+            raise ValidationError({"error": "No interview schedule found for this application"})
+
+    @action(detail=True, methods=['post'], url_path='send-interview-to-client')
+    def send_interview_to_client(self, request, pk=None):
+        application = self.get_object()
+        try:
+            schedule = application.interview_schedule
+            simulate_client_interview_details_email(schedule.id)
+            log_action(request.user, 'sent', 'InterviewSchedule', schedule.id, f"Sent interview details to client for {application.candidate.candidate_name}")
+            return Response({"message": "Interview details sent to client successfully"})
+        except InterviewSchedule.DoesNotExist:
+            raise ValidationError({"error": "No interview schedule found for this application"})
+
+    @action(detail=True, methods=['post'], url_path='update-interview-attendance')
+    def update_interview_attendance(self, request, pk=None):
+        application = self.get_object()
+        status = request.data.get('status')
+        from candidates.models import InterviewAttendanceStatus
+        if status not in InterviewAttendanceStatus.values:
+            raise ValidationError({"error": f"Invalid attendance status. Must be one of: {InterviewAttendanceStatus.values}"})
+        try:
+            schedule = application.interview_schedule
+            schedule.attendance_status = status
+            schedule.save()
+            log_action(request.user, 'updated', 'InterviewSchedule', schedule.id, f"Updated attendance status to {status} for {application.candidate.candidate_name}")
+            ApplicationHistory.objects.create(
+                application=application,
+                user=request.user,
+                action="attendance_updated",
+                notes=f"Interview attendance updated to {status}.",
+                organization=application.organization
+            )
+            send_attendance_update_email(schedule.id)
+            return Response({"message": f"Attendance status updated to {status}"})
+        except InterviewSchedule.DoesNotExist:
+            raise ValidationError({"error": "No interview schedule found for this application"})
 
     @action(detail=True, methods=['post'], url_path='review')
     def review(self, request, pk=None):

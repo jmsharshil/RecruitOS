@@ -35,6 +35,17 @@ class ManagerReviewStatus(models.TextChoices):
     REJECTED = 'rejected'
     RESUBMIT = 'resubmit'
 
+class InterviewApprovalStatus(models.TextChoices):
+    PENDING  = 'pending'
+    APPROVED = 'approved'
+    REJECTED = 'rejected'
+
+class InterviewAttendanceStatus(models.TextChoices):
+    PENDING = 'pending'
+    ATTENDED = 'attended'
+    NO_SHOW = 'no-show'
+    RESCHEDULE_REQUESTED = 'reschedule-requested'
+
 class Candidate(BaseModel):
     id                 = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     profile_name       = models.CharField(max_length=200)
@@ -121,6 +132,8 @@ class InterviewSchedule(BaseModel):
     mode = models.CharField(max_length=20, choices=InterviewMode.choices)
     interviewer_name = models.CharField(max_length=150, blank=True)
     notes = models.TextField(blank=True)
+    manager_approval_status = models.CharField(max_length=20, choices=InterviewApprovalStatus.choices, default=InterviewApprovalStatus.PENDING)
+    attendance_status = models.CharField(max_length=20, choices=InterviewAttendanceStatus.choices, default=InterviewAttendanceStatus.PENDING)
 
 
 class ClientSubmission(BaseModel):

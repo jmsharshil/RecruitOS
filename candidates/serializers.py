@@ -25,7 +25,7 @@ class InterviewScheduleSerializer(serializers.ModelSerializer):
     class Meta:
         model = InterviewSchedule
         fields = '__all__'
-        read_only_fields = ['id', 'application', 'organization', 'is_deleted']
+        read_only_fields = ['id', 'application', 'organization', 'is_deleted', 'manager_approval_status', 'attendance_status']
 
 
 class ClientSubmissionSerializer(serializers.ModelSerializer):
