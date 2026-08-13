@@ -717,19 +717,32 @@ class ApplicationViewSet(viewsets.ModelViewSet):
     def update_interview_attendance(self, request, pk=None):
         application = self.get_object()
         status = request.data.get('status')
+        notes = request.data.get('notes', '').strip()
         from candidates.models import InterviewAttendanceStatus
         if status not in InterviewAttendanceStatus.values:
             raise ValidationError({"error": f"Invalid attendance status. Must be one of: {InterviewAttendanceStatus.values}"})
         try:
             schedule = application.interview_schedule
             schedule.attendance_status = status
+            
+            if notes:
+                if schedule.notes:
+                    schedule.notes = f"{schedule.notes}\n\n[Attendance - {status.title()}]: {notes}"
+                else:
+                    schedule.notes = notes
+            
             schedule.save()
+            
+            history_notes = f"Interview attendance updated to {status}."
+            if notes:
+                history_notes += f" Notes: {notes}"
+                
             log_action(request.user, 'updated', 'InterviewSchedule', schedule.id, f"Updated attendance status to {status} for {application.candidate.candidate_name}")
             ApplicationHistory.objects.create(
                 application=application,
                 user=request.user,
                 action="attendance_updated",
-                notes=f"Interview attendance updated to {status}.",
+                notes=history_notes,
                 organization=application.organization
             )
             send_attendance_update_email(schedule.id, action_user_id=request.user.id)
