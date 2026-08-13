@@ -92,6 +92,7 @@ class ApplicationListSerializer(serializers.ModelSerializer):
 
     submitted_by   = serializers.SerializerMethodField()
     candidate_cv   = serializers.SerializerMethodField()
+    interview_schedule = serializers.SerializerMethodField()
 
     class Meta:
         model = Application
@@ -102,7 +103,7 @@ class ApplicationListSerializer(serializers.ModelSerializer):
             'job_title', 'status', 'stage_name', 'share_date', 'created_at',
             'current_ctc', 'expected_ctc', 'notice_period', 'hike',
             'preferred_location', 'offer_in_hand', 'reason_for_change', 'dob',
-            'submitted_by', 'candidate_cv',
+            'submitted_by', 'candidate_cv', 'interview_schedule',
             'manager_review_status', 'manager_review_notes',
             # write-only
             'job_id', 'candidate_id', 'current_stage_id',
@@ -111,6 +112,12 @@ class ApplicationListSerializer(serializers.ModelSerializer):
 
     def get_stage_name(self, obj):
         return obj.current_stage.name if obj.current_stage else None
+
+    def get_interview_schedule(self, obj):
+        try:
+            return InterviewScheduleSerializer(obj.interview_schedule).data
+        except InterviewSchedule.DoesNotExist:
+            return None
 
     def get_candidate_cv(self, obj):
         request = self.context.get('request')
