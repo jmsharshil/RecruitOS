@@ -233,6 +233,33 @@ class ApplicationDetailSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     "non_field_errors": ["This candidate is already linked to this job requisition."]
                 })
+        
+        required_fields = {
+            'current_ctc': 'Current CTC',
+            'expected_ctc': 'Expected CTC',
+            'hike': 'Hike',
+            'notice_period': 'Notice Period',
+            'offer_in_hand': 'Offer in Hand',
+            'preferred_location': 'Pref. Location',
+            'reason_for_change': 'Reason for Change',
+            'dob': 'Date of Birth'
+        }
+        
+        errors = {}
+        for field, label in required_fields.items():
+            val = attrs.get(field)
+            if val is None:
+                if self.instance:
+                    val = getattr(self.instance, field, None)
+                elif candidate:
+                    val = getattr(candidate, field, None)
+                    
+            if val in [None, '', 'Not specified', 'Not provided', 0, 0.0, '0', '0.0']:
+                errors[field] = f"{label} is required."
+                
+        if errors:
+            raise serializers.ValidationError(errors)
+            
         return attrs
 
 # ---------------------------------------------------------------------------
