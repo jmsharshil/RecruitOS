@@ -317,7 +317,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         """
         if self.action in ['list', 'retrieve', 'create', 'update', 'partial_update',
                            'move_stage', 'schedule_interview', 'send_to_client',
-                           'submit_for_review', 'review', 'bulk_review', 'grouped_approval_queue']:
+                           'submit_for_review', 'review', 'bulk_review', 'grouped_approval_queue',
+                           'send_interview_to_client', 'update_interview_attendance']:
             return [permissions.IsAuthenticated()]
         if self.action == 'destroy':
             return [IsAdmin()]
