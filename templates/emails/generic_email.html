@@ -1,0 +1,31 @@
+{% extends "emails/base_email.html" %}
+
+{% block content %}
+<div class="content">
+    {% if manager_name %}
+    <p>Hi {{ manager_name }},</p>
+    {% elif recruiter_name %}
+    <p>Hi {{ recruiter_name }},</p>
+    {% elif recipient_name %}
+    <p>Hi {{ recipient_name }},</p>
+    {% else %}
+    <p>Hello,</p>
+    {% endif %}
+    
+    <p>{{ plain_message|linebreaksbr }}</p>
+    
+    {% if interview_date and interview_time %}
+    <div style="background: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #e2e8f0;">
+        <p style="margin: 0 0 10px 0;"><strong>Proposed Date:</strong> {{ interview_date }}</p>
+        <p style="margin: 0;"><strong>Proposed Time:</strong> {{ interview_time }}</p>
+    </div>
+    {% endif %}
+    
+    {% if status %}
+    <p><strong>Status:</strong> <span style="text-transform: uppercase;">{{ status }}</span></p>
+    {% endif %}
+    
+    <p>Thank you,</p>
+    <p>The {{ org_name }} Team</p>
+</div>
+{% endblock %}

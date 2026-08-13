@@ -436,6 +436,35 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                     )
                 except Exception as e:
                     logger.error(f"Failed to send status update email: {e}")
+            elif request.user.role in [UserRole.MANAGER, UserRole.ADMIN]:
+                try:
+                    frontend_base = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))
+                    url = f"{frontend_base}/candidates/{application.candidate.id}"
+                    
+                    for recruiter in application.job.assigned_recruiters.all():
+                        if not recruiter.email:
+                            continue
+                            
+                        context = {
+                            "recruiter_name": recruiter.name,
+                            "candidate_name": application.candidate.candidate_name,
+                            "job_title": application.job.title,
+                            "status": stage.name,
+                            "url": url,
+                            "org_name": application.organization.name if application.organization else "RecruitOS",
+                            "plain_message": f"{request.user.role.capitalize()} ({request.user.name}) has moved {application.candidate.candidate_name} to a new stage: {stage.name} for the job {application.job.title}.\n\nView Candidate: {url}"
+                        }
+                        
+                        send_org_email(
+                            organization=application.organization,
+                            subject=f"Stage Update: {application.candidate.candidate_name} — {application.job.title}",
+                            template_name="generic_email",
+                            context=context,
+                            recipient_list=[recruiter.email],
+                            from_email_override=request.user.email
+                        )
+                except Exception as e:
+                    logger.error(f"Failed to notify recruiters of stage change: {e}")
 
             if "interview" in stage.name.lower():
                 from notifications.models import Notification

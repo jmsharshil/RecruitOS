@@ -40,7 +40,7 @@ class JobViewSet(viewsets.ModelViewSet):
         return Job.objects.none()
 
     def get_permissions(self):
-        if self.action in ['list', 'retrieve', 'upload_link']:
+        if self.action in ['list', 'retrieve', 'upload_link', 'pipeline']:
             return [permissions.IsAuthenticated()]
         if self.action == 'destroy':
             return [IsAdmin()]
