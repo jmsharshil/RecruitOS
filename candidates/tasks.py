@@ -507,6 +507,15 @@ def simulate_client_interview_details_email(schedule_id, action_user_id=None):
         schedule = InterviewSchedule.objects.select_related('application__candidate', 'application__job', 'organization').get(id=schedule_id)
         client = schedule.application.job.client
         if client and client.email:
+            client_email = client.email
+            recipient_name = client.company_name
+            if schedule.application.job.team_member_id and isinstance(client.team_members, list):
+                for tm in client.team_members:
+                    if isinstance(tm, dict) and str(tm.get('id')) == str(schedule.application.job.team_member_id) and tm.get('email'):
+                        client_email = tm.get('email')
+                        recipient_name = tm.get('name', recipient_name)
+                        break
+
             from accounts.email_utils import send_org_email
 
             from_email = None
@@ -517,7 +526,7 @@ def simulate_client_interview_details_email(schedule_id, action_user_id=None):
                     from_email = action_user.email
 
             context = {
-                'client_name': client.company_name,
+                'recipient_name': recipient_name,
                 'candidate_name': schedule.application.candidate.candidate_name,
                 'interview_date': str(schedule.date),
                 'interview_time': str(schedule.time),
@@ -529,7 +538,7 @@ def simulate_client_interview_details_email(schedule_id, action_user_id=None):
                 subject=f"Interview Details: {schedule.application.candidate.candidate_name}",
                 template_name='generic_email',
                 context=context,
-                recipient_list=[client.email],
+                recipient_list=[client_email],
                 from_email_override=from_email,
             )
     except Exception as e:

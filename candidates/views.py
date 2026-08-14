@@ -335,6 +335,20 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             return qs.filter(job__assigned_recruiters=user)
         return qs.none()
 
+    def create(self, request, *args, **kwargs):
+        from rest_framework import status
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        
+        application = serializer.instance
+        candidate = application.candidate
+        job = application.job
+        
+        return Response({
+            "message": f"{candidate.candidate_name} has been successfully submitted to {job.title}."
+        }, status=status.HTTP_201_CREATED)
+
     def perform_create(self, serializer):
         # We fetch candidate to inherit default values
         candidate = serializer.validated_data.get('candidate')

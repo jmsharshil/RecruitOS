@@ -11,8 +11,9 @@ class CandidateBriefSerializer(serializers.ModelSerializer):
         model = Candidate
         fields = [
             'id', 'candidate_name', 'email', 'contact', 'current_profile',
-            'current_company', 'experience', 'resume_file_name',
-            'is_duplicate', 'duplicate_of',
+            'current_company', 'experience', 'current_location', 'skills',
+            'education', 'linkedin_url', 'portfolio_url', 'certifications', 'tags',
+            'resume_file_name', 'is_duplicate', 'duplicate_of',
         ]
 
 
@@ -65,6 +66,9 @@ class ApplicationListSerializer(serializers.ModelSerializer):
     candidate_current_company = serializers.CharField(source='candidate.current_company', read_only=True)
     candidate_current_location = serializers.CharField(source='candidate.current_location', read_only=True)
     
+    candidate_skills = serializers.JSONField(source='candidate.skills', read_only=True)
+    candidate_education = serializers.JSONField(source='candidate.education', read_only=True)
+    
     current_ctc = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     expected_ctc = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     notice_period = serializers.CharField(read_only=True)
@@ -100,6 +104,7 @@ class ApplicationListSerializer(serializers.ModelSerializer):
             'id', 'candidate_name', 'candidate_email', 'candidate_contact',
             'candidate_experience', 'candidate_current_profile',
             'candidate_current_company', 'candidate_current_location',
+            'candidate_skills', 'candidate_education',
             'job_title', 'status', 'stage_name', 'share_date', 'created_at',
             'current_ctc', 'expected_ctc', 'notice_period', 'hike',
             'preferred_location', 'offer_in_hand', 'reason_for_change', 'dob',
