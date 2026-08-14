@@ -421,7 +421,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                             "status": application.status.replace('-', ' ').title(),
                             "url": url,
                             "org_name": application.organization.name if application.organization else "RecruitOS",
-                            "plain_message": f"{self.request.user.role.capitalize()} ({self.request.user.name}) has moved {application.candidate.candidate_name} to a new stage: {application.status.replace('-', ' ').title()} for the job {application.job.title}.\n\nView Candidate: {url}"
+                            "plain_message": f"{self.request.user.role.capitalize()} ({self.request.user.name}) has moved {application.candidate.candidate_name} to a new stage: {application.status.replace('-', ' ').title()} for the job {application.job.title}."
                         }
                         
                         send_org_email(
@@ -524,7 +524,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                             "status": stage.name,
                             "url": url,
                             "org_name": application.organization.name if application.organization else "RecruitOS",
-                            "plain_message": f"{request.user.role.capitalize()} ({request.user.name}) has moved {application.candidate.candidate_name} to a new stage: {stage.name} for the job {application.job.title}.\n\nView Candidate: {url}"
+                            "plain_message": f"{request.user.role.capitalize()} ({request.user.name}) has moved {application.candidate.candidate_name} to a new stage: {stage.name} for the job {application.job.title}."
                         }
                         
                         send_org_email(

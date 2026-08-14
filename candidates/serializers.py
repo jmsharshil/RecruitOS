@@ -171,6 +171,7 @@ class ApplicationDetailSerializer(serializers.ModelSerializer):
     client_submission  = serializers.SerializerMethodField()
     submitted_by       = serializers.SerializerMethodField()
     candidate_cv       = serializers.SerializerMethodField()
+    past_jobs          = serializers.SerializerMethodField()
     history            = ApplicationHistorySerializer(many=True, read_only=True)
     share_date         = DateParserField(required=False, allow_null=True)
     dob                = DateParserField(required=False, allow_null=True)
@@ -274,6 +275,27 @@ class ApplicationDetailSerializer(serializers.ModelSerializer):
             
         return attrs
 
+    def get_past_jobs(self, obj):
+        from candidates.models import Application
+        apps = Application.objects.filter(
+            candidate=obj.candidate,
+            is_deleted=False
+        ).exclude(id=obj.id).select_related('job', 'job__client', 'current_stage', 'organization')
+        
+        past = []
+        for app in apps:
+            company = app.job.client.company_name if app.job.client else (app.organization.name if app.organization else "Internal")
+            past.append({
+                "application_id": app.id,
+                "job_id": app.job.id,
+                "job_title": app.job.title,
+                "company_name": company,
+                "stage": app.current_stage.name if app.current_stage else None,
+                "status": app.status,
+                "created_at": app.created_at
+            })
+        return past
+
 # ---------------------------------------------------------------------------
 # Candidate serializers
 # ---------------------------------------------------------------------------
@@ -312,6 +334,7 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
     Note: Fields like dob, doc, ctc, notice_period, reason_for_change moved to Application.
     """
     applications         = ApplicationListSerializer(many=True, read_only=True)
+    past_jobs            = serializers.SerializerMethodField()
     uploaded_by          = UserBriefSerializer(read_only=True)
     duplicate_of_detail  = CandidateBriefSerializer(source='duplicate_of', read_only=True)
     created_at           = DateParserDateTimeField(read_only=True)
@@ -342,3 +365,24 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
         if 'candidate_name' in validated_data and 'profile_name' not in validated_data:
             validated_data['profile_name'] = validated_data['candidate_name']
         return super().update(instance, validated_data)
+
+    def get_past_jobs(self, obj):
+        from candidates.models import Application
+        apps = Application.objects.filter(
+            candidate=obj,
+            is_deleted=False
+        ).select_related('job', 'job__client', 'current_stage', 'organization')
+        
+        past = []
+        for app in apps:
+            company = app.job.client.company_name if app.job.client else (app.organization.name if app.organization else "Internal")
+            past.append({
+                "application_id": app.id,
+                "job_id": app.job.id,
+                "job_title": app.job.title,
+                "company_name": company,
+                "stage": app.current_stage.name if app.current_stage else None,
+                "status": app.status,
+                "created_at": app.created_at
+            })
+        return past

@@ -24,6 +24,12 @@
     {% if status %}
     <p><strong>Status:</strong> <span style="text-transform: uppercase;">{{ status }}</span></p>
     {% endif %}
+
+    {% if url %}
+    <div class="btn-wrapper">
+        <a href="{{ url }}" class="btn">View Candidate</a>
+    </div>
+    {% endif %}
     
     <p>Thank you,</p>
     <p>The {{ org_name }} Team</p>
