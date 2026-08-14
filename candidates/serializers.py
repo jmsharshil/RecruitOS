@@ -279,6 +279,7 @@ class ApplicationDetailSerializer(serializers.ModelSerializer):
         from candidates.models import Application
         apps = Application.objects.filter(
             candidate=obj.candidate,
+            organization=obj.organization,
             is_deleted=False
         ).select_related(
             'job', 'job__client', 'current_stage', 'organization', 
@@ -385,6 +386,7 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
         from candidates.models import Application
         apps = Application.objects.filter(
             candidate=obj,
+            organization=obj.organization,
             is_deleted=False
         ).select_related(
             'job', 'job__client', 'current_stage', 'organization', 
