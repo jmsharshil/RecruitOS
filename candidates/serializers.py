@@ -280,7 +280,7 @@ class ApplicationDetailSerializer(serializers.ModelSerializer):
         apps = Application.objects.filter(
             candidate=obj.candidate,
             is_deleted=False
-        ).exclude(id=obj.id).select_related('job', 'job__client', 'current_stage', 'organization')
+        ).select_related('job', 'job__client', 'current_stage', 'organization')
         
         past = []
         for app in apps:
