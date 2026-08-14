@@ -280,19 +280,34 @@ class ApplicationDetailSerializer(serializers.ModelSerializer):
         apps = Application.objects.filter(
             candidate=obj.candidate,
             is_deleted=False
-        ).select_related('job', 'job__client', 'current_stage', 'organization')
+        ).select_related(
+            'job', 'job__client', 'current_stage', 'organization', 
+            'created_by', 'candidate__uploaded_by', 'job__hiring_manager', 'job__created_by'
+        )
         
         past = []
         for app in apps:
             company = app.job.client.company_name if app.job.client else (app.organization.name if app.organization else "Internal")
+            recruiter = app.created_by or app.candidate.uploaded_by
+            recruiter_name = recruiter.name if recruiter else None
+            job_manager = app.job.hiring_manager or app.job.created_by
+            manager_name = job_manager.name if job_manager else None
+            
             past.append({
                 "application_id": app.id,
                 "job_id": app.job.id,
                 "job_title": app.job.title,
                 "company_name": company,
+                "job_location": app.job.location,
+                "job_mode": app.job.job_mode,
                 "stage": app.current_stage.name if app.current_stage else None,
                 "status": app.status,
-                "created_at": app.created_at
+                "manager_review_status": app.manager_review_status,
+                "manager_review_notes": app.manager_review_notes,
+                "created_at": app.created_at,
+                "updated_at": app.updated_at,
+                "recruiter_name": recruiter_name,
+                "manager_name": manager_name
             })
         return past
 
@@ -371,18 +386,33 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
         apps = Application.objects.filter(
             candidate=obj,
             is_deleted=False
-        ).select_related('job', 'job__client', 'current_stage', 'organization')
+        ).select_related(
+            'job', 'job__client', 'current_stage', 'organization', 
+            'created_by', 'candidate__uploaded_by', 'job__hiring_manager', 'job__created_by'
+        )
         
         past = []
         for app in apps:
             company = app.job.client.company_name if app.job.client else (app.organization.name if app.organization else "Internal")
+            recruiter = app.created_by or app.candidate.uploaded_by
+            recruiter_name = recruiter.name if recruiter else None
+            job_manager = app.job.hiring_manager or app.job.created_by
+            manager_name = job_manager.name if job_manager else None
+
             past.append({
                 "application_id": app.id,
                 "job_id": app.job.id,
                 "job_title": app.job.title,
                 "company_name": company,
+                "job_location": app.job.location,
+                "job_mode": app.job.job_mode,
                 "stage": app.current_stage.name if app.current_stage else None,
                 "status": app.status,
-                "created_at": app.created_at
+                "manager_review_status": app.manager_review_status,
+                "manager_review_notes": app.manager_review_notes,
+                "created_at": app.created_at,
+                "updated_at": app.updated_at,
+                "recruiter_name": recruiter_name,
+                "manager_name": manager_name
             })
         return past
