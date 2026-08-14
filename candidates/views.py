@@ -408,7 +408,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             if self.request.user.role in [UserRole.MANAGER, UserRole.ADMIN]:
                 try:
                     frontend_base = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))
-                    url = f"{frontend_base}/candidates/{application.candidate.id}"
+                    url = f"{frontend_base}/positions/{application.job.id}/pipeline"
                     
                     for recruiter in application.job.assigned_recruiters.all():
                         if not recruiter.email:
@@ -511,7 +511,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             elif request.user.role in [UserRole.MANAGER, UserRole.ADMIN]:
                 try:
                     frontend_base = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))
-                    url = f"{frontend_base}/candidates/{application.candidate.id}"
+                    url = f"{frontend_base}/positions/{application.job.id}/pipeline"
                     
                     for recruiter in application.job.assigned_recruiters.all():
                         if not recruiter.email:
@@ -547,7 +547,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                         title="Candidate Moved to Interview Stage",
                         message=f"{application.candidate.candidate_name} has been moved to {stage.name}.",
                         type='info',
-                        link=f"/candidates/{application.candidate.id}"
+                        link=f"/positions/{application.job.id}/pipeline"
                     )
                     # Also send email alert to the recruiter
                     try:
@@ -716,16 +716,58 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         except InterviewSchedule.DoesNotExist:
             raise ValidationError({"error": "No interview schedule found for this application"})
 
-    @action(detail=True, methods=['post'], url_path='send-interview-to-client')
-    def send_interview_to_client(self, request, pk=None):
-        application = self.get_object()
-        try:
-            schedule = application.interview_schedule
-            simulate_client_interview_details_email(schedule.id, action_user_id=request.user.id)
-            log_action(request.user, 'sent', 'InterviewSchedule', schedule.id, f"Sent interview details to client for {application.candidate.candidate_name}")
-            return Response({"message": "Interview details sent to client successfully"})
-        except InterviewSchedule.DoesNotExist:
-            raise ValidationError({"error": "No interview schedule found for this application"})
+    @action(detail=False, methods=['post'], url_path='send-interview-to-client')
+    def send_interview_to_client(self, request):
+        application_ids = request.data.get('application_ids', [])
+        
+        if not isinstance(application_ids, list) or not application_ids:
+            raise ValidationError({"error": "Provide a list of application_ids"})
+
+        applications = self.get_queryset().filter(id__in=application_ids).select_related('job', 'candidate', 'job__client', 'interview_schedule')
+        
+        updated_count = 0
+        errors = []
+        valid_schedules_by_client = {}
+
+        for application in applications:
+            try:
+                schedule = application.interview_schedule
+            except Exception:
+                errors.append(f"{application.candidate.candidate_name}: No interview schedule found")
+                continue
+            
+            client_email = None
+            recipient_name = "Client"
+            if application.job.client:
+                client_email = application.job.client.email
+                recipient_name = application.job.client.company_name
+                if application.job.team_member_id and isinstance(application.job.client.team_members, list):
+                    for tm in application.job.client.team_members:
+                        if isinstance(tm, dict) and str(tm.get('id')) == str(application.job.team_member_id) and tm.get('email'):
+                            client_email = tm.get('email')
+                            recipient_name = tm.get('name', recipient_name)
+                            break
+                            
+            if client_email:
+                group_key = (application.job.id, client_email, recipient_name)
+                if group_key not in valid_schedules_by_client:
+                    valid_schedules_by_client[group_key] = []
+                valid_schedules_by_client[group_key].append(schedule.id)
+                log_action(request.user, 'sent', 'InterviewSchedule', schedule.id, f"Sent interview details to client for {application.candidate.candidate_name}")
+                updated_count += 1
+            else:
+                errors.append(f"{application.candidate.candidate_name}: Client email not found")
+
+        if valid_schedules_by_client:
+            from candidates.tasks import simulate_bulk_client_interview_details_email
+            for (job_id, client_email, recipient_name), schedule_ids in valid_schedules_by_client.items():
+                simulate_bulk_client_interview_details_email(schedule_ids, client_email, recipient_name, request.user.id)
+
+        return Response({
+            "message": f"Successfully sent {updated_count} interview schedules to client.",
+            "errors": errors
+        }, status=200)
+
 
     @action(detail=True, methods=['post'], url_path='update-interview-attendance')
     def update_interview_attendance(self, request, pk=None):
@@ -913,7 +955,7 @@ def send_manager_bulk_review_email(recruiter, manager, apps, status, notes, from
         app_list.append({
             "candidate_name": app.candidate.candidate_name,
             "job_title": app.job.title,
-            "url": f"{frontend_base}/candidates/{app.candidate.id}"
+            "url": f"{frontend_base}/positions/{app.job.id}/pipeline"
         })
         
     context = {
@@ -946,7 +988,7 @@ def send_manager_review_email(application, from_email=None):
     manager_email = manager.email if manager else ""
 
     frontend_base = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))
-    url = f"{frontend_base}/candidates/{application.candidate.id}"
+    url = f"{frontend_base}/positions/{application.job.id}/pipeline"
 
     context = {
         "recruiter": recruiter,
@@ -976,7 +1018,7 @@ def send_candidate_status_update_email(application, action, notes, recruiter):
         return
 
     frontend_base = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))
-    url = f"{frontend_base}/candidates/{application.candidate.id}"
+    url = f"{frontend_base}/positions/{application.job.id}/pipeline"
 
     context = {
         "manager_name": manager.name,

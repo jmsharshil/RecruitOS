@@ -284,7 +284,7 @@ def simulate_interview_reminder(interview_schedule_id):
                 title="Interview Reminder",
                 message=f"Interview for {candidate.candidate_name} is in 24 hours.",
                 type='warning',
-                link=f"/candidates/{candidate.id}"
+                link=f"/positions/{application.job.id}/pipeline"
             )
 
             # Also send email reminder
@@ -299,7 +299,7 @@ def simulate_interview_reminder(interview_schedule_id):
                     'interview_mode': schedule.mode,
                     'interviewer_name': schedule.interviewer_name,
                     'notes': schedule.notes,
-                    'candidate_link': f"/candidates/{candidate.id}",
+                    'candidate_link': f"/positions/{application.job.id}/pipeline",
                     'plain_message': f"Reminder: Interview for {candidate.candidate_name} is scheduled for {schedule.date} at {schedule.time}.",
                 }
                 send_org_email(
@@ -354,7 +354,7 @@ def simulate_resume_submission_notification(obj_id):
                 title="New Resume Submitted",
                 message=f"{candidate.candidate_name} submitted a resume for '{application.job.title}'.",
                 type='info',
-                link=f"/candidates/{candidate.id}"
+                link=f"/positions/{application.job.id}/pipeline"
             )
 
         # Notify the Manager (Hiring Manager or the Creator of the Job)
@@ -543,6 +543,45 @@ def simulate_client_interview_details_email(schedule_id, action_user_id=None):
             )
     except Exception as e:
         logger.error(f"Failed to send client interview details email: {e}")
+
+@run_in_thread
+def simulate_bulk_client_interview_details_email(schedule_ids, client_email, recipient_name, action_user_id=None):
+    try:
+        schedules = InterviewSchedule.objects.filter(id__in=schedule_ids).select_related('application__candidate', 'application__job', 'organization')
+        if not schedules.exists():
+            return
+            
+        organization = schedules.first().organization
+        
+        from accounts.email_utils import send_org_email
+
+        from_email = None
+        if action_user_id:
+            from accounts.models import User
+            action_user = User.objects.filter(id=action_user_id).first()
+            if action_user:
+                from_email = action_user.email
+
+        message_lines = [f"Interviews have been finalized for the following candidates:"]
+        for schedule in schedules:
+            message_lines.append(f"- {schedule.application.candidate.candidate_name}: {schedule.date} at {schedule.time} ({schedule.mode})")
+
+        plain_message = "\n".join(message_lines)
+
+        context = {
+            'recipient_name': recipient_name,
+            'plain_message': plain_message
+        }
+        send_org_email(
+            organization=organization,
+            subject=f"Bulk Interview Details: {len(schedules)} Candidates",
+            template_name='generic_email',
+            context=context,
+            recipient_list=[client_email],
+            from_email_override=from_email,
+        )
+    except Exception as e:
+        logger.error(f"Failed to send bulk client interview details email: {e}")
 
 @run_in_thread
 def send_attendance_update_email(schedule_id, action_user_id=None):
