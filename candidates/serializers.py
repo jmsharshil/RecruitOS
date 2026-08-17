@@ -197,9 +197,9 @@ class ApplicationDetailSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'organization', 'is_deleted', 'manager_review_status', 'manager_review_notes']
 
     def to_representation(self, instance):
-        ret = super().to_representation(instance)
-        ret.pop('feedback', None)
-        return ret
+        return {
+            "past_jobs": self.get_past_jobs(instance)
+        }
 
     def get_interview_schedule(self, obj):
         try:
