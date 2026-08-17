@@ -57,7 +57,7 @@ class JobViewSet(viewsets.ModelViewSet):
                     'job_title': job.title,
                     'assigner_name': self.request.user.name,
                     'url': url,
-                    'plain_message': f"You have been assigned to a new job: {job.title} by {self.request.user.name}.",
+                    'plain_message': f"You have been assigned a new job: {job.title}.\nPlease review the job details and begin the required recruitment activity at the earliest.",
                 }
                 send_org_email(
                     organization=job.organization,

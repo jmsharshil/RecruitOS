@@ -4,8 +4,8 @@
 {% block content %}
   <p>Dear <strong>{{ client_name }}</strong>,</p>
   <p>
-    We are pleased to share shortlisted candidate profiles for the
-    <strong>{{ job_title }}</strong> position.
+    Please find <strong>{{ candidates_data|length }}</strong> candidate profiles submitted for <strong>{{ job_title }}</strong>.<br>
+    Kindly review the profiles and let us know which candidates you would like to take forward.
   </p>
 
   <div style="overflow-x: auto;">
@@ -31,11 +31,6 @@
 
   <div class="divider" style="margin: 20px 0; border-top: 1px solid #e2e8f0;"></div>
 
-  <p>
-    Please find the candidates' resumes attached to this email.
-    Review the profiles at your earliest convenience and share your feedback.
-    Our team is available to arrange interviews at your preferred time.
-  </p>
   <p>
     Submitted by: <strong>{{ sent_by }}</strong> from <strong>{{ org_name }}</strong>
   </p>

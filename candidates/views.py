@@ -421,7 +421,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                             "status": application.status.replace('-', ' ').title(),
                             "url": url,
                             "org_name": application.organization.name if application.organization else "RecruitOS",
-                            "plain_message": f"{self.request.user.role.capitalize()} ({self.request.user.name}) has moved {application.candidate.candidate_name} to a new stage: {application.status.replace('-', ' ').title()} for the job {application.job.title}."
+                            "plain_message": f"The stage/status of {application.candidate.candidate_name} for {application.job.title} has been updated.\nPlease review the latest status and take the necessary action."
                         }
                         
                         send_org_email(
@@ -524,7 +524,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                             "status": stage.name,
                             "url": url,
                             "org_name": application.organization.name if application.organization else "RecruitOS",
-                            "plain_message": f"{request.user.role.capitalize()} ({request.user.name}) has moved {application.candidate.candidate_name} to a new stage: {stage.name} for the job {application.job.title}."
+                            "plain_message": f"The stage/status of {application.candidate.candidate_name} for {application.job.title} has been updated.\nPlease review the latest status and take the necessary action."
                         }
                         
                         send_org_email(
@@ -557,7 +557,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                             subject=f"Candidate Moved to Interview Stage: {application.candidate.candidate_name}",
                             template_name='generic_email',
                             context={
-                                'plain_message': f"Candidate {application.candidate.candidate_name} has been moved to the '{stage.name}' stage for the job '{application.job.title}'."
+                                'plain_message': f"{application.candidate.candidate_name} has been moved to the interview stage for {application.job.title}.\nPlease review the candidate details and proceed with the interview process."
                             },
                             recipient_list=[recruiter.email],
                         )
@@ -969,7 +969,8 @@ def send_manager_bulk_review_email(recruiter, manager, apps, status, notes, from
         "status": status,
         "notes": notes,
         "app_list": app_list,
-        "org_name": org.name if org else "RecruitOS"
+        "org_name": org.name if org else "RecruitOS",
+        "plain_message": f"A total of {len(apps)} applications have been reviewed with the status {status}.\nPlease review the updated applications and proceed with the next steps accordingly."
     }
 
     send_org_email(
@@ -1003,7 +1004,8 @@ def send_manager_review_email(application, from_email=None):
         "status": application.manager_review_status,
         "notes": application.manager_review_notes,
         "url": url,
-        "org_name": application.organization.name if application.organization else "RecruitOS"
+        "org_name": application.organization.name if application.organization else "RecruitOS",
+        "plain_message": f"{application.candidate.candidate_name} has been reviewed and the current status is {application.manager_review_status}.\nPlease take note of the update and proceed with the next required action."
     }
 
     send_org_email(
@@ -1033,7 +1035,7 @@ def send_candidate_status_update_email(application, action, notes, recruiter):
         "recruiter_name": recruiter.name,
         "url": url,
         "org_name": application.organization.name if application.organization else "RecruitOS",
-        "plain_message": f"Status updated for {application.candidate.candidate_name}: {action}"
+        "plain_message": f"The status/stage of {application.candidate.candidate_name} for {application.job.title} has been updated by the recruiter.\nPlease review the update and proceed with the appropriate next steps."
     }
 
     send_org_email(

@@ -4,7 +4,8 @@
 {% block content %}
   <p>Hi <strong>{{ recruiter.name }}</strong>,</p>
   <p>
-    Manager <strong>{{ manager_name }}</strong> has reviewed the application of candidate <strong>{{ candidate.candidate_name }}</strong> for the job <strong>{{ job.title }}</strong>.
+    <strong>{{ candidate.candidate_name }}</strong> has been reviewed and the current status is <strong>{{ status }}</strong>.<br>
+    Please take note of the update and proceed with the next required action.
   </p>
 
   {% if status == 'accepted' %}

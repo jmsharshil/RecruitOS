@@ -1,12 +1,11 @@
 {% extends "emails/base_email.html" %}
-
+{% block title %}New Job Assignment{% endblock %}
 {% block content %}
 <div class="content">
     <p>Hi {{ recruiter_name }},</p>
     
-    <p>You have been assigned to a new job: <strong>{{ job_title }}</strong> by {{ assigner_name }}.</p>
-    
-    <p>Please log in to your dashboard to review the job requirements and start sourcing candidates.</p>
+    <p>You have been assigned a new job: <strong>{{ job_title }}</strong>.</p>
+    <p>Please review the job details and begin the required recruitment activity at the earliest.</p>
     
     <div style="margin-top: 30px;">
         <a href="{{ url }}" class="button">View Job Details</a>

@@ -40,7 +40,7 @@ def simulate_client_submission_email(application_id, client_email, recipient_nam
             'sent_by': getattr(application, 'client_submission', None) and
                        getattr(application.client_submission.sent_by, 'name', 'RecruitOS'),
             'resume_link': '',  # Set to actual resume URL when hosted
-            'plain_message': f"Please find attached the profile of {candidate.candidate_name} for {application.job.title}.",
+            'plain_message': f"Please find the profile of {candidate.candidate_name} for the position of {application.job.title}.\nKindly review the profile and share your feedback or next steps.",
         }
         
         # Build dynamic tracker fields based on assigned team member format
@@ -168,6 +168,7 @@ def simulate_bulk_client_submission_email(application_ids, client_email, recipie
             'org_name': org.name,
             'sent_by': getattr(first_app, 'client_submission', None) and
                        getattr(first_app.client_submission.sent_by, 'name', 'RecruitOS') or 'RecruitOS',
+            'plain_message': f"Please find {len(applications)} candidate profiles submitted for {job.title}.\nKindly review the profiles and let us know which candidates you would like to take forward.",
         }
 
         # Build headers
@@ -300,7 +301,7 @@ def simulate_interview_reminder(interview_schedule_id):
                     'interviewer_name': schedule.interviewer_name,
                     'notes': schedule.notes,
                     'candidate_link': f"/positions/{application.job.id}/pipeline",
-                    'plain_message': f"Reminder: Interview for {candidate.candidate_name} is scheduled for {schedule.date} at {schedule.time}.",
+                    'plain_message': f"This is a reminder that the interview for {candidate.candidate_name} for {application.job.title} is scheduled for tomorrow.\nPlease review the interview details and ensure all necessary arrangements are in place.",
                 }
                 send_org_email(
                     organization=org,
@@ -341,7 +342,7 @@ def simulate_resume_submission_notification(obj_id):
             'current_location': candidate.current_location or 'N/A',
             'education': ', '.join([e.get('degree', '') if isinstance(e, dict) else str(e) for e in candidate.education]) if candidate.education and isinstance(candidate.education, list) else 'N/A',
             'skills': ', '.join(candidate.skills) if candidate.skills else 'N/A',
-            'plain_message': f"A new candidate {candidate.candidate_name} has been added to your tracker."
+            'plain_message': f"A new candidate, {candidate.candidate_name}, has been added for {application.job.title}.\nPlease review the candidate profile and take the necessary action."
         }
         
         from accounts.email_utils import send_org_email
@@ -412,7 +413,7 @@ def simulate_resume_submission_notification(obj_id):
             'current_location': candidate.current_location or 'N/A',
             'education': ', '.join([e.get('degree', '') if isinstance(e, dict) else str(e) for e in candidate.education]) if candidate.education and isinstance(candidate.education, list) else 'N/A',
             'skills': ', '.join(candidate.skills) if candidate.skills else 'N/A',
-            'plain_message': f"A new candidate {candidate.candidate_name} has been added to your pool tracker."
+            'plain_message': f"A new candidate, {candidate.candidate_name}, has been added for {application.job.title}.\nPlease review the candidate profile and take the necessary action."
         }
         
         if candidate.uploaded_by:
@@ -456,7 +457,7 @@ def send_interview_approval_request_email(schedule_id, action_user_id=None):
                 'job_title': schedule.application.job.title,
                 'interview_date': str(schedule.date),
                 'interview_time': str(schedule.time),
-                'plain_message': f"An interview schedule has been proposed for {schedule.application.candidate.candidate_name}. Please review."
+                'plain_message': f"An interview has been proposed for {schedule.application.candidate.candidate_name}.\nPlease review the proposed schedule and approve or suggest an alternate time."
             }
             send_org_email(
                 organization=schedule.organization,
@@ -488,7 +489,11 @@ def send_interview_approval_result_email(schedule_id, action_user_id=None):
                 'recruiter_name': recruiter.name,
                 'candidate_name': schedule.application.candidate.candidate_name,
                 'status': schedule.manager_approval_status,
-                'plain_message': f"The interview schedule for {schedule.application.candidate.candidate_name} has been {schedule.manager_approval_status}."
+                'plain_message': (
+                    f"The proposed interview schedule for {schedule.application.candidate.candidate_name} has been approved.\nPlease proceed with the interview arrangements and communicate the finalized details as required."
+                    if schedule.manager_approval_status == 'approved' else
+                    f"The interview schedule for {schedule.application.candidate.candidate_name} has been {schedule.manager_approval_status}."
+                )
             }
             send_org_email(
                 organization=schedule.organization,
@@ -533,7 +538,7 @@ def simulate_client_interview_details_email(schedule_id, action_user_id=None):
                 'interview_date': str(schedule.date),
                 'interview_time': str(schedule.time),
                 'mode': schedule.mode,
-                'plain_message': f"An interview has been finalized for {schedule.application.candidate.candidate_name} on {schedule.date} at {schedule.time}."
+                'plain_message': f"Please find below the finalized interview details for {schedule.application.candidate.candidate_name}.\nKindly confirm receipt and ensure the candidate is informed accordingly."
             }
             send_org_email(
                 organization=schedule.organization,
@@ -606,7 +611,7 @@ def send_attendance_update_email(schedule_id, action_user_id=None):
                 'manager_name': manager.name,
                 'candidate_name': schedule.application.candidate.candidate_name,
                 'attendance_status': schedule.attendance_status,
-                'plain_message': f"The attendance status for {schedule.application.candidate.candidate_name}'s interview has been updated to {schedule.attendance_status}."
+                'plain_message': f"The interview attendance for {schedule.application.candidate.candidate_name} has been recorded.\nPlease review the attendance status and proceed with the next step in the recruitment process."
             }
             send_org_email(
                 organization=schedule.organization,

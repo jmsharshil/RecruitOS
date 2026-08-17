@@ -51,9 +51,9 @@ def send_set_pin_email(user, sender_email=None):
 
     org = getattr(user, 'organization', None)
     plain_message = (
-        f"Hi {user.name},\n\n"
-        f"You have been added as a {user.role.title()} for {getattr(org, 'name', 'RecruitOS')}.\n"
-        f"Please log in by visiting:\n{url}\n\n"
+        f"Welcome to the team! Your account has been created successfully, and you can now access the platform using your login credentials.\n"
+        f"We’re excited to have you on board and look forward to working with you.\n\n"
+        f"Link: {url}"
     )
 
     context = {
@@ -65,7 +65,7 @@ def send_set_pin_email(user, sender_email=None):
     try:
         send_org_email(
             organization=org,
-            subject=f'Welcome to {getattr(org, "name", "RecruitOS")}',
+            subject='Welcome to DSP Eminence Consulting Services',
             template_name='set_pin',
             context=context,
             recipient_list=[user.email],
@@ -86,10 +86,8 @@ def send_forgot_password_email(user):
 
     org = getattr(user, 'organization', None)
     plain_message = (
-        f"Hi {user.name},\n\n"
-        f"We received a request to reset your security PIN for your account at {getattr(org, 'name', 'RecruitOS')}.\n"
-        f"Please reset your PIN by visiting:\n{url}\n\n"
-        "If you did not request a PIN reset, you can safely ignore this email."
+        f"Your request to reset your PIN has been received. Please use the secure link/process provided to create your new PIN.\n\n"
+        f"Link: {url}"
     )
 
     context = {
@@ -121,10 +119,9 @@ def forgot_password_email(user):
 
     org = getattr(user, 'organization', None)
     plain_message = (
-        f"Hi {user.name},\n\n"
-        f"Your account has been created for {getattr(org, 'name', 'RecruitOS')}.\n"
-        f"Please set your security PIN by visiting:\n{url}\n\n"
-        "The PIN can be 4-6 digits. You will use it to log in going forward."
+        f"Your password-change request has been initiated successfully. Please complete the process using the instructions provided.\n"
+        f"For security, do not share your password with anyone.\n\n"
+        f"Link: {url}"
     )
 
     context = {

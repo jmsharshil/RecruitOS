@@ -1,10 +1,11 @@
 {% extends "emails/base_email.html" %}
-{% block title %}Candidate Tracker Update: {{ candidate_name }}{% endblock %}
+{% block title %}New CV Uploaded{% endblock %}
 
 {% block content %}
   <p>Dear <strong>{{ recipient_name }}</strong>,</p>
   <p>
-    A new candidate has been successfully added to your tracker. Here are the details:
+    A new candidate, <strong>{{ candidate_name }}</strong>, has been added for <strong>{{ job_title }}</strong>.<br>
+    Please review the candidate profile and take the necessary action.
   </p>
 
   <table style="width: 100%; border-collapse: collapse; margin-top: 15px; border: 1px solid #e2e8f0; font-size: 14px;">

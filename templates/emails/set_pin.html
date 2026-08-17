@@ -1,11 +1,11 @@
 {% extends "emails/base_email.html" %}
-{% block title %}Welcome to {{ org_name }}{% endblock %}
+{% block title %}Welcome to DSP Eminence Consulting Services{% endblock %}
 
 {% block content %}
   <p>Hi <strong>{{ user.name }}</strong>,</p>
   <p>
-    You have been added as a <strong>{{ user.role|title }}</strong> for <strong>{{ org_name }}</strong>.
-    To get started, please log in using the button below.
+    Welcome to the team! Your account has been created successfully, and you can now access the platform using your login credentials.<br>
+    We’re excited to have you on board and look forward to working with you.
   </p>
 
   <div class="btn-wrapper">
@@ -18,6 +18,5 @@
   <p class="link-fallback">{{ url }}</p>
 
   <div class="divider"></div>
-
   <p>If you did not expect this email, please ignore it or contact your administrator.</p>
 {% endblock %}

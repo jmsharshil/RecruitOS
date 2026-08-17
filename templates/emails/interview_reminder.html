@@ -4,7 +4,8 @@
 {% block content %}
   <p>Hi <strong>{{ recruiter_name }}</strong>,</p>
   <p>
-    This is a reminder that you have an interview scheduled for tomorrow.
+    This is a reminder that the interview for <strong>{{ candidate_name }}</strong> for <strong>{{ job_title }}</strong> is scheduled for tomorrow.<br>
+    Please review the interview details and ensure all necessary arrangements are in place.
   </p>
 
   <div class="info-box">
@@ -27,6 +28,4 @@
     </div>
   {% endif %}
 
-  <div class="divider"></div>
-  <p>Please ensure all preparation is complete before the interview. Good luck!</p>
 {% endblock %}
