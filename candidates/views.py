@@ -738,11 +738,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             
             client_email = None
             recipient_name = "Client"
-            
-            manager = application.job.hiring_manager or application.job.created_by
-            if not manager or not manager.email:
-                errors.append(f"{application.candidate.candidate_name}: Manager or Recruiter email not found for this Job.")
-                continue
+
             if application.job.client:
                 client_email = application.job.client.email
                 recipient_name = application.job.client.company_name
