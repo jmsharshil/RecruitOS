@@ -518,8 +518,10 @@ def simulate_client_interview_details_email(schedule_id, action_user_id=None):
 
             from accounts.email_utils import send_org_email
 
-            from_email = None
-            if action_user_id:
+            manager = schedule.application.job.hiring_manager or schedule.application.job.created_by
+            from_email = manager.email if manager and manager.email else None
+
+            if not from_email and action_user_id:
                 from accounts.models import User
                 action_user = User.objects.filter(id=action_user_id).first()
                 if action_user:
@@ -555,8 +557,10 @@ def simulate_bulk_client_interview_details_email(schedule_ids, client_email, rec
         
         from accounts.email_utils import send_org_email
 
-        from_email = None
-        if action_user_id:
+        manager = schedules.first().application.job.hiring_manager or schedules.first().application.job.created_by
+        from_email = manager.email if manager and manager.email else None
+
+        if not from_email and action_user_id:
             from accounts.models import User
             action_user = User.objects.filter(id=action_user_id).first()
             if action_user:
