@@ -282,8 +282,8 @@ class ApplicationDetailSerializer(serializers.ModelSerializer):
             organization=obj.organization,
             is_deleted=False
         ).select_related(
-            'job', 'job__client', 'current_stage', 'organization', 
-            'created_by', 'candidate__uploaded_by', 'job__hiring_manager', 'job__created_by'
+            'job', 'job__client', 'current_stage', 'organization',
+            'candidate', 'created_by', 'candidate__uploaded_by', 'job__hiring_manager', 'job__created_by'
         )
         
         past = []
@@ -295,20 +295,18 @@ class ApplicationDetailSerializer(serializers.ModelSerializer):
             manager_name = job_manager.name if job_manager else None
             
             past.append({
-                "application_id": app.id,
+                "candidate_name": app.candidate.candidate_name,
+                "email": app.candidate.email,
                 "job_id": app.job.id,
                 "job_title": app.job.title,
                 "company_name": company,
-                "job_location": app.job.location,
-                "job_mode": app.job.job_mode,
-                "stage": app.current_stage.name if app.current_stage else None,
                 "status": app.status,
+                "stage": app.current_stage.name if app.current_stage else None,
                 "manager_review_status": app.manager_review_status,
                 "manager_review_notes": app.manager_review_notes,
-                "created_at": app.created_at,
-                "updated_at": app.updated_at,
                 "recruiter_name": recruiter_name,
-                "manager_name": manager_name
+                "manager_name": manager_name,
+                "created_at": app.created_at
             })
         return past
 
