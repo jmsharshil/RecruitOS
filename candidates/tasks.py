@@ -70,15 +70,19 @@ def simulate_client_submission_email(application_id, client_email, recipient_nam
                     val = ""
                     col_norm = col.strip().lower().replace(' ', '_')
                     
-                    if col_norm in ['candidate_name', 'name']: val = candidate.candidate_name
-                    elif col_norm == 'email': val = candidate.email
-                    elif col_norm in ['phone', 'contact', 'contacts']: val = candidate.contact
-                    elif col_norm in ['total_experience', 'experience', 'total_exp']: val = candidate.experience
-                    elif col_norm == 'current_company': val = candidate.current_company
-                    elif col_norm in ['current_designation', 'current_profile', 'designation', 'role']: val = candidate.current_profile
-                    elif col_norm in ['current_ctc', 'ctc', 'cctc']: val = f"₹{application.current_ctc}" if application.current_ctc else ""
-                    elif col_norm in ['expected_ctc', 'expected_ctc', 'ectc']: val = f"₹{application.expected_ctc}" if application.expected_ctc else ""
-                    elif col_norm == 'notice_period': val = application.notice_period
+                    if col_norm in ['candidate_name', 'name', 'candidate']: val = candidate.candidate_name
+                    elif col_norm in ['email', 'candidate_email_id', 'candidate_email', 'email_id']: val = candidate.email
+                    elif col_norm in ['phone', 'contact', 'contacts', 'mobile_no.', 'mobile_no', 'mobile_number', 'mobile']: val = candidate.contact
+                    elif col_norm in ['total_experience', 'experience', 'total_exp', 'exp']: val = candidate.experience
+                    elif col_norm in ['current_company', 'company', 'organization']: val = candidate.current_company
+                    elif col_norm in ['current_designation', 'current_profile', 'designation', 'role', 'c._designation', 'c_designation']: val = candidate.current_profile
+                    elif col_norm in ['current_ctc', 'ctc', 'cctc']: 
+                        c_val = application.current_ctc or candidate.current_ctc
+                        val = f"₹{c_val}" if c_val else ""
+                    elif col_norm in ['expected_ctc', 'expected_ctc', 'ectc']: 
+                        e_val = application.expected_ctc or candidate.expected_ctc
+                        val = f"₹{e_val}" if e_val else ""
+                    elif col_norm in ['notice_period', 'notice']: val = application.notice_period or candidate.notice_period
                     elif col_norm in ['current_location', 'address', 'location']: val = shorten_location(candidate.current_location)
                     elif col_norm == 'preferred_location': val = shorten_location(candidate.preferred_location)
                     elif col_norm == 'hike': val = application.hike
@@ -106,9 +110,13 @@ def simulate_client_submission_email(application_id, client_email, recipient_nam
                 {'label': 'Experience', 'value': candidate.experience},
                 {'label': 'Location', 'value': shorten_location(candidate.current_location)},
             ]
-            if application.current_ctc: tracker_fields.append({'label': 'Current CTC', 'value': f"₹{application.current_ctc}"})
-            if application.expected_ctc: tracker_fields.append({'label': 'Expected CTC', 'value': f"₹{application.expected_ctc}"})
-            if application.notice_period: tracker_fields.append({'label': 'Notice Period', 'value': application.notice_period})
+            c_ctc = application.current_ctc or candidate.current_ctc
+            e_ctc = application.expected_ctc or candidate.expected_ctc
+            np = application.notice_period or candidate.notice_period
+            
+            if c_ctc: tracker_fields.append({'label': 'Current CTC', 'value': f"₹{c_ctc}"})
+            if e_ctc: tracker_fields.append({'label': 'Expected CTC', 'value': f"₹{e_ctc}"})
+            if np: tracker_fields.append({'label': 'Notice Period', 'value': np})
 
         context['tracker_fields'] = tracker_fields
         context['header_color'] = header_color
@@ -126,8 +134,6 @@ def simulate_client_submission_email(application_id, client_email, recipient_nam
             except Exception as e:
                 logger.error(f"Could not read resume for client attachment: {e}")
 
-        # print(f"==========> [DEBUG] Starting client submission email to: {client_email}")
-        
         # Determine who sent it to set as the "From" address
         from_email = None
         if hasattr(application, 'client_submission') and application.client_submission.sent_by:
@@ -135,11 +141,6 @@ def simulate_client_submission_email(application_id, client_email, recipient_nam
         elif application.job.hiring_manager:
             from_email = application.job.hiring_manager.email
             
-        # print(f"==========> [DEBUG] EMAIL ROUTING INFO:")
-        # print(f"==========> [DEBUG]   FROM (override): {from_email or 'Default Org Email'}")
-        # print(f"==========> [DEBUG]   TO (recipient): {client_email}")
-        # print(f"==========> [DEBUG]   ORG: {org.name}")
-
         send_org_email(
             organization=org,
             subject=f"Candidate Profile: {candidate.candidate_name} — {application.job.title}",
@@ -149,10 +150,8 @@ def simulate_client_submission_email(application_id, client_email, recipient_nam
             attachments=attachments,
             from_email_override=from_email
         )
-        # print(f"==========> [DEBUG] Client submission email SUCCESS for application {application_id} to {client_email}")
         logger.info(f"Client submission email sent for application {application_id} to {client_email}")
     except Exception as e:
-        # print(f"==========> [DEBUG] Client submission email FAILED: {e}")
         logger.error(f"Client submission email failed for application {application_id}: {e}")
 
 
@@ -225,15 +224,19 @@ def simulate_bulk_client_submission_email(application_ids, client_email, recipie
                 val = ""
                 col_norm = col.strip().lower().replace(' ', '_')
                 
-                if col_norm in ['candidate_name', 'name']: val = candidate.candidate_name
-                elif col_norm == 'email': val = candidate.email
-                elif col_norm in ['phone', 'contact', 'contacts']: val = candidate.contact
-                elif col_norm in ['total_experience', 'experience', 'total_exp']: val = candidate.experience
-                elif col_norm == 'current_company': val = candidate.current_company
-                elif col_norm in ['current_designation', 'current_profile', 'designation', 'role']: val = candidate.current_profile
-                elif col_norm in ['current_ctc', 'ctc', 'cctc']: val = f"₹{app.current_ctc}" if app.current_ctc else ""
-                elif col_norm in ['expected_ctc', 'ectc']: val = f"₹{app.expected_ctc}" if app.expected_ctc else ""
-                elif col_norm == 'notice_period': val = app.notice_period
+                if col_norm in ['candidate_name', 'name', 'candidate']: val = candidate.candidate_name
+                elif col_norm in ['email', 'candidate_email_id', 'candidate_email', 'email_id']: val = candidate.email
+                elif col_norm in ['phone', 'contact', 'contacts', 'mobile_no.', 'mobile_no', 'mobile_number', 'mobile']: val = candidate.contact
+                elif col_norm in ['total_experience', 'experience', 'total_exp', 'exp']: val = candidate.experience
+                elif col_norm in ['current_company', 'company', 'organization']: val = candidate.current_company
+                elif col_norm in ['current_designation', 'current_profile', 'designation', 'role', 'c._designation', 'c_designation']: val = candidate.current_profile
+                elif col_norm in ['current_ctc', 'ctc', 'cctc']: 
+                    c_val = app.current_ctc or candidate.current_ctc
+                    val = f"₹{c_val}" if c_val else ""
+                elif col_norm in ['expected_ctc', 'ectc']: 
+                    e_val = app.expected_ctc or candidate.expected_ctc
+                    val = f"₹{e_val}" if e_val else ""
+                elif col_norm in ['notice_period', 'notice']: val = app.notice_period or candidate.notice_period
                 elif col_norm in ['current_location', 'address', 'location']: val = shorten_location(candidate.current_location)
                 elif col_norm == 'preferred_location': val = shorten_location(candidate.preferred_location)
                 elif col_norm == 'hike': val = app.hike
@@ -309,9 +312,12 @@ def simulate_interview_reminder(interview_schedule_id):
                 user=uploader,
                 organization=org,
                 title="Interview Reminder",
-                message=f"Interview for {candidate.candidate_name} is in 24 hours.",
+                message=f"Upcoming interview for {schedule.application.candidate.candidate_name} scheduled at {schedule.time.strftime('%I:%M %p') if schedule.time else ''}.",
                 type='warning',
-                link=f"/positions/{application.job.id}/pipeline"
+                link=f"/positions/{application.job.id}/pipeline",
+                name=schedule.application.candidate.candidate_name,
+                event="Interview Reminder",
+                process="Interview"
             )
 
             # Also send email reminder
@@ -328,6 +334,9 @@ def simulate_interview_reminder(interview_schedule_id):
                     'notes': schedule.notes,
                     'candidate_link': f"/positions/{application.job.id}/pipeline",
                     'plain_message': f"This is a reminder that the interview for {candidate.candidate_name} for {application.job.title} is scheduled for tomorrow.\nPlease review the interview details and ensure all necessary arrangements are in place.",
+                    'notification_name': candidate.candidate_name,
+                    'notification_event': "Interview Reminder",
+                    'notification_process': "Interview"
                 }
                 send_org_email(
                     organization=org,
@@ -349,7 +358,6 @@ def simulate_interview_reminder(interview_schedule_id):
 @run_in_thread
 def simulate_resume_submission_notification(obj_id):
     """Notify about new resume submission. Supports Application (job-specific) or pure pool Candidate (obj_id = candidate.id)."""
-    print(f"==========> [DEBUG] simulate_resume_submission_notification called for ID: {obj_id}")
     try:
         application = Application.objects.select_related('candidate', 'job', 'job__client', 'organization').get(id=obj_id)
         candidate = application.candidate
@@ -372,7 +380,10 @@ def simulate_resume_submission_notification(obj_id):
             'skills': ', '.join(candidate.skills) if candidate.skills else 'N/A',
             'synopsis': application.synopsis if application.synopsis else None,
             'url': f"{frontend_base}/positions/{application.job.id}/pipeline",
-            'plain_message': f"A new candidate, {candidate.candidate_name}, has been added for {application.job.title}.\nPlease review the candidate profile and take the necessary action."
+            'plain_message': f"A new candidate, {candidate.candidate_name}, has been added for {application.job.title}.\nPlease review the candidate profile and take the necessary action.",
+            'notification_name': candidate.candidate_name,
+            'notification_event': "New Resume",
+            'notification_process': "Application"
         }
         
         from accounts.email_utils import send_org_email
@@ -386,7 +397,10 @@ def simulate_resume_submission_notification(obj_id):
                 title="New Resume Submitted",
                 message=f"{candidate.candidate_name} submitted a resume for '{application.job.title}'.",
                 type='info',
-                link=f"/positions/{application.job.id}/pipeline"
+                link=f"/positions/{application.job.id}/pipeline",
+                name=candidate.candidate_name,
+                event="New Resume",
+                process="Application"
             )
 
         # Notify the Manager (Hiring Manager or the Creator of the Job)
@@ -447,7 +461,10 @@ def simulate_resume_submission_notification(obj_id):
             'education': ', '.join([e.get('degree', '') if isinstance(e, dict) else str(e) for e in candidate.education]) if candidate.education and isinstance(candidate.education, list) else 'N/A',
             'skills': ', '.join(candidate.skills) if candidate.skills else 'N/A',
             'url': f"{frontend_base}/candidates/{candidate.id}",
-            'plain_message': f"A new candidate, {candidate.candidate_name}, has been added for {application.job.title}.\nPlease review the candidate profile and take the necessary action."
+            'plain_message': f"A new candidate, {candidate.candidate_name}, has been added.",
+            'notification_name': candidate.candidate_name,
+            'notification_event': "New Resume",
+            'notification_process': "Talent Pool"
         }
         
         if candidate.uploaded_by:
@@ -457,18 +474,17 @@ def simulate_resume_submission_notification(obj_id):
                 title="New Resume in Pool",
                 message=f"{candidate.candidate_name} added to talent pool.",
                 type='info',
-                link=f"/candidates/{candidate.id}"
+                link=f"/candidates/{candidate.id}",
+                name=candidate.candidate_name,
+                event="New Resume",
+                process="Talent Pool"
             )
-
-        else:
-            print(f"==========> [DEBUG] IN-APP NOTIFICATION SKIPPED: 'uploaded_by' is empty")
                 
         logger.info(f"Resume submission notification fired for pool candidate {obj_id}")
     except Candidate.DoesNotExist:
         logger.warning(f"No Application or Candidate found for id={obj_id}")
     except Exception as e:
         logger.error(f"Pool notification error: {e}")
-        print(f"==========> [DEBUG] Pool notification error: {e}")
 
 @run_in_thread
 def send_interview_approval_request_email(schedule_id, action_user_id=None):
@@ -494,7 +510,10 @@ def send_interview_approval_request_email(schedule_id, action_user_id=None):
                 'interview_date': str(schedule.date),
                 'interview_time': str(schedule.time),
                 'url': f"{frontend_base}/approvals",
-                'plain_message': f"An interview has been proposed for {schedule.application.candidate.candidate_name}.\nPlease review the proposed schedule and approve or suggest an alternate time."
+                'plain_message': f"An interview has been proposed for {schedule.application.candidate.candidate_name} and requires your approval.",
+                'notification_name': schedule.application.candidate.candidate_name,
+                'notification_event': "Approval Required",
+                'notification_process': "Interview"
             }
             send_org_email(
                 organization=schedule.organization,
@@ -529,11 +548,10 @@ def send_interview_approval_result_email(schedule_id, action_user_id=None):
                 'candidate_name': schedule.application.candidate.candidate_name,
                 'status': schedule.manager_approval_status,
                 'url': f"{frontend_base}/positions/{schedule.application.job.id}/pipeline",
-                'plain_message': (
-                    f"The proposed interview schedule for {schedule.application.candidate.candidate_name} has been approved.\nPlease proceed with the interview arrangements and communicate the finalized details as required."
-                    if schedule.manager_approval_status == 'approved' else
-                    f"The interview schedule for {schedule.application.candidate.candidate_name} has been {schedule.manager_approval_status}."
-                )
+                'plain_message': f"The interview schedule for {schedule.application.candidate.candidate_name} has been {schedule.manager_approval_status}.",
+                'notification_name': schedule.application.candidate.candidate_name,
+                'notification_event': f"Approval {schedule.manager_approval_status.title()}",
+                'notification_process': "Interview"
             }
             send_org_email(
                 organization=schedule.organization,

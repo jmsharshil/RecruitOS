@@ -541,7 +541,10 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                         title="Candidate Moved to Interview Stage",
                         message=f"{application.candidate.candidate_name} has been moved to {stage.name}.",
                         type='info',
-                        link=f"/positions/{application.job.id}/pipeline"
+                        link=f"/positions/{application.job.id}/pipeline",
+                        name=application.candidate.candidate_name,
+                        event="Stage Update",
+                        process="Pipeline"
                     )
                     # Also send email alert to the recruiter
                     try:
@@ -1020,7 +1023,10 @@ def send_manager_review_email(application, from_email=None):
         "notes": application.manager_review_notes,
         "url": url,
         "org_name": application.organization.name if application.organization else "RecruitOS",
-        "plain_message": f"{application.candidate.candidate_name} has been reviewed and the current status is {application.manager_review_status}.\nPlease take note of the update and proceed with the next required action."
+        "plain_message": f"{application.candidate.candidate_name} has been reviewed and the current status is {application.manager_review_status}.\nPlease take note of the update and proceed with the next required action.",
+        "notification_name": application.candidate.candidate_name,
+        "notification_event": f"Review {application.manager_review_status.upper()}",
+        "notification_process": "Manager Review"
     }
 
     send_org_email(
@@ -1050,7 +1056,10 @@ def send_candidate_status_update_email(application, action, notes, recruiter):
         "recruiter_name": recruiter.name,
         "url": url,
         "org_name": application.organization.name if application.organization else "RecruitOS",
-        "plain_message": f"The status/stage of {application.candidate.candidate_name} for {application.job.title} has been updated by the recruiter.\nPlease review the update and proceed with the appropriate next steps."
+        "plain_message": f"The status/stage of {application.candidate.candidate_name} for {application.job.title} has been updated by the recruiter.\nPlease review the update and proceed with the appropriate next steps.",
+        "notification_name": application.candidate.candidate_name,
+        "notification_event": action,
+        "notification_process": "Status Update"
     }
 
     send_org_email(
