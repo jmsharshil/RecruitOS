@@ -89,12 +89,7 @@ class CandidateViewSet(viewsets.ModelViewSet):
         candidate.applications.update(
             current_ctc=candidate.current_ctc,
             expected_ctc=candidate.expected_ctc,
-            notice_period=candidate.notice_period,
-            hike=candidate.hike,
-            offer_in_hand=candidate.offer_in_hand,
-            reason_for_change=candidate.reason_for_change,
-            preferred_location=candidate.preferred_location,
-            dob=candidate.dob
+            notice_period=candidate.notice_period
         )
 
     def perform_destroy(self, instance):
@@ -327,10 +322,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = Application.objects.filter(is_deleted=False, organization=user.organization)
-        if user.role == UserRole.ADMIN:
+        if user.role in [UserRole.ADMIN, UserRole.MANAGER]:
             return qs
-        elif user.role == UserRole.MANAGER:
-            return qs.filter(Q(job__created_by=user) | Q(job__hiring_manager=user))
         elif user.role == UserRole.RECRUITER:
             return qs.filter(job__assigned_recruiters=user)
         return qs.none()
@@ -359,11 +352,6 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             if 'current_ctc' not in serializer.validated_data: defaults['current_ctc'] = candidate.current_ctc
             if 'expected_ctc' not in serializer.validated_data: defaults['expected_ctc'] = candidate.expected_ctc
             if 'notice_period' not in serializer.validated_data: defaults['notice_period'] = candidate.notice_period
-            if 'hike' not in serializer.validated_data: defaults['hike'] = candidate.hike
-            if 'offer_in_hand' not in serializer.validated_data: defaults['offer_in_hand'] = candidate.offer_in_hand
-            if 'reason_for_change' not in serializer.validated_data: defaults['reason_for_change'] = candidate.reason_for_change
-            if 'preferred_location' not in serializer.validated_data: defaults['preferred_location'] = candidate.preferred_location
-            if 'dob' not in serializer.validated_data: defaults['dob'] = candidate.dob
 
         application = serializer.save(
             organization=self.request.user.organization,
@@ -410,15 +398,13 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                     frontend_base = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))
                     url = f"{frontend_base}/positions/{application.job.id}/pipeline"
                     
-                    for recruiter in application.job.assigned_recruiters.all():
-                        if not recruiter.email:
-                            continue
-                            
+                    uploader = application.created_by or application.candidate.uploaded_by
+                    if uploader and uploader.organization_id == application.organization_id and uploader.email:
                         context = {
-                            "recruiter_name": recruiter.name,
+                            "recruiter_name": uploader.name,
                             "candidate_name": application.candidate.candidate_name,
                             "job_title": application.job.title,
-                            "status": application.status.replace('-', ' ').title(),
+                            "status": application.status,
                             "url": url,
                             "org_name": application.organization.name if application.organization else "RecruitOS",
                             "plain_message": f"The stage/status of {application.candidate.candidate_name} for {application.job.title} has been updated.\nPlease review the latest status and take the necessary action."
@@ -429,7 +415,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                             subject=f"Stage Update: {application.candidate.candidate_name} — {application.job.title}",
                             template_name="generic_email",
                             context=context,
-                            recipient_list=[recruiter.email],
+                            recipient_list=[uploader.email],
                             from_email_override=self.request.user.email
                         )
                 except Exception as e:
@@ -458,6 +444,12 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
         
+        # Prevent non-admin/manager from changing pipeline stage
+        if 'current_stage_id' in request.data:
+            if request.user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+                if str(instance.current_stage_id) != str(request.data.get('current_stage_id')):
+                    return Response({"error": "Only Admins and Managers can change the pipeline stage."}, status=403)
+        
         # If candidate data is provided, manually update the Candidate model
         # since it's marked as read_only in the ApplicationDetailSerializer.
         candidate_data = request.data.get('candidate')
@@ -479,6 +471,9 @@ class ApplicationViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='move-stage')
     def move_stage(self, request, pk=None):
+        if request.user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+            return Response({"error": "Only Admins and Managers can change the pipeline stage."}, status=403)
+            
         application = self.get_object()
         stage_id = request.data.get('stage_id')
         try:
@@ -513,12 +508,10 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                     frontend_base = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))
                     url = f"{frontend_base}/positions/{application.job.id}/pipeline"
                     
-                    for recruiter in application.job.assigned_recruiters.all():
-                        if not recruiter.email:
-                            continue
-                            
+                    uploader = application.created_by or application.candidate.uploaded_by
+                    if uploader and uploader.organization_id == application.organization_id and uploader.email:
                         context = {
-                            "recruiter_name": recruiter.name,
+                            "recruiter_name": uploader.name,
                             "candidate_name": application.candidate.candidate_name,
                             "job_title": application.job.title,
                             "status": stage.name,
@@ -532,7 +525,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                             subject=f"Stage Update: {application.candidate.candidate_name} — {application.job.title}",
                             template_name="generic_email",
                             context=context,
-                            recipient_list=[recruiter.email],
+                            recipient_list=[uploader.email],
                             from_email_override=request.user.email
                         )
                 except Exception as e:
@@ -540,9 +533,10 @@ class ApplicationViewSet(viewsets.ModelViewSet):
 
             if "interview" in stage.name.lower():
                 from notifications.models import Notification
-                for recruiter in application.job.assigned_recruiters.all():
+                uploader = application.created_by or application.candidate.uploaded_by
+                if uploader and uploader.organization_id == application.organization_id:
                     Notification.objects.create(
-                        user=recruiter,
+                        user=uploader,
                         organization=application.organization,
                         title="Candidate Moved to Interview Stage",
                         message=f"{application.candidate.candidate_name} has been moved to {stage.name}.",
@@ -551,16 +545,17 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                     )
                     # Also send email alert to the recruiter
                     try:
-                        from accounts.email_utils import send_org_email
-                        send_org_email(
-                            organization=application.organization,
-                            subject=f"Candidate Moved to Interview Stage: {application.candidate.candidate_name}",
-                            template_name='generic_email',
-                            context={
-                                'plain_message': f"{application.candidate.candidate_name} has been moved to the interview stage for {application.job.title}.\nPlease review the candidate details and proceed with the interview process."
-                            },
-                            recipient_list=[recruiter.email],
-                        )
+                        if uploader.email:
+                            from accounts.email_utils import send_org_email
+                            send_org_email(
+                                organization=application.organization,
+                                subject=f"Candidate Moved to Interview Stage: {application.candidate.candidate_name}",
+                                template_name='generic_email',
+                                context={
+                                    'plain_message': f"{application.candidate.candidate_name} has been moved to the interview stage for {application.job.title}.\nPlease review the candidate details and proceed with the interview process."
+                                },
+                                recipient_list=[uploader.email],
+                            )
                     except Exception as e:
                         logger.error(f"Failed to send interview stage alert email to recruiter: {e}")
 
@@ -577,6 +572,9 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         
         if not isinstance(application_ids, list) or not application_ids:
             raise ValidationError({"error": "Provide a list of application_ids"})
+
+        header_color = request.data.get('header_color')
+        text_color = request.data.get('text_color')
 
         applications = self.get_queryset().filter(id__in=application_ids).select_related('job', 'candidate', 'job__client')
         updated_count = 0
@@ -646,8 +644,25 @@ class ApplicationViewSet(viewsets.ModelViewSet):
 
         if valid_applications_by_client:
             from candidates.tasks import simulate_bulk_client_submission_email
+            from clients.models import TeamMemberTrackerFormat
+            from candidates.models import Job
+
             for (job_id, client_email, recipient_name), app_ids in valid_applications_by_client.items():
-                simulate_bulk_client_submission_email(app_ids, client_email, recipient_name)
+                final_header = header_color
+                final_text = text_color
+
+                if not (final_header and final_text):
+                    job = Job.objects.filter(id=job_id).select_related('client').first()
+                    if job and job.client:
+                        tf = TeamMemberTrackerFormat.objects.filter(
+                            client=job.client,
+                            team_member_id=str(job.team_member_id) if job.team_member_id else ""
+                        ).first()
+                        if tf:
+                            if not final_header: final_header = tf.header_color
+                            if not final_text: final_text = tf.text_color
+
+                simulate_bulk_client_submission_email(app_ids, client_email, recipient_name, final_header, final_text)
 
         return Response({
             "message": f"Successfully sent {updated_count} applications to client.",
@@ -1075,8 +1090,8 @@ class CalendarEventsView(APIView):
         )
 
         if user.role == UserRole.MANAGER:
-            interviews_qs   = interviews_qs.filter(application__job__created_by=user)
-            applications_qs = applications_qs.filter(job__created_by=user)
+            # Managers can see all events in their organization
+            pass
         elif user.role == UserRole.RECRUITER:
             interviews_qs   = interviews_qs.filter(application__job__assigned_recruiters=user)
             applications_qs = applications_qs.filter(job__assigned_recruiters=user)

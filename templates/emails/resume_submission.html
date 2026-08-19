@@ -8,6 +8,13 @@
     Please review the candidate profile and take the necessary action.
   </p>
 
+  {% if synopsis %}
+  <div style="background-color: #f8fafc; padding: 15px; border: 1px solid #e2e8f0; border-radius: 4px; margin-top: 15px;">
+    <h4 style="margin-top: 0; margin-bottom: 8px; color: #334155;">Synopsis</h4>
+    <p style="margin: 0; font-size: 14px; color: #475569;">{{ synopsis|linebreaksbr }}</p>
+  </div>
+  {% endif %}
+
   <table style="width: 100%; border-collapse: collapse; margin-top: 15px; border: 1px solid #e2e8f0; font-size: 14px;">
     <tr style="background-color: #f8fafc;">
       <th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left; width: 30%;">Name</th>
@@ -44,5 +51,11 @@
   </table>
 
   <br/>
-  <p>Please log in to the platform to view the full profile and resume.</p>
+  {% if url %}
+    <div class="btn-wrapper">
+      <a href="{{ url }}" class="btn">View Candidate</a>
+    </div>
+  {% else %}
+    <p>Please log in to the platform to view the full profile and resume.</p>
+  {% endif %}
 {% endblock %}

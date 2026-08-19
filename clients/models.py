@@ -88,6 +88,8 @@ class TeamMemberTrackerFormat(BaseModel):
     
     # Store a list of column names e.g. ["candidate_name", "ctc", "experience"]
     columns = models.JSONField(default=list)
+    header_color = models.CharField(max_length=20, null=True, blank=True)
+    text_color = models.CharField(max_length=20, null=True, blank=True)
     created_by = models.ForeignKey(
         'accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='created_tracker_formats'
     )

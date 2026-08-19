@@ -31,10 +31,8 @@ class JobViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = Job.objects.filter(is_deleted=False, organization=user.organization)
-        if user.role == UserRole.ADMIN:
+        if user.role in [UserRole.ADMIN, UserRole.MANAGER]:
             return qs
-        elif user.role == UserRole.MANAGER:
-            return qs.filter(Q(created_by=user) | Q(hiring_manager=user))
         elif user.role == UserRole.RECRUITER:
             return qs.filter(assigned_recruiters=user)
         return Job.objects.none()

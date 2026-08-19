@@ -56,10 +56,7 @@ class JobExportView(APIView):
             qs = Job.objects.select_related('client').filter(
                 is_deleted=False, organization=request.user.organization
             )
-            user = request.user
-            if user.role == UserRole.MANAGER:
-                qs = qs.filter(created_by=user)
-            # ADMIN sees all org jobs; RECRUITER blocked by IsAdminOrManager
+            # ADMIN and MANAGER see all org jobs; RECRUITER blocked by IsAdminOrManager
             # Note: Matches FDD RBAC; aligned with CandidateExportView QS pattern
 
             status_filter = request.query_params.get('status')

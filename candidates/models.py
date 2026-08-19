@@ -116,6 +116,7 @@ class Application(BaseModel):
         max_length=30, choices=ManagerReviewStatus.choices, default=ManagerReviewStatus.PENDING
     )
     manager_review_notes = models.TextField(blank=True)
+    synopsis = models.TextField(blank=True)
     tracker_custom_fields = models.JSONField(default=dict, blank=True)
 
     class Meta:

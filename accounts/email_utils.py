@@ -201,9 +201,44 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
 
     plain_message = context.get('plain_message', subject)
     
+    # --- Auto-generate in-app notifications for registered users ---
+    try:
+        from notifications.models import Notification, NotificationType
+        target_roles = context.get('target_roles', [])
+        
+        if target_roles:
+            users_to_notify = User.objects.filter(role__in=target_roles, is_active=True)
+            if organization:
+                users_to_notify = users_to_notify.filter(organization=organization)
+        else:
+            users_to_notify = User.objects.filter(email__in=recipient_list)
+            if organization:
+                users_to_notify = users_to_notify.filter(organization=organization)
+            
+        notifications_list = []
+        for u in users_to_notify:
+            link = context.get('url', '')
+            notifications_list.append(
+                Notification(
+                    user=u,
+                    organization=organization,
+                    title=subject,
+                    message=plain_message,
+                    type=NotificationType.INFO,
+                    name=context.get('notification_name', context.get('name', '')),
+                    event=context.get('notification_event', context.get('event', '')),
+                    process=context.get('notification_process', context.get('process', '')),
+                    link=link
+                )
+            )
+        if notifications_list:
+            Notification.objects.bulk_create(notifications_list)
+    except Exception as e:
+        logger.error(f"Failed to create in-app notifications in send_org_email: {e}")
+
+    
     if from_email_override:
-        org_name = branding.get('org_name', getattr(organization, 'name', 'RecruitOS'))
-        from_email = f"{org_name} <{from_email_override}>"
+        from_email = from_email_override
         
         # --- NEW: Check if the override user has Google API Tokens ---
         try:

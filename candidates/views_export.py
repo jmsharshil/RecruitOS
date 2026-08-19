@@ -18,9 +18,9 @@ from accounts.models import UserRole
 
 CANDIDATE_EXPORT_HEADERS = [
     'candidate_name', 'profile_name', 'current_company', 'current_profile',
-    'experience', 'current_location', 'preferred_location',
-    'education', 'contact', 'email', 'dob', 'doc',
-    'current_ctc', 'expected_ctc', 'notice_period', 'offer_in_hand',
+    'experience', 'current_location',
+    'education', 'contact', 'email', 'doc',
+    'current_ctc', 'expected_ctc', 'notice_period',
     'status', 'share_date', 'feedback', 'job_title',
 ]
 
@@ -53,9 +53,9 @@ class CandidateExportView(APIView):
             # Pool candidates omit per-job fields; job_title links to Application.
             rows = [[
                 'Rahul Sharma', 'Software Engineer', 'Tech Solutions Ltd', 'Senior Backend Dev',
-                '6 years', 'Bangalore', 'Bangalore, Remote',
+                '6 years', 'Bangalore',
                 'B.Tech in Computer Science', '+919876543210', 'rahul.sharma@email.com',
-                '1995-05-15', '2024-01-10', 1200000, 1800000, '30 days', 0,
+                '2024-01-10', 1200000, 1800000, '30 days',
                 'SCREENING', '2024-01-10', 'Strong Python/Django background', 'Senior Python Developer'
             ]]
             ext = 'xlsx' if export_format == 'xlsx' else 'csv'
@@ -68,12 +68,8 @@ class CandidateExportView(APIView):
                 organization=user.organization
             ).prefetch_related('applications__job')
 
-            if user.role == UserRole.ADMIN:
+            if user.role in [UserRole.ADMIN, UserRole.MANAGER]:
                 pass  # full org
-            elif user.role == UserRole.MANAGER:
-                qs = qs.filter(
-                    Q(applications__job__created_by=user) | Q(applications__isnull=True)
-                ).distinct()
             elif user.role == UserRole.RECRUITER:
                 # Recruiters see full org talent pool + candidates from their assigned jobs
                 # (consistent with updated CandidateViewSet.get_queryset())
@@ -106,11 +102,11 @@ class CandidateExportView(APIView):
 
                 rows.append([
                     c.candidate_name, c.profile_name, c.current_company, c.current_profile,
-                    c.experience, c.current_location, getattr(app, 'preferred_location', ''),
+                    c.experience, c.current_location,
                     str(c.education or ''), c.contact, c.email,
-                    getattr(app, 'dob', ''), getattr(app, 'doc', ''),
+                    getattr(app, 'doc', ''),
                     float(getattr(app, 'current_ctc', 0) or 0), float(getattr(app, 'expected_ctc', 0) or 0),
-                    getattr(app, 'notice_period', ''), getattr(app, 'offer_in_hand', 0) or 0,
+                    getattr(app, 'notice_period', ''),
                     status, share_date, feedback,
                     job_title,
                 ])
@@ -236,14 +232,7 @@ class CandidateImportView(APIView):
                         CandidateStatus.SCREENING.value
                     )
 
-                    # Flexible date parsing for dob, doc, share_date
-                    dob = None
-                    dob_raw = row.get('dob')
-                    if dob_raw and str(dob_raw).strip() not in ('', 'None', 'null'):
-                        try:
-                            dob = date_parser.to_internal_value(str(dob_raw).strip())
-                        except Exception:
-                            dob = None
+                    # Flexible date parsing for doc, share_date
 
                     doc = None
                     doc_raw = row.get('doc')
@@ -263,9 +252,7 @@ class CandidateImportView(APIView):
                         except Exception:
                             pass  # fallback to today
 
-                    offer = safe_float(row.get('offer_in_hand'))
-                    if offer is not None:
-                        offer = Decimal(offer)
+                    # offer_in_hand removed from import
 
                     with transaction.atomic():
                         Application.objects.create(
@@ -276,10 +263,6 @@ class CandidateImportView(APIView):
                             current_ctc=Decimal(safe_float(row.get('current_ctc')) or 0),
                             expected_ctc=Decimal(safe_float(row.get('expected_ctc')) or 0),
                             notice_period=row.get('notice_period', 'Not specified'),
-                            reason_for_change=row.get('reason_for_change', 'Imported via file'),
-                            preferred_location=row.get('preferred_location', ''),
-                            offer_in_hand=offer,
-                            dob=dob,
                             doc=doc,
                             feedback=row.get('feedback', ''),
                             share_date=share_date,

@@ -72,11 +72,6 @@ class ApplicationListSerializer(serializers.ModelSerializer):
     current_ctc = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     expected_ctc = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     notice_period = serializers.CharField(read_only=True)
-    hike = serializers.CharField(read_only=True)
-    preferred_location = serializers.CharField(read_only=True)
-    offer_in_hand = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
-    reason_for_change = serializers.CharField(read_only=True)
-    dob = serializers.DateField(read_only=True)
     
     job_title      = serializers.CharField(source='job.title', read_only=True)
     stage_name     = serializers.SerializerMethodField()
@@ -106,8 +101,7 @@ class ApplicationListSerializer(serializers.ModelSerializer):
             'candidate_current_company', 'candidate_current_location',
             'candidate_skills', 'candidate_education',
             'job_title', 'status', 'stage_name', 'share_date', 'created_at',
-            'current_ctc', 'expected_ctc', 'notice_period', 'hike',
-            'preferred_location', 'offer_in_hand', 'reason_for_change', 'dob',
+            'current_ctc', 'expected_ctc', 'notice_period', 'synopsis',
             'submitted_by', 'candidate_cv', 'interview_schedule',
             'manager_review_status', 'manager_review_notes',
             # write-only
@@ -174,7 +168,6 @@ class ApplicationDetailSerializer(serializers.ModelSerializer):
     past_jobs          = serializers.SerializerMethodField()
     history            = ApplicationHistorySerializer(many=True, read_only=True)
     share_date         = DateParserField(required=False, allow_null=True)
-    dob                = DateParserField(required=False, allow_null=True)
     doc                = DateParserField(required=False, allow_null=True)
     created_at         = DateParserDateTimeField(read_only=True)
     updated_at         = DateParserDateTimeField(read_only=True)
@@ -193,7 +186,7 @@ class ApplicationDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Application
-        fields = '__all__'
+        exclude = ['hike', 'preferred_location', 'offer_in_hand', 'reason_for_change', 'dob']
         read_only_fields = ['id', 'organization', 'is_deleted', 'manager_review_status', 'manager_review_notes']
 
     def to_representation(self, instance):
@@ -250,12 +243,7 @@ class ApplicationDetailSerializer(serializers.ModelSerializer):
         required_fields = {
             'current_ctc': 'Current CTC',
             'expected_ctc': 'Expected CTC',
-            'hike': 'Hike',
             'notice_period': 'Notice Period',
-            'offer_in_hand': 'Offer in Hand',
-            'preferred_location': 'Pref. Location',
-            'reason_for_change': 'Reason for Change',
-            'dob': 'Date of Birth'
         }
         
         errors = {}
@@ -357,7 +345,7 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Candidate
-        fields = '__all__'
+        exclude = ['hike', 'preferred_location', 'offer_in_hand', 'reason_for_change', 'dob']
         read_only_fields = [
             'id', 'created_at', 'updated_at', 'is_deleted', 'deleted_at',
             'organization', 'uploaded_by',
@@ -369,8 +357,6 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
         for field in ['current_ctc', 'expected_ctc']:
             if field in mutable_data and mutable_data[field] in ["", None]:
                 mutable_data[field] = 0
-        if 'offer_in_hand' in mutable_data and mutable_data['offer_in_hand'] in ["", None]:
-            mutable_data['offer_in_hand'] = None
             
         return super().to_internal_value(mutable_data)
 

@@ -18,145 +18,79 @@
     }
 
     body {
-      font-family: 'Segoe UI', Arial, sans-serif;
-      background-color: #f1f5f9;
-      color: #1e293b;
+      font-family: Arial, sans-serif;
+      background-color: #ffffff;
+      color: #333333;
+      line-height: 1.6;
     }
 
     .wrapper {
-      max-width: 600px;
-      margin: 40px auto;
-      background: #ffffff;
-      border-radius: 12px;
-      overflow: hidden;
-      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
-    }
-
-    /* Header */
-    .header {
-      background: {{ primary_color|default:"#1e40af" }};
-      padding: 32px 40px;
-      text-align: center;
-    }
-
-    .header img {
-      max-height: 48px;
-      margin-bottom: 12px;
-    }
-
-    .header h1 {
-      color: #ffffff;
-      font-size: 22px;
-      font-weight: 700;
-      letter-spacing: -0.3px;
-    }
-
-    .header .tagline {
-      color: rgba(255, 255, 255, 0.75);
-      font-size: 13px;
-      margin-top: 4px;
-    }
-
-    /* Body */
-    .body {
-      padding: 40px 40px 32px;
+      max-width: 900px;
+      margin: 20px auto;
+      padding: 0 20px;
     }
 
     .body p {
-      font-size: 15px;
-      line-height: 1.7;
-      color: #374151;
-      margin-bottom: 16px;
-    }
-
-    .body h2 {
-      font-size: 18px;
-      font-weight: 600;
-      color: #111827;
-      margin-bottom: 8px;
+      font-size: 14px;
+      margin-bottom: 15px;
     }
 
     /* CTA Button */
     .btn-wrapper {
-      text-align: center;
-      margin: 28px 0;
+      margin: 20px 0;
     }
 
     .btn {
       display: inline-block;
-      padding: 14px 36px;
-      background: {{ primary_color|default:"#1e40af" }};
+      padding: 10px 20px;
+      background: {{ primary_color|default:"#2563eb" }};
       color: #ffffff !important;
       text-decoration: none;
-      border-radius: 8px;
-      font-size: 15px;
-      font-weight: 600;
-      letter-spacing: 0.2px;
+      border-radius: 4px;
+      font-size: 14px;
+      font-weight: bold;
     }
 
     .btn:hover {
-      opacity: 0.92;
+      opacity: 0.9;
     }
 
     /* Divider */
     .divider {
       height: 1px;
-      background: #e5e7eb;
-      margin: 24px 0;
+      background: #eeeeee;
+      margin: 20px 0;
     }
 
     .info-box {
-      background: {{ secondary_color|default:"#f8fafc" }};
-      border-left: 4px solid {{ primary_color|default:"#1e40af" }};
-      padding: 16px 20px;
-      border-radius: 4px;
+      background: #f9f9f9;
+      border-left: 4px solid {{ primary_color|default:"#2563eb" }};
+      padding: 15px;
       margin-bottom: 20px;
     }
 
     .info-box p {
       margin: 0;
       font-size: 14px;
-      color: #374151;
-    }
-
-    /* Link fallback */
-    .link-fallback {
-      word-break: break-all;
-      font-size: 13px;
-      color: #6b7280;
     }
 
     .footer {
-      background: {{ secondary_color|default:"#f8fafc" }};
-      padding: 20px 40px;
-      text-align: center;
-      border-top: 1px solid #e5e7eb;
+      margin-top: 30px;
+      padding-top: 15px;
+      border-top: 1px solid #eeeeee;
     }
 
     .footer p {
       font-size: 12px;
-      color: #9ca3af;
-      line-height: 1.6;
-    }
-
-    .footer a {
-      color: {{ primary_color|default:"#1e40af" }};
-      text-decoration: none;
+      color: #888888;
+      line-height: 1.5;
+      margin-bottom: 5px;
     }
   </style>
 </head>
 
 <body>
   <div class="wrapper">
-    <!-- Header -->
-    <div class="header">
-      {% if org_logo %}
-      <img src="{{ org_logo }}" alt="{{ org_name }} logo" />
-      {% endif %}
-      <h1>{{ org_name }}</h1>
-      <p class="tagline">Powered by RECRUIT-OS</p>
-    </div>
-
     <!-- Content block -->
     <div class="body">
       {% block content %}{% endblock %}
@@ -169,7 +103,7 @@
         {{ footer_text }}
         {% else %}
         &copy; {{ org_name }}. All rights reserved.<br />
-        This email was sent by RecruitSmart ATS.
+        This email was sent via RecruitOS.
         {% endif %}
       </p>
     </div>

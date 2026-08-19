@@ -11,11 +11,21 @@ class NotificationViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return Notification.objects.filter(
+        qs = Notification.objects.filter(
             is_deleted=False,
             organization=self.request.user.organization,
             user=self.request.user
         )
+        
+        unread = self.request.query_params.get('unread')
+        if unread and unread.lower() in ['true', '1']:
+            qs = qs.filter(read=False)
+            
+        limit = self.request.query_params.get('limit')
+        if limit and limit.isdigit():
+            qs = qs[:int(limit)]
+            
+        return qs
 
     def perform_create(self, serializer):
         notification = serializer.save(
@@ -52,26 +62,31 @@ class NotificationViewSet(viewsets.ModelViewSet):
             f"Deleted notification '{instance.title}'"
         )
 
-    @action(detail=True, methods=['patch'], url_path='read')
-    def mark_read(self, request, pk=None):
-        notification = self.get_object()
-        notification.read = True
-        notification.save()
-        log_action(
-            request.user, 
-            'updated', 
-            'Notification', 
-            notification.id, 
-            f"Marked notification '{notification.title}' as read"
-        )
-        return Response(NotificationSerializer(notification).data)
+    @action(detail=False, methods=['patch'], url_path='mark-read')
+    def bulk_mark_read(self, request):
+        """
+        API to mark one or multiple notifications as read/unread.
+        Payload:
+        {
+            "id": "uuid", OR "ids": ["uuid1", "uuid2"],
+            "is_read": true
+        }
+        """
+        data = request.data
+        ids = data.get('ids', [])
+        single_id = data.get('id')
+        is_read = data.get('is_read', True)
+
+        if single_id and single_id not in ids:
+            ids.append(single_id)
+            
+        if not ids:
+            return Response({"error": "Please provide 'id' or 'ids' in payload"}, status=400)
+            
+        updated_count = self.get_queryset().filter(id__in=ids).update(read=is_read)
+        return Response({"message": f"Successfully updated {updated_count} notifications."})
 
     @action(detail=False, methods=['post'], url_path='mark-all-read')
     def mark_all_read(self, request):
         self.get_queryset().update(read=True)
         return Response({"message": "All notifications marked as read"})
-
-    @action(detail=False, methods=['get'], url_path='unread-count')
-    def unread_count(self, request):
-        count = self.get_queryset().filter(read=False).count()
-        return Response({"count": count})

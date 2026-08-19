@@ -8,12 +8,24 @@
     Kindly review the profiles and let us know which candidates you would like to take forward.
   </p>
 
+  {% if synopses %}
+  <div style="background-color: #f8fafc; padding: 15px; border: 1px solid #e2e8f0; border-radius: 4px; margin-top: 15px; margin-bottom: 20px;">
+    <h4 style="margin-top: 0; margin-bottom: 15px; color: #334155;">Candidate Synopses</h4>
+    {% for item in synopses %}
+      <div style="margin-bottom: 12px;">
+        <strong style="color: #0f172a; font-size: 14px;">{{ item.name }}</strong>
+        <p style="margin: 4px 0 0 0; font-size: 13px; color: #475569;">{{ item.text|linebreaksbr }}</p>
+      </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   <div style="overflow-x: auto;">
     <table style="width: 100%; border-collapse: collapse; margin-top: 15px; border: 1px solid #e2e8f0; font-size: 13px;">
       <thead>
-        <tr style="background-color: #f1f5f9;">
+        <tr style="background-color: {{ header_color|default:'#f1f5f9' }};">
           {% for header in tracker_headers %}
-          <th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left; white-space: nowrap;">{{ header }}</th>
+          <th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left; white-space: nowrap; color: {{ text_color|default:'inherit' }};">{{ header }}</th>
           {% endfor %}
         </tr>
       </thead>
