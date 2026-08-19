@@ -308,7 +308,8 @@ def simulate_interview_reminder(interview_schedule_id):
         # In-app notifications for the uploader (ensure same organization)
         uploader = application.created_by or candidate.uploaded_by
         if uploader and uploader.organization_id == org.id:
-            Notification.objects.create(
+            from notifications.services import NotificationService
+            NotificationService.create_notification(
                 user=uploader,
                 organization=org,
                 title="Interview Reminder",
@@ -391,7 +392,8 @@ def simulate_resume_submission_notification(obj_id):
         # Notify the uploader (ensure same organization)
         uploader = application.created_by or application.candidate.uploaded_by
         if uploader and uploader.organization_id == org.id:
-            Notification.objects.create(
+            from notifications.services import NotificationService
+            NotificationService.create_notification(
                 user=uploader,
                 organization=org,
                 title="New Resume Submitted",
@@ -468,7 +470,8 @@ def simulate_resume_submission_notification(obj_id):
         }
         
         if candidate.uploaded_by:
-            Notification.objects.create(
+            from notifications.services import NotificationService
+            NotificationService.create_notification(
                 user=candidate.uploaded_by,
                 organization=org,
                 title="New Resume in Pool",

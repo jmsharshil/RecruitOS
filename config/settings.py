@@ -13,6 +13,7 @@ ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,recruitos-c
 # Frontend URLs for emails and CORS
 FRONTEND_URL = config('FRONTEND_URL', default='https://recruitos.jmstech.co')
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -36,6 +37,7 @@ INSTALLED_APPS = [
     'notifications',
     'audit',
     'common',
+    'channels',
 ]
 
 AUTH_USER_MODEL = 'accounts.User'
@@ -72,6 +74,13 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'config.wsgi.application'
+ASGI_APPLICATION = 'config.asgi.application'
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    },
+}
 
 CONNECTION_STRING = os.environ.get('AZURE_POSTGRESQL_CONNECTIONSTRING')
 

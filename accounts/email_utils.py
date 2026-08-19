@@ -203,7 +203,9 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
     
     # --- Auto-generate in-app notifications for registered users ---
     try:
-        from notifications.models import Notification, NotificationType
+        from notifications.models import NotificationType
+        from notifications.services import NotificationService
+        
         target_roles = context.get('target_roles', [])
         
         if target_roles:
@@ -215,24 +217,19 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
             if organization:
                 users_to_notify = users_to_notify.filter(organization=organization)
             
-        notifications_list = []
         for u in users_to_notify:
             link = context.get('url', '')
-            notifications_list.append(
-                Notification(
-                    user=u,
-                    organization=organization,
-                    title=subject,
-                    message=plain_message,
-                    type=NotificationType.INFO,
-                    name=context.get('notification_name', context.get('name', '')),
-                    event=context.get('notification_event', context.get('event', '')),
-                    process=context.get('notification_process', context.get('process', '')),
-                    link=link
-                )
+            NotificationService.create_notification(
+                user=u,
+                organization=organization,
+                title=subject,
+                message=plain_message,
+                type=NotificationType.INFO,
+                name=context.get('notification_name', context.get('name', '')),
+                event=context.get('notification_event', context.get('event', '')),
+                process=context.get('notification_process', context.get('process', '')),
+                link=link
             )
-        if notifications_list:
-            Notification.objects.bulk_create(notifications_list)
     except Exception as e:
         logger.error(f"Failed to create in-app notifications in send_org_email: {e}")
 

@@ -532,10 +532,10 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                     logger.error(f"Failed to notify recruiters of stage change: {e}")
 
             if "interview" in stage.name.lower():
-                from notifications.models import Notification
+                from notifications.services import NotificationService
                 uploader = application.created_by or application.candidate.uploaded_by
                 if uploader and uploader.organization_id == application.organization_id:
-                    Notification.objects.create(
+                    NotificationService.create_notification(
                         user=uploader,
                         organization=application.organization,
                         title="Candidate Moved to Interview Stage",

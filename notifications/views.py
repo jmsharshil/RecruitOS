@@ -28,10 +28,15 @@ class NotificationViewSet(viewsets.ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
-        notification = serializer.save(
+        from notifications.services import NotificationService
+        
+        # Save via service to trigger WebSocket broadcast
+        notification = NotificationService.create_notification(
             user=self.request.user,
-            organization=self.request.user.organization
+            organization=self.request.user.organization,
+            **serializer.validated_data
         )
+        
         log_action(
             self.request.user, 
             'created', 
