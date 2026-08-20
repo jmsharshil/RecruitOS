@@ -49,7 +49,7 @@ class ClientViewSet(viewsets.ModelViewSet):
         return Client.objects.none()
 
     def get_permissions(self):
-        if self.action in ['list', 'retrieve']:
+        if self.action in ['list', 'retrieve', 'general_dropdown']:
             return [permissions.IsAuthenticated()]
         if self.action == 'destroy':
             return [IsAdmin()]
