@@ -254,41 +254,39 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
             message['from'] = from_email
             message['subject'] = subject
 
-                part1 = MIMEText(plain_message, 'plain')
-                part2 = MIMEText(html_message, 'html')
-                message.attach(part1)
-                message.attach(part2)
+            part1 = MIMEText(plain_message, 'plain')
+            part2 = MIMEText(html_message, 'html')
+            message.attach(part1)
+            message.attach(part2)
 
-                if attachments:
-                    from email.mime.base import MIMEBase
-                    from email import encoders
-                    for filename, content, mimetype in attachments:
-                        maintype, subtype = mimetype.split('/', 1)
-                        part = MIMEBase(maintype, subtype)
-                        part.set_payload(content)
-                        encoders.encode_base64(part)
-                        part.add_header('Content-Disposition', f'attachment; filename="{filename}"')
-                        message.attach(part)
+            if attachments:
+                from email.mime.base import MIMEBase
+                from email import encoders
+                for filename, content, mimetype in attachments:
+                    maintype, subtype = mimetype.split('/', 1)
+                    part = MIMEBase(maintype, subtype)
+                    part.set_payload(content)
+                    encoders.encode_base64(part)
+                    part.add_header('Content-Disposition', f'attachment; filename="{filename}"')
+                    message.attach(part)
 
-                raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+            raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
 
-                creds = Credentials(
-                    token=sender_user.google_access_token,
-                    refresh_token=sender_user.google_refresh_token,
-                    token_uri="https://oauth2.googleapis.com/token",
-                    client_id=getattr(settings, 'GOOGLE_OAUTH_CLIENT_ID', None),
-                    client_secret=getattr(settings, 'GOOGLE_OAUTH_CLIENT_SECRET', None),
-                )
-                service = build('gmail', 'v1', credentials=creds)
-                
-                try:
-                    sent_msg = service.users().messages().send(userId='me', body={'raw': raw_message}).execute()
-                    logger.info(f"Successfully sent via Gmail API! Message ID: {sent_msg['id']}")
-                    return  # Exit early, we sent it successfully via API
-                except Exception as e:
-                    logger.error(f"Gmail API send failed: {e}. Falling back to standard SMTP.")
-        except User.DoesNotExist:
-            pass
+            creds = Credentials(
+                token=sender_user.google_access_token,
+                refresh_token=sender_user.google_refresh_token,
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=getattr(settings, 'GOOGLE_OAUTH_CLIENT_ID', None),
+                client_secret=getattr(settings, 'GOOGLE_OAUTH_CLIENT_SECRET', None),
+            )
+            service = build('gmail', 'v1', credentials=creds)
+            
+            try:
+                sent_msg = service.users().messages().send(userId='me', body={'raw': raw_message}).execute()
+                logger.info(f"Successfully sent via Gmail API! Message ID: {sent_msg['id']}")
+                return  # Exit early, we sent it successfully via API
+            except Exception as e:
+                logger.error(f"Gmail API send failed: {e}. Falling back to standard SMTP.")
     else:
         from_email = get_org_from_email(organization)
 
