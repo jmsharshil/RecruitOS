@@ -34,6 +34,11 @@ class NotificationService:
                 "link": notification.link,
                 "created_at": notification.created_at.isoformat(),
                 "is_read": notification.read,
+                "from": {
+                    "id": str(notification.from_user.id),
+                    "name": notification.from_user.name,
+                    "email": notification.from_user.email,
+                } if notification.from_user else None,
             }
             
             async_to_sync(channel_layer.group_send)(

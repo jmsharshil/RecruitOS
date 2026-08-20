@@ -537,6 +537,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 if uploader and uploader.organization_id == application.organization_id:
                     NotificationService.create_notification(
                         user=uploader,
+                        from_user=request.user,
                         organization=application.organization,
                         title="Candidate Moved to Interview Stage",
                         message=f"{application.candidate.candidate_name} has been moved to {stage.name}.",

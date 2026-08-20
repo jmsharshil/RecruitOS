@@ -49,7 +49,7 @@ class JobViewSet(viewsets.ModelViewSet):
         for recruiter in new_recruiters:
             try:
                 frontend_base = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))
-                url = f"{frontend_base}/jobs/{job.id}"
+                url = f"{frontend_base}/positions/{job.id}"
                 context = {
                     'recruiter_name': recruiter.name,
                     'job_title': job.title,

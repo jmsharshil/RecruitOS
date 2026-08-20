@@ -201,6 +201,13 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
 
     plain_message = context.get('plain_message', subject)
     
+    sender_user = None
+    if from_email_override:
+        try:
+            sender_user = User.objects.get(email=from_email_override)
+        except User.DoesNotExist:
+            pass
+
     # --- Auto-generate in-app notifications for registered users ---
     try:
         from notifications.models import NotificationType
@@ -221,6 +228,7 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
             link = context.get('url', '')
             NotificationService.create_notification(
                 user=u,
+                from_user=sender_user,
                 organization=organization,
                 title=subject,
                 message=plain_message,
@@ -238,15 +246,13 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
         from_email = from_email_override
         
         # --- NEW: Check if the override user has Google API Tokens ---
-        try:
-            sender_user = User.objects.get(email=from_email_override)
-            if sender_user.google_access_token:
-                logger.info(f"Attempting to send email via Gmail API for {from_email_override}")
-                # Create a MIME message
-                message = MIMEMultipart('alternative')
-                message['to'] = ", ".join(recipient_list)
-                message['from'] = from_email
-                message['subject'] = subject
+        if sender_user and sender_user.google_access_token:
+            logger.info(f"Attempting to send email via Gmail API for {from_email_override}")
+            # Create a MIME message
+            message = MIMEMultipart('alternative')
+            message['to'] = ", ".join(recipient_list)
+            message['from'] = from_email
+            message['subject'] = subject
 
                 part1 = MIMEText(plain_message, 'plain')
                 part2 = MIMEText(html_message, 'html')

@@ -12,6 +12,7 @@ class NotificationType(models.TextChoices):
 class Notification(BaseModel):
     id         = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user       = models.ForeignKey(User, related_name='notifications', on_delete=models.CASCADE)
+    from_user  = models.ForeignKey(User, related_name='sent_notifications', on_delete=models.SET_NULL, null=True, blank=True)
     title      = models.CharField(max_length=200)
     message    = models.TextField()
     type       = models.CharField(max_length=10, choices=NotificationType.choices, default=NotificationType.INFO)
