@@ -226,6 +226,13 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
             
         for u in users_to_notify:
             link = context.get('url', '')
+            if link and link.startswith('http'):
+                from urllib.parse import urlparse
+                parsed = urlparse(link)
+                link = parsed.path
+                if parsed.query:
+                    link = f"{link}?{parsed.query}"
+            
             NotificationService.create_notification(
                 user=u,
                 from_user=sender_user,

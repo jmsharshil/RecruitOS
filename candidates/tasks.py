@@ -324,6 +324,7 @@ def simulate_interview_reminder(interview_schedule_id):
             # Also send email reminder
             try:
                 from accounts.email_utils import send_org_email
+                frontend_base = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))
                 context = {
                     'recruiter_name': uploader.name,
                     'candidate_name': candidate.candidate_name,
@@ -333,7 +334,7 @@ def simulate_interview_reminder(interview_schedule_id):
                     'interview_mode': schedule.mode,
                     'interviewer_name': schedule.interviewer_name,
                     'notes': schedule.notes,
-                    'candidate_link': f"/positions/{application.job.id}/pipeline",
+                    'candidate_link': f"{frontend_base}/positions/{application.job.id}/pipeline",
                     'plain_message': f"This is a reminder that the interview for {candidate.candidate_name} for {application.job.title} is scheduled for tomorrow.\nPlease review the interview details and ensure all necessary arrangements are in place.",
                     'notification_name': candidate.candidate_name,
                     'notification_event': "Interview Reminder",
@@ -380,7 +381,7 @@ def simulate_resume_submission_notification(obj_id):
             'education': ', '.join([e.get('degree', '') if isinstance(e, dict) else str(e) for e in candidate.education]) if candidate.education and isinstance(candidate.education, list) else 'N/A',
             'skills': ', '.join(candidate.skills) if candidate.skills else 'N/A',
             'synopsis': application.synopsis if application.synopsis else None,
-            'url': f"{frontend_base}/positions/{application.job.id}/pipeline",
+            'url': f"{frontend_base}/approvals/{application.job.id}",
             'plain_message': f"A new candidate, {candidate.candidate_name}, has been added for {application.job.title}.\nPlease review the candidate profile and take the necessary action.",
             'notification_name': candidate.candidate_name,
             'notification_event': "New Resume",
@@ -399,7 +400,7 @@ def simulate_resume_submission_notification(obj_id):
                 title="New Resume Submitted",
                 message=f"{candidate.candidate_name} submitted a resume for '{application.job.title}'.",
                 type='info',
-                link=f"/positions/{application.job.id}/pipeline",
+                link=f"/approvals/{application.job.id}",
                 name=candidate.candidate_name,
                 event="New Resume",
                 process="Application"
@@ -512,7 +513,7 @@ def send_interview_approval_request_email(schedule_id, action_user_id=None):
                 'job_title': schedule.application.job.title,
                 'interview_date': str(schedule.date),
                 'interview_time': str(schedule.time),
-                'url': f"{frontend_base}/approvals",
+                'url': f"{frontend_base}/positions/{schedule.application.job.id}/pipeline",
                 'plain_message': f"An interview has been proposed for {schedule.application.candidate.candidate_name} and requires your approval.",
                 'notification_name': schedule.application.candidate.candidate_name,
                 'notification_event': "Approval Required",

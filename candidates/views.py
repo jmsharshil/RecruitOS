@@ -1012,7 +1012,7 @@ def send_manager_review_email(application, from_email=None):
     manager_email = manager.email if manager else ""
 
     frontend_base = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))
-    url = f"{frontend_base}/positions/{application.job.id}/pipeline"
+    url = f"{frontend_base}/approvals/{application.job.id}"
 
     context = {
         "recruiter": recruiter,
