@@ -449,6 +449,12 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             if request.user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
                 if str(instance.current_stage_id) != str(request.data.get('current_stage_id')):
                     return Response({"error": "Only Admins and Managers can change the pipeline stage."}, status=403)
+                    
+        # The frontend pipeline board groups by `status`. We must prevent recruiters from changing it.
+        if 'status' in request.data:
+            if request.user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+                if str(instance.status) != str(request.data.get('status')):
+                    return Response({"error": "Only Admins and Managers can change the pipeline stage (status)."}, status=403)
         
         # If candidate data is provided, manually update the Candidate model
         # since it's marked as read_only in the ApplicationDetailSerializer.
@@ -670,6 +676,83 @@ class ApplicationViewSet(viewsets.ModelViewSet):
 
         return Response({
             "message": f"Successfully sent {updated_count} applications to client.",
+            "errors": errors
+        }, status=200)
+
+    @action(detail=False, methods=['post'], url_path='client-reminder')
+    def client_reminder(self, request):
+        """Bulk send reminder for applications to client."""
+        application_ids = request.data.get('application_ids', [])
+        
+        if not isinstance(application_ids, list) or not application_ids:
+            raise ValidationError({"error": "Provide a list of application_ids"})
+
+        header_color = request.data.get('header_color')
+        text_color = request.data.get('text_color')
+
+        applications = self.get_queryset().filter(id__in=application_ids).select_related('job', 'candidate', 'job__client')
+        updated_count = 0
+        errors = []
+        valid_applications_by_client = {}
+
+        for application in applications:
+            if application.job.hiring_for != 'client':
+                errors.append(f"{application.candidate.candidate_name}: Job is not hiring for a client")
+                continue
+
+            log_action(request.user, 'sent', 'Application', application.id, f"Sent reminder to client for {application.candidate.candidate_name}")
+            
+            client_name = application.job.client.company_name if application.job.client else "client"
+            ApplicationHistory.objects.create(
+                application=application,
+                user=request.user,
+                action="client_reminder",
+                notes=f"Sent a reminder to client: {client_name}",
+                organization=application.organization
+            )
+
+            if application.job.client:
+                client_email = application.job.client.email
+                recipient_name = application.job.client.company_name
+                if application.job.team_member_id and isinstance(application.job.client.team_members, list):
+                    for tm in application.job.client.team_members:
+                        if isinstance(tm, dict) and str(tm.get('id')) == str(application.job.team_member_id) and tm.get('email'):
+                            client_email = tm.get('email')
+                            recipient_name = tm.get('name', recipient_name)
+                            break
+                
+                if client_email:
+                    group_key = (application.job.id, client_email, recipient_name)
+                    if group_key not in valid_applications_by_client:
+                        valid_applications_by_client[group_key] = []
+                    valid_applications_by_client[group_key].append(application.id)
+            
+            updated_count += 1
+
+        if valid_applications_by_client:
+            from candidates.tasks import simulate_bulk_client_reminder_email
+            from clients.models import TeamMemberTrackerFormat
+            from candidates.models import Job
+
+            for (job_id, client_email, recipient_name), app_ids in valid_applications_by_client.items():
+                final_header = header_color
+                final_text = text_color
+
+                if not (final_header and final_text):
+                    job = Job.objects.filter(id=job_id).select_related('client').first()
+                    if job and job.client:
+                        tf = TeamMemberTrackerFormat.objects.filter(
+                            client=job.client,
+                            team_member_id=str(job.team_member_id) if job.team_member_id else ""
+                        ).first()
+                        if tf:
+                            if not final_header: final_header = tf.header_color
+                            if not final_text: final_text = tf.text_color
+
+                simulate_bulk_client_reminder_email(app_ids, client_email, recipient_name, final_header, final_text)
+
+        return Response({
+            "message": f"Successfully sent reminders for {updated_count} applications to client.",
             "errors": errors
         }, status=200)
 

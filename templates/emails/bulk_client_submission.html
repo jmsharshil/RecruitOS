@@ -9,15 +9,9 @@
   </p>
 
   {% if synopses %}
-  <div style="background-color: #f8fafc; padding: 15px; border: 1px solid #e2e8f0; border-radius: 4px; margin-top: 15px; margin-bottom: 20px;">
-    <h4 style="margin-top: 0; margin-bottom: 15px; color: #334155;">Candidate Synopses</h4>
     {% for item in synopses %}
-      <div style="margin-bottom: 12px;">
-        <strong style="color: #0f172a; font-size: 14px;">{{ item.name }}</strong>
-        <p style="margin: 4px 0 0 0; font-size: 13px; color: #475569;">{{ item.text|linebreaksbr }}</p>
-      </div>
+      <p>{{ item.text|linebreaksbr }}</p>
     {% endfor %}
-  </div>
   {% endif %}
 
   <div style="overflow-x: auto;">

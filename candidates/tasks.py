@@ -686,3 +686,140 @@ def send_attendance_update_email(schedule_id, action_user_id=None):
     except Exception as e:
         logger.error(f"Failed to send attendance update email: {e}")
 
+@run_in_thread
+def simulate_bulk_client_reminder_email(application_ids, client_email, recipient_name=None, header_color=None, text_color=None):
+    """Send a bulk client reminder email containing a tracker of multiple candidates."""
+    try:
+        if not application_ids:
+            return
+
+        applications = Application.objects.select_related(
+            'candidate', 'job', 'job__client', 'client_submission__sent_by', 'organization'
+        ).filter(id__in=application_ids)
+
+        if not applications.exists():
+            return
+
+        first_app = applications.first()
+        org = first_app.organization
+        job = first_app.job
+
+        if not recipient_name:
+            recipient_name = job.client.company_name if job.client else client_email
+
+        from accounts.email_utils import send_org_email
+        
+        context = {
+            'client_name': recipient_name,
+            'job_title': job.title,
+            'org_name': org.name,
+            'sent_by': getattr(first_app, 'client_submission', None) and
+                       getattr(first_app.client_submission.sent_by, 'name', 'RecruitOS') or 'RecruitOS',
+            'plain_message': f"This is a gentle reminder regarding the {len(applications)} candidate profiles previously submitted for {job.title}.\nKindly review these profiles and share your feedback or next steps at your earliest convenience.",
+        }
+
+        # Build headers
+        tracker_headers = []
+        columns_to_extract = []
+        
+        if job.team_member_id:
+            try:
+                from clients.models import TeamMemberTrackerFormat
+                tracker_format = TeamMemberTrackerFormat.objects.get(
+                    client_id=job.client_id, 
+                    team_member_id=job.team_member_id, 
+                    is_deleted=False
+                )
+                columns_to_extract = tracker_format.columns
+                tracker_headers = [col.replace('_', ' ').title() for col in columns_to_extract]
+            except Exception as e:
+                logger.warning(f"Could not load tracker format for team member {job.team_member_id}: {e}")
+
+        if not tracker_headers:
+            columns_to_extract = ['candidate_name', 'contact', 'email', 'current_profile', 'experience', 'current_location', 'current_ctc', 'expected_ctc', 'notice_period']
+            tracker_headers = ['Candidate Name', 'Contact', 'Email', 'Current Role', 'Experience', 'Location', 'Current CTC', 'Expected CTC', 'Notice Period']
+
+        candidates_data = []
+        attachments = []
+        synopses = []
+
+        for app in applications:
+            candidate = app.candidate
+            
+            if app.synopsis:
+                synopses.append({'name': candidate.candidate_name, 'text': app.synopsis})
+                
+            row = []
+            
+            for col in columns_to_extract:
+                val = ""
+                col_norm = col.strip().lower().replace(' ', '_')
+                
+                if col_norm in ['candidate_name', 'name', 'candidate']: val = candidate.candidate_name
+                elif col_norm in ['email', 'candidate_email_id', 'candidate_email', 'email_id']: val = candidate.email
+                elif col_norm in ['phone', 'contact', 'contacts', 'mobile_no.', 'mobile_no', 'mobile_number', 'mobile']: val = candidate.contact
+                elif col_norm in ['total_experience', 'experience', 'total_exp', 'exp']: val = candidate.experience
+                elif col_norm in ['current_company', 'company', 'organization']: val = candidate.current_company
+                elif col_norm in ['current_designation', 'current_profile', 'designation', 'role', 'c._designation', 'c_designation']: val = candidate.current_profile
+                elif col_norm in ['current_ctc', 'ctc', 'cctc']: 
+                    c_val = app.current_ctc or candidate.current_ctc
+                    val = f"₹{c_val}" if c_val else ""
+                elif col_norm in ['expected_ctc', 'ectc']: 
+                    e_val = app.expected_ctc or candidate.expected_ctc
+                    val = f"₹{e_val}" if e_val else ""
+                elif col_norm in ['notice_period', 'notice']: val = app.notice_period or candidate.notice_period
+                elif col_norm in ['current_location', 'address', 'location']: val = shorten_location(candidate.current_location)
+                elif col_norm == 'preferred_location': val = shorten_location(candidate.preferred_location)
+                elif col_norm == 'hike': val = app.hike
+                elif col_norm == 'skills': val = ", ".join(candidate.skills) if isinstance(candidate.skills, list) else candidate.skills
+                elif col_norm == 'education': val = ", ".join([e.get('degree', '') if isinstance(e, dict) else str(e) for e in candidate.education]) if isinstance(candidate.education, list) else candidate.education
+                else:
+                    custom_fields = app.tracker_custom_fields if isinstance(app.tracker_custom_fields, dict) else {}
+                    val = custom_fields.get(col, custom_fields.get(col_norm, ""))
+                
+                if isinstance(val, str) and val.strip().lower() == "not specified":
+                    val = ""
+                    
+                row.append(val)
+            
+            candidates_data.append(row)
+
+            if candidate.resume:
+                try:
+                    with candidate.resume.open('rb') as f:
+                        resume_content = f.read()
+                    import os
+                    resume_filename = os.path.basename(candidate.resume.name)
+                    safe_name = candidate.candidate_name.replace(' ', '_')
+                    resume_filename = f"{safe_name}_{resume_filename}"
+                    mimetype = 'application/pdf' if resume_filename.lower().endswith('.pdf') else 'application/octet-stream'
+                    attachments.append((resume_filename, resume_content, mimetype))
+                except Exception as e:
+                    logger.error(f"Could not read resume for candidate {candidate.id}: {e}")
+
+        context['tracker_headers'] = tracker_headers
+        context['candidates_data'] = candidates_data
+        context['synopses'] = synopses
+        context['header_color'] = header_color
+        context['text_color'] = text_color
+
+        from_email = None
+        if hasattr(first_app, 'client_submission') and first_app.client_submission.sent_by:
+            from_email = first_app.client_submission.sent_by.email
+        elif first_app.job.hiring_manager:
+            from_email = first_app.job.hiring_manager.email
+
+        subject_count = f"{len(applications)} Candidate Profiles" if len(applications) > 1 else "1 Candidate Profile"
+        
+        send_org_email(
+            organization=org,
+            subject=f"Reminder: {subject_count} pending review for {job.title}",
+            template_name='bulk_client_submission',
+            context=context,
+            recipient_list=[client_email],
+            attachments=attachments,
+            from_email_override=from_email
+        )
+        logger.info(f"Bulk client reminder email sent for {len(applications)} apps to {client_email}")
+    except Exception as e:
+        logger.error(f"Bulk client reminder email failed: {e}")

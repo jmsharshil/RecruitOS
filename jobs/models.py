@@ -10,9 +10,10 @@ class HiringFor(models.TextChoices):
     CLIENT = 'client'
 
 class JobStatus(models.TextChoices):
-    OPEN    = 'open'
-    CLOSED  = 'closed'
-    ON_HOLD = 'on-hold'
+    OPEN    = 'open', 'Open'
+    ONGOING = 'ongoing', 'Ongoing'
+    CLOSED  = 'close', 'Close'
+    ON_HOLD = 'hold', 'Hold'
 
 class JobTypes(models.TextChoices):
     PERMANENT   = 'permanent'

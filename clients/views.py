@@ -278,7 +278,7 @@ class TeamMemberTrackerFormatViewSet(viewsets.ModelViewSet):
                     row[col] = candidate.candidate_name
                 elif col_norm == 'email':
                     row[col] = candidate.email
-                elif col_norm in ['phone', 'contact', 'contacts']:
+                elif col_norm in ['phone', 'contact', 'contacts', 'contact_no.', 'contact_no']:
                     row[col] = candidate.contact
                 elif col_norm in ['total_experience', 'experience', 'total_exp']:
                     row[col] = candidate.experience if candidate.experience else ""
@@ -406,8 +406,8 @@ class TeamMemberTrackerFormatViewSet(viewsets.ModelViewSet):
                 if 'email' in normalized_item:
                     candidate.email = normalized_item['email']
                     cand_modified = True
-                if 'phone' in normalized_item or 'contact' in normalized_item or 'contacts' in normalized_item:
-                    candidate.contact = normalized_item.get('phone') or normalized_item.get('contact') or normalized_item.get('contacts')
+                if 'phone' in normalized_item or 'contact' in normalized_item or 'contacts' in normalized_item or 'contact_no.' in normalized_item or 'contact_no' in normalized_item:
+                    candidate.contact = normalized_item.get('phone') or normalized_item.get('contact') or normalized_item.get('contacts') or normalized_item.get('contact_no.') or normalized_item.get('contact_no')
                     cand_modified = True
                 if 'total_experience' in normalized_item or 'experience' in normalized_item or 'total_exp' in normalized_item:
                     candidate.experience = normalized_item.get('total_experience') or normalized_item.get('experience') or normalized_item.get('total_exp')

@@ -82,6 +82,9 @@ class CandidateExportView(APIView):
             # Optional filters (these will exclude pool candidates)
             status_filter = request.query_params.get('status')
             job_id = request.query_params.get('job_id')
+            candidate_ids = request.query_params.get('candidate_ids')
+            application_ids = request.query_params.get('application_ids')
+            
             if status_filter:
                 qs = qs.filter(
                     applications__status=status_filter,
@@ -89,11 +92,23 @@ class CandidateExportView(APIView):
                 )
             if job_id:
                 qs = qs.filter(applications__job_id=job_id)
+            if candidate_ids:
+                c_ids = [x.strip() for x in candidate_ids.split(',') if x.strip()]
+                qs = qs.filter(id__in=c_ids)
+            if application_ids:
+                app_ids = [x.strip() for x in application_ids.split(',') if x.strip()]
+                qs = qs.filter(applications__id__in=app_ids)
 
             rows = []
             for c in qs:
                 # Use cached prefetched applications, ignore soft-deleted (pool candidates have none)
                 apps = [a for a in c.applications.all() if not getattr(a, 'is_deleted', False)]
+                if application_ids:
+                    app_ids_list = [x.strip() for x in application_ids.split(',') if x.strip()]
+                    apps = [a for a in apps if str(a.id) in app_ids_list]
+                elif job_id:
+                    apps = [a for a in apps if str(a.job_id) == str(job_id)]
+                
                 app = apps[0] if apps else None
                 status = getattr(app, 'status', 'POOL')
                 share_date = getattr(app, 'share_date', '')
