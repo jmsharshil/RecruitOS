@@ -99,6 +99,22 @@ class CandidateExportView(APIView):
                 app_ids = [x.strip() for x in application_ids.split(',') if x.strip()]
                 qs = qs.filter(applications__id__in=app_ids)
 
+            header_color = request.query_params.get('header_color')
+            text_color = request.query_params.get('text_color')
+            
+            # Auto-detect colors from client tracker format if job_id is provided
+            if job_id and not (header_color and text_color):
+                job = Job.objects.filter(id=job_id).select_related('client').first()
+                if job and job.client:
+                    from clients.models import TeamMemberTrackerFormat
+                    tf = TeamMemberTrackerFormat.objects.filter(
+                        client=job.client,
+                        team_member_id=str(job.team_member_id) if job.team_member_id else ""
+                    ).first()
+                    if tf:
+                        if not header_color: header_color = tf.header_color
+                        if not text_color: text_color = tf.text_color
+
             rows = []
             for c in qs:
                 # Use cached prefetched applications, ignore soft-deleted (pool candidates have none)
@@ -130,7 +146,14 @@ class CandidateExportView(APIView):
             log_msg = f"Exported {len(rows)} candidates (incl. pool)"
 
         log_action(request.user, 'exported', 'Candidate', None, log_msg)
-        return generate_csv_response(filename, CANDIDATE_EXPORT_HEADERS, rows, export_format=export_format)
+        return generate_csv_response(
+            filename, 
+            CANDIDATE_EXPORT_HEADERS, 
+            rows, 
+            export_format=export_format,
+            header_color=locals().get('header_color'),
+            text_color=locals().get('text_color')
+        )
 
 
 class CandidateImportView(APIView):

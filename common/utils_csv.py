@@ -6,9 +6,10 @@ from decimal import Decimal
 from django.http import HttpResponse
 import openpyxl
 from openpyxl import Workbook
+from openpyxl.styles import PatternFill, Font
 
 
-def generate_csv_response(filename, headers, rows, export_format='csv'):
+def generate_csv_response(filename, headers, rows, export_format='csv', header_color=None, text_color=None):
     """
     Unified generator for CSV or XLSX export (called by *ExportView.get()).
     Defaults to CSV for backward compat. Uses openpyxl for XLSX with native Python
@@ -22,6 +23,28 @@ def generate_csv_response(filename, headers, rows, export_format='csv'):
         ws = wb.active
         ws.title = "Export"
         ws.append(headers)
+        
+        # Apply styles if colors are provided
+        if header_color or text_color:
+            fill = None
+            font = None
+            if header_color:
+                h_col = str(header_color).lstrip('#')
+                if len(h_col) == 6: h_col = 'FF' + h_col
+                fill = PatternFill(start_color=h_col, end_color=h_col, fill_type='solid')
+            if text_color:
+                t_col = str(text_color).lstrip('#')
+                if len(t_col) == 6: t_col = 'FF' + t_col
+                font = Font(color=t_col, bold=True)
+            else:
+                font = Font(bold=True)
+                
+            for cell in ws[1]:
+                if fill:
+                    cell.fill = fill
+                if font:
+                    cell.font = font
+                    
         for row in rows:
             # Clean row for Excel: use native types so openpyxl sets correct cell types
             # (boolean for bool, date serial for date, empty for None). Prevents corruption.
