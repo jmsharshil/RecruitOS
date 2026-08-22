@@ -44,9 +44,9 @@ class CandidateExportView(APIView):
         Uses exact same Q-filter/RBAC as CandidateViewSet.get_queryset() for pool+assigned.
         Filters on status/job_id exclude pure pool candidates. Updated filename per format."""
         is_template = request.query_params.get('template') in ('1', 'true', 'yes')
-        export_format = request.query_params.get('format', 'csv').lower()
+        export_format = request.query_params.get('format', 'xlsx').lower()
         if export_format not in ('csv', 'xlsx'):
-            export_format = 'csv'
+            export_format = 'xlsx'
 
         if is_template:
             # Sample data for template - reflects split Candidate (pool) / Application (per-job) model.
