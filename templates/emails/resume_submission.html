@@ -9,10 +9,10 @@
   </p>
 
   {% if synopsis %}
-  <div style="background-color: #f8fafc; padding: 15px; border: 1px solid #e2e8f0; border-radius: 4px; margin-top: 15px;">
-    <h4 style="margin-top: 0; margin-bottom: 8px; color: #334155;">Synopsis</h4>
-    <p style="margin: 0; font-size: 14px; color: #475569;">{{ synopsis|linebreaksbr }}</p>
-  </div>
+  <p style="margin-top: 15px; font-size: 14px;">
+    <strong>Synopsis:</strong><br>
+    {{ synopsis|linebreaksbr }}
+  </p>
   {% endif %}
 
   <table style="width: 100%; border-collapse: collapse; margin-top: 15px; border: 1px solid #e2e8f0; font-size: 14px;">
