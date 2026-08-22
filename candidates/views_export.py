@@ -115,6 +115,10 @@ class CandidateExportView(APIView):
                         if not header_color: header_color = tf.header_color
                         if not text_color: text_color = tf.text_color
 
+            # If colors are detected, auto-switch to xlsx (unless explicitly forced to csv)
+            if (header_color or text_color) and request.query_params.get('format') != 'csv':
+                export_format = 'xlsx'
+
             rows = []
             for c in qs:
                 # Use cached prefetched applications, ignore soft-deleted (pool candidates have none)
