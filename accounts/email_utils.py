@@ -255,6 +255,33 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
         # --- NEW: Check if the override user has Google API Tokens ---
         if sender_user and sender_user.google_access_token:
             logger.info(f"Attempting to send email via Gmail API for {from_email_override}")
+            
+            creds = Credentials(
+                token=sender_user.google_access_token,
+                refresh_token=sender_user.google_refresh_token,
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=getattr(settings, 'GOOGLE_OAUTH_CLIENT_ID', None),
+                client_secret=getattr(settings, 'GOOGLE_OAUTH_CLIENT_SECRET', None),
+            )
+            service = build('gmail', 'v1', credentials=creds)
+            
+            # Fetch user's Gmail signature
+            try:
+                aliases = service.users().settings().sendAs().list(userId='me').execute()
+                signature = ""
+                for alias in aliases.get('sendAs', []):
+                    if alias.get('isPrimary'):
+                        signature = alias.get('signature', '')
+                        break
+                
+                if signature:
+                    html_message += f"<br><br>{signature}"
+                    import re
+                    plain_signature = re.sub('<[^<]+?>', '', signature)
+                    plain_message += f"\n\n{plain_signature}"
+            except Exception as e:
+                logger.error(f"Failed to fetch Gmail signature: {e}")
+
             if attachments:
                 message = MIMEMultipart('mixed')
             else:
@@ -288,15 +315,6 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
                 message.attach(MIMEText(html_message, 'html'))
 
             raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
-
-            creds = Credentials(
-                token=sender_user.google_access_token,
-                refresh_token=sender_user.google_refresh_token,
-                token_uri="https://oauth2.googleapis.com/token",
-                client_id=getattr(settings, 'GOOGLE_OAUTH_CLIENT_ID', None),
-                client_secret=getattr(settings, 'GOOGLE_OAUTH_CLIENT_SECRET', None),
-            )
-            service = build('gmail', 'v1', credentials=creds)
             
             try:
                 sent_msg = service.users().messages().send(userId='me', body={'raw': raw_message}).execute()
