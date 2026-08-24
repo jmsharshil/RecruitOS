@@ -170,7 +170,7 @@ def get_org_branding(organization, template_key: str) -> dict:
 # Main send helper
 # ---------------------------------------------------------------------------
 
-def send_org_email(organization, subject: str, template_name: str, context: dict, recipient_list: list, from_email_override: str = None, attachments: list = None):
+def send_org_email(organization, subject: str, template_name: str, context: dict, recipient_list: list, from_email_override: str = None, attachments: list = None, cc_list: list = None):
     """
     Render an email template with org branding and send via the org's SMTP
     (or Django default if not configured). **Enforces fallback to global
@@ -261,6 +261,8 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
                 message = MIMEMultipart('alternative')
                 
             message['to'] = ", ".join(recipient_list)
+            if cc_list:
+                message['cc'] = ", ".join(cc_list)
             message['from'] = from_email
             message['subject'] = subject
 
@@ -314,6 +316,7 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
             body=plain_message,
             from_email=from_email,
             to=recipient_list,
+            cc=cc_list,
             connection=connection,
         )
         msg.attach_alternative(html_message, 'text/html')
@@ -343,20 +346,21 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
     # === GLOBAL FALLBACK ===
     try:
         global_conn = get_connection(fail_silently=False)
-        msg = EmailMultiAlternatives(
+        msg_fallback = EmailMultiAlternatives(
             subject=subject,
             body=plain_message,
-            from_email=from_email,
+            from_email=getattr(settings, 'EMAIL_HOST_USER', settings.DEFAULT_FROM_EMAIL),
             to=recipient_list,
+            cc=cc_list,
             connection=global_conn,
         )
-        msg.attach_alternative(html_message, 'text/html')
+        msg_fallback.attach_alternative(html_message, 'text/html')
         
         if attachments:
             for filename, content, mimetype in attachments:
-                msg.attach(filename, content, mimetype)
+                msg_fallback.attach(filename, content, mimetype)
                 
-        msg.send()
+        msg_fallback.send()
         print(f"==========> [DEBUG] Global Fallback SMTP send SUCCESS to {recipient_list}")
         logger.info(
             f"Email '{template_name}' sent to {recipient_list} "

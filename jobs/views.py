@@ -44,27 +44,41 @@ class JobViewSet(viewsets.ModelViewSet):
         return [IsAdminOrManager()]
 
     def _notify_new_recruiters(self, job, new_recruiters):
-        for recruiter in new_recruiters:
-            try:
-                frontend_base = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))
-                url = f"{frontend_base}/positions/{job.id}"
-                context = {
-                    'recruiter_name': recruiter.name,
-                    'job_title': job.title,
-                    'assigner_name': self.request.user.name,
-                    'url': url,
-                    'plain_message': f"You have been assigned a new job: {job.title}.\nPlease review the job details and begin the required recruitment activity at the earliest.",
-                }
-                send_org_email(
-                    organization=job.organization,
-                    subject=f"New Job Assignment: {job.title}",
-                    template_name='job_assigned',
-                    context=context,
-                    recipient_list=[recruiter.email],
-                    from_email_override=self.request.user.email,
-                )
-            except Exception:
-                pass
+        if not new_recruiters:
+            return
+            
+        try:
+            frontend_base = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))
+            url = f"{frontend_base}/positions/{job.id}"
+            
+            emails = [r.email for r in new_recruiters if r.email]
+            names = [r.name for r in new_recruiters if r.name]
+            
+            if not emails:
+                return
+                
+            if len(names) == 1:
+                recruiter_names = names[0]
+            else:
+                recruiter_names = "Team"
+            
+            context = {
+                'recruiter_name': recruiter_names,
+                'job_title': job.title,
+                'assigner_name': self.request.user.name,
+                'url': url,
+                'plain_message': f"You have been assigned a new job: {job.title}.\nPlease review the job details and begin the required recruitment activity at the earliest.",
+            }
+            send_org_email(
+                organization=job.organization,
+                subject=f"New Job Assignment: {job.title}",
+                template_name='job_assigned',
+                context=context,
+                recipient_list=emails,
+                from_email_override=self.request.user.email,
+            )
+        except Exception:
+            pass
 
     def perform_create(self, serializer):
         job = serializer.save(created_by=self.request.user, organization=self.request.user.organization)

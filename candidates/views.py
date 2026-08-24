@@ -585,6 +585,14 @@ class ApplicationViewSet(viewsets.ModelViewSet):
 
         header_color = request.data.get('header_color')
         text_color = request.data.get('text_color')
+        
+        cc_emails_raw = request.data.get('cc_emails', [])
+        if isinstance(cc_emails_raw, str):
+            cc_emails = [e.strip() for e in cc_emails_raw.split(',') if e.strip()]
+        elif isinstance(cc_emails_raw, list):
+            cc_emails = [str(e).strip() for e in cc_emails_raw if str(e).strip()]
+        else:
+            cc_emails = []
 
         applications = self.get_queryset().filter(id__in=application_ids).select_related('job', 'candidate', 'job__client')
         updated_count = 0
@@ -672,7 +680,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                             if not final_header: final_header = tf.header_color
                             if not final_text: final_text = tf.text_color
 
-                simulate_bulk_client_submission_email(app_ids, client_email, recipient_name, final_header, final_text)
+                simulate_bulk_client_submission_email(app_ids, client_email, recipient_name, final_header, final_text, cc_emails=cc_emails)
 
         return Response({
             "message": f"Successfully sent {updated_count} applications to client.",
