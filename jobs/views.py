@@ -31,10 +31,8 @@ class JobViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = Job.objects.filter(is_deleted=False, organization=user.organization)
-        if user.role in [UserRole.ADMIN, UserRole.MANAGER]:
+        if user.role in [UserRole.ADMIN, UserRole.MANAGER, UserRole.RECRUITER]:
             return qs
-        elif user.role == UserRole.RECRUITER:
-            return qs.filter(assigned_recruiters=user)
         return Job.objects.none()
 
     def get_permissions(self):

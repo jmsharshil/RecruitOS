@@ -568,6 +568,82 @@ def send_interview_approval_result_email(schedule_id, action_user_id=None):
     except Exception as e:
         logger.error(f"Failed to send interview approval result email: {e}")
 
+def _build_tracker_and_attachments_for_apps(applications, job):
+    tracker_headers = []
+    columns_to_extract = []
+    
+    if job.team_member_id:
+        try:
+            from clients.models import TeamMemberTrackerFormat
+            tracker_format = TeamMemberTrackerFormat.objects.get(
+                client_id=job.client_id, 
+                team_member_id=job.team_member_id, 
+                is_deleted=False
+            )
+            columns_to_extract = tracker_format.columns
+            tracker_headers = [col.replace('_', ' ').title() for col in columns_to_extract]
+        except Exception as e:
+            logger.warning(f"Could not load tracker format for team member {job.team_member_id}: {e}")
+
+    if not tracker_headers:
+        columns_to_extract = ['candidate_name', 'contact', 'email', 'current_profile', 'experience', 'current_location', 'current_ctc', 'expected_ctc', 'notice_period']
+        tracker_headers = ['Candidate Name', 'Contact', 'Email', 'Current Role', 'Experience', 'Location', 'Current CTC', 'Expected CTC', 'Notice Period']
+
+    candidates_data = []
+    attachments = []
+
+    for app in applications:
+        candidate = app.candidate
+            
+        row = []
+        for col in columns_to_extract:
+            val = ""
+            col_norm = col.strip().lower().replace(' ', '_')
+            
+            if col_norm in ['candidate_name', 'name', 'candidate']: val = candidate.candidate_name
+            elif col_norm in ['email', 'candidate_email_id', 'candidate_email', 'email_id']: val = candidate.email
+            elif col_norm in ['phone', 'contact', 'contacts', 'mobile_no.', 'mobile_no', 'mobile_number', 'mobile']: val = candidate.contact
+            elif col_norm in ['total_experience', 'experience', 'total_exp', 'exp']: val = candidate.experience
+            elif col_norm in ['current_company', 'company', 'organization']: val = candidate.current_company
+            elif col_norm in ['current_designation', 'current_profile', 'designation', 'role', 'c._designation', 'c_designation']: val = candidate.current_profile
+            elif col_norm in ['current_ctc', 'ctc', 'cctc']: 
+                c_val = app.current_ctc or candidate.current_ctc
+                val = f"₹{c_val}" if c_val else ""
+            elif col_norm in ['expected_ctc', 'ectc']: 
+                e_val = app.expected_ctc or candidate.expected_ctc
+                val = f"₹{e_val}" if e_val else ""
+            elif col_norm in ['notice_period', 'notice']: val = app.notice_period or candidate.notice_period
+            elif col_norm in ['current_location', 'address', 'location']: val = shorten_location(candidate.current_location)
+            elif col_norm == 'preferred_location': val = shorten_location(candidate.preferred_location)
+            elif col_norm == 'hike': val = app.hike
+            elif col_norm == 'skills': val = ", ".join(candidate.skills) if isinstance(candidate.skills, list) else candidate.skills
+            elif col_norm == 'education': val = ", ".join([e.get('degree', '') if isinstance(e, dict) else str(e) for e in candidate.education]) if isinstance(candidate.education, list) else candidate.education
+            else:
+                custom_fields = app.tracker_custom_fields if isinstance(app.tracker_custom_fields, dict) else {}
+                val = custom_fields.get(col, custom_fields.get(col_norm, ""))
+            
+            if isinstance(val, str) and val.strip().lower() == "not specified":
+                val = ""
+                
+            row.append(val)
+        
+        candidates_data.append(row)
+
+        if candidate.resume:
+            try:
+                with candidate.resume.open('rb') as f:
+                    resume_content = f.read()
+                import os
+                resume_filename = os.path.basename(candidate.resume.name)
+                safe_name = candidate.candidate_name.replace(' ', '_')
+                resume_filename = f"{safe_name}_{resume_filename}"
+                mimetype = 'application/pdf' if resume_filename.lower().endswith('.pdf') else 'application/octet-stream'
+                attachments.append((resume_filename, resume_content, mimetype))
+            except Exception as e:
+                logger.error(f"Could not read resume for candidate {candidate.id}: {e}")
+                
+    return tracker_headers, candidates_data, attachments
+
 @run_in_thread
 def simulate_client_interview_details_email(schedule_id, action_user_id=None):
     try:
@@ -594,13 +670,19 @@ def simulate_client_interview_details_email(schedule_id, action_user_id=None):
                 if action_user:
                     from_email = action_user.email
 
+            tracker_headers, candidates_data, attachments = _build_tracker_and_attachments_for_apps(
+                [schedule.application], schedule.application.job
+            )
+
             context = {
                 'recipient_name': recipient_name,
                 'candidate_name': schedule.application.candidate.candidate_name,
                 'interview_date': str(schedule.date),
                 'interview_time': str(schedule.time),
                 'mode': schedule.mode,
-                'plain_message': f"Please find below the finalized interview details for {schedule.application.candidate.candidate_name}.\nKindly confirm receipt and ensure the candidate is informed accordingly."
+                'plain_message': f"Please find below the finalized interview details for {schedule.application.candidate.candidate_name}.\nKindly confirm receipt and ensure the candidate is informed accordingly.",
+                'tracker_headers': tracker_headers,
+                'candidates_data': candidates_data
             }
             send_org_email(
                 organization=schedule.organization,
@@ -609,6 +691,7 @@ def simulate_client_interview_details_email(schedule_id, action_user_id=None):
                 context=context,
                 recipient_list=[client_email],
                 from_email_override=from_email,
+                attachments=attachments
             )
     except Exception as e:
         logger.error(f"Failed to send client interview details email: {e}")
@@ -639,9 +722,16 @@ def simulate_bulk_client_interview_details_email(schedule_ids, client_email, rec
 
         plain_message = "\n".join(message_lines)
 
+        applications = [s.application for s in schedules]
+        tracker_headers, candidates_data, attachments = _build_tracker_and_attachments_for_apps(
+            applications, schedules.first().application.job
+        )
+
         context = {
             'recipient_name': recipient_name,
-            'plain_message': plain_message
+            'plain_message': plain_message,
+            'tracker_headers': tracker_headers,
+            'candidates_data': candidates_data
         }
         send_org_email(
             organization=organization,
@@ -650,6 +740,7 @@ def simulate_bulk_client_interview_details_email(schedule_ids, client_email, rec
             context=context,
             recipient_list=[client_email],
             from_email_override=from_email,
+            attachments=attachments
         )
     except Exception as e:
         logger.error(f"Failed to send bulk client interview details email: {e}")

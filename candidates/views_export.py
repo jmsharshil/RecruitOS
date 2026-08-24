@@ -68,16 +68,8 @@ class CandidateExportView(APIView):
                 organization=user.organization
             ).prefetch_related('applications__job')
 
-            if user.role in [UserRole.ADMIN, UserRole.MANAGER]:
+            if user.role in [UserRole.ADMIN, UserRole.MANAGER, UserRole.RECRUITER]:
                 pass  # full org
-            elif user.role == UserRole.RECRUITER:
-                # Recruiters see full org talent pool + candidates from their assigned jobs
-                # (consistent with updated CandidateViewSet.get_queryset())
-                qs = qs.filter(
-                    Q(applications__isnull=True) |
-                    Q(applications__job__assigned_recruiters=user)
-                ).distinct()
-            # Note: Exactly matches CandidateViewSet.get_queryset() RBAC for pool + assigned jobs
 
             # Optional filters (these will exclude pool candidates)
             status_filter = request.query_params.get('status')
@@ -205,11 +197,8 @@ class CandidateImportView(APIView):
                     errors.append({"row": i, "error": f"Job '{job_title}' not found."})
                     skipped += 1
                     continue
-                # RBAC: Recruiters can only link to jobs they are assigned to
-                if user.role == UserRole.RECRUITER and not job.assigned_recruiters.filter(id=user.id).exists():
-                    errors.append({"row": i, "error": f"Recruiter not assigned to job '{job_title}'. Access denied."})
-                    skipped += 1
-                    continue
+                # RBAC: Recruiters can now import candidates to any job in the organization
+                pass
 
             # Get or create candidate (pool-friendly, dedup by email+org). Only pool fields.
             candidate = Candidate.objects.filter(

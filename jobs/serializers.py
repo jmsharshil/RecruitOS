@@ -92,7 +92,7 @@ class JobDetailSerializer(serializers.ModelSerializer):
     # Write-only field for assigning recruiters
     assigned_recruiter_ids = serializers.PrimaryKeyRelatedField(
         many=True, write_only=True,
-        queryset=User.objects.filter(role='recruiter'),
+        queryset=User.objects.filter(role__in=['manager', 'recruiter', 'admin']),
         source='assigned_recruiters',
         required=False
     )

@@ -1,5 +1,5 @@
 import logging
-from rest_framework import status, permissions, viewsets, serializers
+from rest_framework import status, permissions, viewsets, serializers, filters
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.exceptions import PermissionDenied
@@ -336,6 +336,8 @@ class UserViewSet(viewsets.ModelViewSet):
     - Endpoint: /api/v1/users/
     """
     permission_classes = [IsAdminOrManager, IsOwnerOrAdmin]
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name', 'email']
 
     def get_serializer_class(self):
         if self.action == 'list':

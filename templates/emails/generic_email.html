@@ -25,6 +25,29 @@
     <p><strong>Status:</strong> <span style="text-transform: uppercase;">{{ status }}</span></p>
     {% endif %}
 
+    {% if tracker_headers and candidates_data %}
+    <div style="overflow-x: auto;">
+      <table style="width: 100%; border-collapse: collapse; margin-top: 15px; border: 1px solid #e2e8f0; font-size: 13px;">
+        <thead>
+          <tr style="background-color: {{ header_color|default:'#f1f5f9' }};">
+            {% for header in tracker_headers %}
+            <th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left; white-space: nowrap; color: {{ text_color|default:'inherit' }};">{{ header }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in candidates_data %}
+          <tr {% if forloop.counter|divisibleby:2 %}style="background-color: #f8fafc;"{% endif %}>
+            {% for value in row %}
+            <td style="padding: 10px; border: 1px solid #e2e8f0;">{{ value }}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
     {% if url %}
     <div class="btn-wrapper">
         <a href="{{ url }}" class="btn">View Candidate</a>

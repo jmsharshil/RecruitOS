@@ -255,18 +255,23 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
         # --- NEW: Check if the override user has Google API Tokens ---
         if sender_user and sender_user.google_access_token:
             logger.info(f"Attempting to send email via Gmail API for {from_email_override}")
-            # Create a MIME message
-            message = MIMEMultipart('alternative')
+            if attachments:
+                message = MIMEMultipart('mixed')
+            else:
+                message = MIMEMultipart('alternative')
+                
             message['to'] = ", ".join(recipient_list)
             message['from'] = from_email
             message['subject'] = subject
 
-            part1 = MIMEText(plain_message, 'plain')
-            part2 = MIMEText(html_message, 'html')
-            message.attach(part1)
-            message.attach(part2)
-
+            # The text parts go into an 'alternative' block if we have attachments (mixed root)
+            # or directly into the root if we don't (alternative root).
             if attachments:
+                alt_part = MIMEMultipart('alternative')
+                alt_part.attach(MIMEText(plain_message, 'plain'))
+                alt_part.attach(MIMEText(html_message, 'html'))
+                message.attach(alt_part)
+                
                 from email.mime.base import MIMEBase
                 from email import encoders
                 for filename, content, mimetype in attachments:
@@ -276,6 +281,9 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
                     encoders.encode_base64(part)
                     part.add_header('Content-Disposition', f'attachment; filename="{filename}"')
                     message.attach(part)
+            else:
+                message.attach(MIMEText(plain_message, 'plain'))
+                message.attach(MIMEText(html_message, 'html'))
 
             raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
 
