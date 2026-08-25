@@ -264,7 +264,7 @@ class TeamMemberTrackerFormatViewSet(viewsets.ModelViewSet):
                 output.read(),
                 content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             )
-            response['Content-Disposition'] = f'attachment; filename="tracker_template_{tracker.client.name.replace(" ", "_")}.xlsx"'
+            response['Content-Disposition'] = f'attachment; filename="tracker_template_{tracker.client.company_name.replace(" ", "_")}.xlsx"'
             
             return response
         except Exception as e:
