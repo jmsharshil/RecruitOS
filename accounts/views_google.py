@@ -41,7 +41,7 @@ class GoogleLoginView(APIView):
                 }
                 flow = Flow.from_client_config(
                     client_config,
-                    scopes=['openid', 'email', 'profile', 'https://www.googleapis.com/auth/gmail.send'],
+                    scopes=['openid', 'email', 'profile', 'https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/gmail.settings.basic'],
                     redirect_uri='postmessage'
                 )
                 

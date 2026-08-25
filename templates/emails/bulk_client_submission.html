@@ -3,10 +3,7 @@
 
 {% block content %}
   <p>Dear <strong>{{ client_name }}</strong>,</p>
-  <p>
-    Please find <strong>{{ candidates_data|length }}</strong> candidate profiles submitted for <strong>{{ job_title }}</strong>.<br>
-    Kindly review the profiles and let us know which candidates you would like to take forward.
-  </p>
+  <p>{{ plain_message|default:"Please review the profiles below." }}</p>
 
   {% if synopses %}
     {% for item in synopses %}

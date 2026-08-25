@@ -3,10 +3,7 @@
 
 {% block content %}
   <p>Dear <strong>{{ client_name }}</strong>,</p>
-  <p>
-    Please find the profile of <strong>{{ candidate_name }}</strong> for the position of <strong>{{ job_title }}</strong>.<br>
-    Kindly review the profile and share your feedback or next steps.
-  </p>
+  <p>{{ plain_message|default:"Please review the profile below." }}</p>
 
   <table style="width: 100%; border-collapse: collapse; margin-top: 15px; border: 1px solid #e2e8f0; font-size: 14px;">
     {% for field in tracker_fields %}

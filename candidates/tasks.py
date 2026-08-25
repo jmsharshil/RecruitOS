@@ -141,9 +141,11 @@ def simulate_client_submission_email(application_id, client_email, recipient_nam
         elif application.job.hiring_manager:
             from_email = application.job.hiring_manager.email
             
+        context['plain_message'] = f"PFA resume for {application.job.title} – {application.job.location}."
+
         send_org_email(
             organization=org,
-            subject=f"Candidate Profile: {candidate.candidate_name} — {application.job.title}",
+            subject=f"Resume for {application.job.title} – {application.job.location}.",
             template_name='client_submission',
             context=context,
             recipient_list=[client_email],
@@ -184,7 +186,7 @@ def simulate_bulk_client_submission_email(application_ids, client_email, recipie
             'org_name': org.name,
             'sent_by': getattr(first_app, 'client_submission', None) and
                        getattr(first_app.client_submission.sent_by, 'name', 'RecruitOS') or 'RecruitOS',
-            'plain_message': f"Please find {len(applications)} candidate profiles submitted for {job.title}.\nKindly review the profiles and let us know which candidates you would like to take forward.",
+            'plain_message': f"PFA resumes for {job.title} – {job.location}.",
         }
 
         tracker_headers, candidates_data, attachments, synopses = _build_tracker_and_attachments_for_apps(applications, job)
@@ -201,11 +203,9 @@ def simulate_bulk_client_submission_email(application_ids, client_email, recipie
         elif first_app.job.hiring_manager:
             from_email = first_app.job.hiring_manager.email
 
-        subject_count = f"{len(applications)} Candidate Profiles" if len(applications) > 1 else "1 Candidate Profile"
-        
         send_org_email(
             organization=org,
-            subject=f"{subject_count} for {job.title}",
+            subject=f"Resumes for {job.title} – {job.location}.",
             template_name='bulk_client_submission',
             context=context,
             recipient_list=[client_email],
@@ -609,13 +609,13 @@ def simulate_client_interview_details_email(schedule_id, action_user_id=None):
                 'interview_date': str(schedule.date),
                 'interview_time': str(schedule.time),
                 'mode': schedule.mode,
-                'plain_message': f"Please find below the finalized interview details for {schedule.application.candidate.candidate_name}.\nKindly confirm receipt and ensure the candidate is informed accordingly.",
+                'plain_message': f"{schedule.application.candidate.candidate_name} is available for {schedule.mode} on {schedule.date.strftime('%A')} ({schedule.date.strftime('%d-%m-%Y')}) at {schedule.time.strftime('%I:%M %p')}. Please confirm",
                 'tracker_headers': tracker_headers,
                 'candidates_data': candidates_data
             }
             send_org_email(
                 organization=schedule.organization,
-                subject=f"Interview Details: {schedule.application.candidate.candidate_name}",
+                subject=f"Interview Schedule for {schedule.application.job.title} – {schedule.application.job.location}.",
                 template_name='generic_email',
                 context=context,
                 recipient_list=[client_email],
@@ -645,11 +645,11 @@ def simulate_bulk_client_interview_details_email(schedule_ids, client_email, rec
             if action_user:
                 from_email = action_user.email
 
-        message_lines = [f"Interviews have been finalized for the following candidates:"]
+        message_lines = []
         for schedule in schedules:
-            message_lines.append(f"- {schedule.application.candidate.candidate_name}: {schedule.date} at {schedule.time} ({schedule.mode})")
+            message_lines.append(f"{schedule.application.candidate.candidate_name} is available for {schedule.mode} on {schedule.date.strftime('%A')} ({schedule.date.strftime('%d-%m-%Y')}) at {schedule.time.strftime('%I:%M %p')}. Please confirm")
 
-        plain_message = "\n".join(message_lines)
+        plain_message = "\n\n".join(message_lines)
 
         applications = [s.application for s in schedules]
         tracker_headers, candidates_data, attachments, synopses = _build_tracker_and_attachments_for_apps(
@@ -664,7 +664,7 @@ def simulate_bulk_client_interview_details_email(schedule_ids, client_email, rec
         }
         send_org_email(
             organization=organization,
-            subject=f"Bulk Interview Details: {len(schedules)} Candidates",
+            subject=f"Interview Schedule for {schedules.first().application.job.title} – {schedules.first().application.job.location}.",
             template_name='generic_email',
             context=context,
             recipient_list=[client_email],
@@ -729,13 +729,35 @@ def simulate_bulk_client_reminder_email(application_ids, client_email, recipient
 
         from accounts.email_utils import send_org_email
         
+        has_attended = False
+        for app in applications:
+            if hasattr(app, 'interview_schedule') and app.interview_schedule and app.interview_schedule.attendance_status == 'attended':
+                has_attended = True
+                break
+            if app.status in ['interview-align', 'select', 'offered', 'joined']: # Add other post-interview statuses if needed
+                has_attended = True
+                break
+
+        is_bulk = len(applications) > 1
+
+        if has_attended:
+            if is_bulk:
+                plain_message = "Below mentioned candidates has appeared for the interview, request you to update Their status."
+            else:
+                plain_message = "Below mentioned candidate has appeared for the interview, request you to update His/her status."
+        else:
+            if is_bulk:
+                plain_message = "Below mention resumes were shared earlier. Request you to update their status."
+            else:
+                plain_message = "Below mention resume was shared earlier. Request you to update his/her status."
+
         context = {
             'client_name': recipient_name,
             'job_title': job.title,
             'org_name': org.name,
             'sent_by': getattr(first_app, 'client_submission', None) and
                        getattr(first_app.client_submission.sent_by, 'name', 'RecruitOS') or 'RecruitOS',
-            'plain_message': f"This is a gentle reminder regarding the {len(applications)} candidate profiles previously submitted for {job.title}.\nKindly review these profiles and share your feedback or next steps at your earliest convenience.",
+            'plain_message': plain_message,
         }
 
         tracker_headers, candidates_data, attachments, synopses = _build_tracker_and_attachments_for_apps(applications, job)
@@ -752,11 +774,9 @@ def simulate_bulk_client_reminder_email(application_ids, client_email, recipient
         elif first_app.job.hiring_manager:
             from_email = first_app.job.hiring_manager.email
 
-        subject_count = f"{len(applications)} Candidate Profiles" if len(applications) > 1 else "1 Candidate Profile"
-        
         send_org_email(
             organization=org,
-            subject=f"Reminder: {subject_count} pending review for {job.title}",
+            subject=f"Status update for {job.title} – {job.location}.",
             template_name='bulk_client_submission',
             context=context,
             recipient_list=[client_email],

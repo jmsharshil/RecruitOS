@@ -275,7 +275,15 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
                         break
                 
                 if signature:
-                    html_message += f"<br><br>{signature}"
+                    if '</div>' in html_message:
+                        # Find the last closing div and insert before it
+                        last_div_idx = html_message.rfind('</div>')
+                        html_message = html_message[:last_div_idx] + f"<br><br>{signature}" + html_message[last_div_idx:]
+                    elif '</body>' in html_message:
+                        html_message = html_message.replace('</body>', f'<br><br>{signature}</body>')
+                    else:
+                        html_message += f"<br><br>{signature}"
+                        
                     import re
                     plain_signature = re.sub('<[^<]+?>', '', signature)
                     plain_message += f"\n\n{plain_signature}"
