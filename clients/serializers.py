@@ -19,11 +19,66 @@ class ClientDocumentSerializer(serializers.ModelSerializer):
 class TeamMemberTrackerFormatSerializer(serializers.ModelSerializer):
     team_member_details = serializers.SerializerMethodField()
     created_by = UserBriefSerializer(read_only=True)
+    csv_file = serializers.FileField(required=False, write_only=True)
+    xlsx_file = serializers.FileField(required=False, write_only=True)
 
     class Meta:
         model = TeamMemberTrackerFormat
         fields = '__all__'
         read_only_fields = ['id', 'created_by', 'created_at', 'updated_at', 'organization', 'is_deleted', 'deleted_at']
+
+    def validate(self, attrs):
+        csv_file = attrs.pop('csv_file', None)
+        xlsx_file = attrs.pop('xlsx_file', None)
+        
+        if xlsx_file:
+            import openpyxl
+            try:
+                wb = openpyxl.load_workbook(xlsx_file, data_only=True)
+                ws = wb.active
+                headers = []
+                bg_color = None
+                fg_color = None
+                
+                # Read the first row
+                for cell in ws[1]:
+                    if cell.value is not None and str(cell.value).strip():
+                        headers.append(str(cell.value).strip())
+                        # Extract colors from the first valid cell
+                        if not bg_color and cell.fill and cell.fill.start_color and cell.fill.start_color.rgb:
+                            val = cell.fill.start_color.rgb
+                            if isinstance(val, str) and len(val) == 8:
+                                bg_color = f"#{val[2:]}"
+                            elif isinstance(val, str) and len(val) == 6:
+                                bg_color = f"#{val}"
+                        if not fg_color and cell.font and cell.font.color and cell.font.color.rgb:
+                            val = cell.font.color.rgb
+                            if isinstance(val, str) and len(val) == 8:
+                                fg_color = f"#{val[2:]}"
+                            elif isinstance(val, str) and len(val) == 6:
+                                fg_color = f"#{val}"
+                
+                if headers:
+                    attrs['columns'] = headers
+                if bg_color:
+                    attrs['header_color'] = bg_color
+                if fg_color:
+                    attrs['text_color'] = fg_color
+            except Exception as e:
+                raise serializers.ValidationError({"xlsx_file": f"Invalid XLSX file: {str(e)}"})
+        elif csv_file:
+            import csv
+            try:
+                decoded_file = csv_file.read().decode('utf-8-sig').splitlines()
+                reader = csv.reader(decoded_file)
+                raw_headers = next(reader, [])
+                headers = [h.strip() for h in raw_headers if h.strip()]
+                if headers:
+                    attrs['columns'] = headers
+            except Exception as e:
+                raise serializers.ValidationError({"csv_file": f"Invalid CSV file: {str(e)}"})
+                
+        return attrs
 
     def get_team_member_details(self, obj):
         details = {

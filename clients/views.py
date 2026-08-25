@@ -216,6 +216,57 @@ class TeamMemberTrackerFormatViewSet(viewsets.ModelViewSet):
         instance.save()
         log_action(self.request.user, 'deleted', 'TeamMemberTrackerFormat', instance.id, f"Deleted tracker format for team member {instance.team_member_id}")
 
+    @action(detail=True, methods=['get'], url_path='export-template')
+    def export_template(self, request, pk=None):
+        tracker = self.get_object()
+        columns = tracker.columns
+        if not columns:
+            return Response({"error": "No columns defined for this tracker format."}, status=status.HTTP_400_BAD_REQUEST)
+
+        from django.http import HttpResponse
+        import io
+        import openpyxl
+        from openpyxl.styles import PatternFill, Font
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Template"
+
+        for col_num, column_title in enumerate(columns, 1):
+            cell = ws.cell(row=1, column=col_num, value=column_title)
+            
+            if tracker.header_color:
+                bg_color = tracker.header_color.lstrip('#')
+                if len(bg_color) == 6:
+                    bg_color = f"FF{bg_color}" # openpyxl uses aRGB
+                elif len(bg_color) != 8:
+                    bg_color = None
+                if bg_color:
+                    cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
+                    
+            if tracker.text_color:
+                fg_color = tracker.text_color.lstrip('#')
+                if len(fg_color) == 6:
+                    fg_color = f"FF{fg_color}"
+                elif len(fg_color) != 8:
+                    fg_color = None
+                if fg_color:
+                    cell.font = Font(color=fg_color, bold=True)
+            else:
+                cell.font = Font(bold=True)
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        response = HttpResponse(
+            output.read(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = f'attachment; filename="tracker_template_{tracker.client.name.replace(" ", "_")}.xlsx"'
+        
+        return response
+
     @action(detail=False, methods=['post'], url_path='preview')
     def preview(self, request):
         """
