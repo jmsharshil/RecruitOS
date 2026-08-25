@@ -436,16 +436,14 @@ class TeamMemberTrackerFormatViewSet(viewsets.ModelViewSet):
                 # Application fields
                 if 'current_ctc' in normalized_item or 'ctc' in normalized_item or 'cctc' in normalized_item:
                     ctc_val = normalized_item.get('current_ctc') or normalized_item.get('ctc') or normalized_item.get('cctc')
-                    try:
-                        app.current_ctc = float(ctc_val) if ctc_val else None
+                    if ctc_val is not None:
+                        app.current_ctc = str(ctc_val).strip()
                         app_modified = True
-                    except ValueError: pass
                 if 'expected_ctc' in normalized_item or 'ectc' in normalized_item:
                     val = normalized_item.get('expected_ctc') or normalized_item.get('ectc')
-                    try:
-                        app.expected_ctc = float(val) if val else None
+                    if val is not None:
+                        app.expected_ctc = str(val).strip()
                         app_modified = True
-                    except ValueError: pass
                 if 'hike' in normalized_item and hasattr(app, 'hike'):
                     app.hike = normalized_item['hike']
                     app_modified = True

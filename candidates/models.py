@@ -76,14 +76,14 @@ class Candidate(BaseModel):
     )
     
     # Salary & Availability fields on candidate level
-    current_ctc        = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    expected_ctc       = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    current_ctc        = models.CharField(max_length=50, blank=True)
+    expected_ctc       = models.CharField(max_length=50, blank=True)
     notice_period      = models.CharField(max_length=50, blank=True)
     hike               = models.CharField(max_length=50, blank=True)
     
     # Additional common ATS fields
     preferred_location = models.CharField(max_length=150, blank=True, null=True)
-    offer_in_hand      = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    offer_in_hand      = models.CharField(max_length=50, blank=True, null=True)
     reason_for_change  = models.TextField(blank=True, null=True)
     dob                = models.DateField(null=True, blank=True)
 
@@ -99,10 +99,10 @@ class Application(BaseModel):
         max_length=30, choices=CandidateStatus.choices, default="screening"
     )
     preferred_location = models.CharField(max_length=150, blank=True)
-    current_ctc        = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    expected_ctc       = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    current_ctc        = models.CharField(max_length=50, blank=True)
+    expected_ctc       = models.CharField(max_length=50, blank=True)
     hike               = models.CharField(max_length=50, blank=True)
-    offer_in_hand      = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    offer_in_hand      = models.CharField(max_length=50, blank=True, null=True)
     notice_period      = models.CharField(max_length=50,blank=True)
     reason_for_change  = models.TextField(blank=True)
     dob                = models.DateField(null=True, blank=True)

@@ -69,8 +69,8 @@ class ApplicationListSerializer(serializers.ModelSerializer):
     candidate_skills = serializers.JSONField(source='candidate.skills', read_only=True)
     candidate_education = serializers.JSONField(source='candidate.education', read_only=True)
     
-    current_ctc = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
-    expected_ctc = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    current_ctc = serializers.CharField(read_only=True)
+    expected_ctc = serializers.CharField(read_only=True)
     notice_period = serializers.CharField(read_only=True)
     
     job_title      = serializers.CharField(source='job.title', read_only=True)
