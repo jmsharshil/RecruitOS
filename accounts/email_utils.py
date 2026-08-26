@@ -269,10 +269,18 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
             try:
                 aliases = service.users().settings().sendAs().list(userId='me').execute()
                 signature = ""
+                # First try to find signature for the specific alias we're sending from
                 for alias in aliases.get('sendAs', []):
-                    if alias.get('isPrimary'):
+                    if alias.get('sendAsEmail') == from_email_override:
                         signature = alias.get('signature', '')
                         break
+                
+                # Fallback to primary alias if not found or empty
+                if not signature:
+                    for alias in aliases.get('sendAs', []):
+                        if alias.get('isPrimary'):
+                            signature = alias.get('signature', '')
+                            break
                 
                 if signature:
                     if '</div>' in html_message:
