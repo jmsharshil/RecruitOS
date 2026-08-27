@@ -17,7 +17,7 @@ from candidates.utils import safe_float
 from accounts.models import UserRole
 
 CANDIDATE_EXPORT_HEADERS = [
-    'candidate_name', 'profile_name', 'current_company', 'current_profile',
+    'candidate_name', 'current_company', 'current_profile',
     'experience', 'current_location',
     'education', 'contact', 'email', 'doc',
     'current_ctc', 'expected_ctc', 'notice_period',
@@ -52,7 +52,7 @@ class CandidateExportView(APIView):
             # Sample data for template - reflects split Candidate (pool) / Application (per-job) model.
             # Pool candidates omit per-job fields; job_title links to Application.
             rows = [[
-                'Rahul Sharma', 'Software Engineer', 'Tech Solutions Ltd', 'Senior Backend Dev',
+                'Rahul Sharma', 'Tech Solutions Ltd', 'Senior Backend Dev',
                 '6 years', 'Bangalore',
                 'B.Tech in Computer Science', '+919876543210', 'rahul.sharma@email.com',
                 '2024-01-10', 1200000, 1800000, '30 days',
@@ -128,7 +128,7 @@ class CandidateExportView(APIView):
                 job_title = getattr(app, 'job', None).title if app and getattr(app, 'job', None) else 'Talent Pool'
 
                 rows.append([
-                    c.candidate_name, c.profile_name, c.current_company, c.current_profile,
+                    c.candidate_name, c.current_company, c.current_profile,
                     c.experience, c.current_location,
                     str(c.education or ''), c.contact, c.email,
                     getattr(app, 'doc', ''),
@@ -211,7 +211,7 @@ class CandidateImportView(APIView):
                     with transaction.atomic():
                         candidate = Candidate.objects.create(
                             candidate_name=name,
-                            profile_name=row.get('profile_name', name).strip(),
+                            profile_name=name,
                             current_profile=row.get('current_profile', 'Not provided'),
                             current_company=row.get('current_company', 'Not provided'),
                             experience=row.get('experience', '0 years'),

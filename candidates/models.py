@@ -33,7 +33,6 @@ class ManagerReviewStatus(models.TextChoices):
     PENDING  = 'pending'
     ACCEPTED = 'accepted'
     REJECTED = 'rejected'
-    RESUBMIT = 'resubmit'
 
 class InterviewApprovalStatus(models.TextChoices):
     PENDING  = 'pending'

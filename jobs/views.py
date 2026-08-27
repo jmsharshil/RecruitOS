@@ -19,7 +19,7 @@ from django.conf import settings
 class JobViewSet(viewsets.ModelViewSet):
     filter_backends  = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class  = JobFilterSet
-    search_fields    = ['title', 'description', 'location', 'code', 'status']
+    search_fields    = ['title', 'description', 'location', 'code', 'status', 'created_by__name']
     ordering_fields  = ['title', 'created_at', 'target_closing_date', 'priority', 'status']
     ordering         = ['-created_at']
 
@@ -42,6 +42,40 @@ class JobViewSet(viewsets.ModelViewSet):
             return [IsAdmin()]
         # Mutating actions restricted to admin/manager (create, update, status, stages, manage_recruiters)
         return [IsAdminOrManager()]
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+
+        # Calculate stats for the filtered jobs
+        from django.db.models import Count, Q
+        from candidates.models import Application
+        
+        job_ids = queryset.values_list('id', flat=True)
+        
+        stats = Application.objects.filter(job_id__in=job_ids, is_deleted=False).aggregate(
+            pending_count=Count('id', filter=Q(manager_review_status='pending') | Q(interview_schedule__manager_approval_status='pending')),
+            approved_count=Count('id', filter=Q(manager_review_status='accepted') | Q(interview_schedule__manager_approval_status='approved')),
+            rejected_count=Count('id', filter=Q(manager_review_status='rejected') | Q(interview_schedule__manager_approval_status='rejected'))
+        )
+        
+        approval_stats = [
+            {"status": "pending", "count": stats['pending_count'] or 0},
+            {"status": "approved", "count": stats['approved_count'] or 0},
+            {"status": "rejected", "count": stats['rejected_count'] or 0}
+        ]
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            response = self.get_paginated_response(serializer.data)
+            response.data['approval_stats'] = approval_stats
+            return response
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({
+            "results": serializer.data,
+            "approval_stats": approval_stats
+        })
 
     def _notify_new_recruiters(self, job, new_recruiters):
         if not new_recruiters:

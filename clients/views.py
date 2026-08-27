@@ -18,8 +18,8 @@ from candidates.models import Application
 class ClientViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = ClientFilterSet
-    search_fields   = ['company_name', 'client_name', 'email', 'industry', 'city']
-    ordering_fields = ['company_name', 'status', 'created_at', 'updated_at', 'agreement_date']
+    search_fields   = ['company_name', 'city']
+    ordering_fields = ['company_name', 'created_at', 'updated_at', 'agreement_date']
     ordering        = ['-created_at']
     parser_classes  = [JSONParser, MultiPartParser, FormParser]
 
@@ -304,7 +304,8 @@ class TeamMemberTrackerFormatViewSet(viewsets.ModelViewSet):
                     tracker_receiver = {
                         "id": tm.get('id'),
                         "name": tm.get('name'),
-                        "email": tm.get('email')
+                        "email": tm.get('email'),
+                        "phone_number": tm.get('phone_number')
                     }
                     break
 

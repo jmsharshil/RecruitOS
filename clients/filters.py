@@ -11,16 +11,12 @@ from clients.models import Client
 class ClientFilterSet(django_filters.FilterSet):
     """
     Filter clients by:
-      - status (exact)
-      - industry (icontains)
       - city, state, country (icontains)
       - created range
       - has_agreement (boolean: agreement_document__isnull)
       - commercial_decided (icontains on text field)
-    SearchFilter on ViewSet handles company_name, client_name, email, industry.
+    SearchFilter on ViewSet handles company_name.
     """
-    status             = django_filters.CharFilter(field_name='status', lookup_expr='exact')
-    industry           = django_filters.CharFilter(field_name='industry', lookup_expr='icontains')
     city               = django_filters.CharFilter(field_name='city', lookup_expr='icontains')
     state              = django_filters.CharFilter(field_name='state', lookup_expr='icontains')
     country            = django_filters.CharFilter(field_name='country', lookup_expr='icontains')
@@ -33,7 +29,7 @@ class ClientFilterSet(django_filters.FilterSet):
     class Meta:
         model = Client
         fields = [
-            'status', 'industry', 'city', 'state', 'country',
+            'city', 'state', 'country',
             'created_after', 'created_before', 'agreement_date_after',
             'has_agreement', 'commercial_decided',
         ]

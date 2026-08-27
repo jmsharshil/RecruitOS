@@ -39,7 +39,7 @@ class CandidateFilterSet(django_filters.FilterSet):
         model = Candidate
         fields = [
             'candidate_name', 'email', 'contact', 'current_profile', 'experience',
-            'current_location', 'current_company', 'education', 'skills', 'tags',
+            'current_location', 'current_company', 'education',
             'is_duplicate', 'created_after', 'created_before',
             'experience_min', 'experience_max',
         ]

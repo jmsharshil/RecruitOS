@@ -13,16 +13,15 @@ from common.permissions import IsAdmin
 from audit.utils import log_action
 
 CLIENT_EXPORT_HEADERS = [
-    'client_id', 'company_name', 'client_name', 'email',
-    'contact', 'street',
+    'client_id', 'company_name', 'street',
     'city', 'state', 'country', 'postal_code',
-    'industry', 'gst_number', 'status', 'agreement_date', 'payment_period_days',
+    'gst_number', 'agreement_date', 'payment_period_days',
     'replacement_period_days', 'commercial_decided', 'agreement_document_name',
     'notes',
 ]
 
 CLIENT_IMPORT_REQUIRED = [
-    'company_name', 'client_name', 'email', 'contact', 'industry',
+    'company_name'
 ]
 
 
@@ -48,11 +47,11 @@ class ClientExportView(APIView):
         if is_template:
             # Sample data for template (commercial_decided now text, e.g. terms or "Yes")
             rows = [[
-                'CLI-001', 'Acme Corp', 'John Doe', 'john@acmecorp.com', 'jane@acmecorp.com',
-                '+1234567890', '+1987654321', 'https://acmecorp.com', 'https://linkedin.com/company/acme',
-                '123 Business St', 'New York', 'NY', 'USA', '10001', 'New York Metro',
-                'Technology', 'GSTIN123456789', 'ACTIVE', '2024-01-15', 30,
-                45, 'Yes - 15% margin, net-30', 'agreement.pdf', 'Sample client notes for demo purposes.'
+                'CLI-001', 'Acme Corp', '123 Business St',
+                'New York', 'NY', 'USA', '10001',
+                'GSTIN123456789', '2024-01-15', 30,
+                45, 'Yes - 15% margin, net-30', 'agreement.pdf',
+                'Sample client notes for demo purposes.'
             ]]
             ext = 'xlsx' if export_format == 'xlsx' else 'csv'
             filename = f'clients_import_template.{ext}'

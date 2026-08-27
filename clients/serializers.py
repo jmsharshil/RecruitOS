@@ -84,7 +84,8 @@ class TeamMemberTrackerFormatSerializer(serializers.ModelSerializer):
         details = {
             'id': obj.team_member_id,
             'name': None,
-            'email': None
+            'email': None,
+            'phone_number': None
         }
         if not obj.client or not obj.client.team_members:
             return details
@@ -93,6 +94,7 @@ class TeamMemberTrackerFormatSerializer(serializers.ModelSerializer):
             if isinstance(tm, dict) and str(tm.get('id')) == str(obj.team_member_id):
                 details['name'] = tm.get('name')
                 details['email'] = tm.get('email')
+                details['phone_number'] = tm.get('phone_number')
                 break
         return details
 
@@ -116,8 +118,8 @@ class ClientListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Client
         fields = [
-            'id', 'client_id', 'company_name', 'industry', 'status',
-            'email', 'contact', 'city', 'state', 'country',
+            'id', 'client_id', 'company_name',
+            'city', 'state', 'country',
             'open_jobs_count', 'created_by_name', 'created_at',
         ]
 
@@ -143,8 +145,12 @@ class ClientDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Client
-        exclude = ['alternative_email', 'alternative_contact', 'website', 'linkedin', 'client_location']
+        exclude = [
+            'alternative_email', 'alternative_contact', 'website', 'linkedin', 'client_location',
+            'client_name', 'industry', 'status', 'email', 'contact'
+        ]
         read_only_fields = ['id', 'client_id', 'created_by', 'is_deleted', 'organization']
+
 
     def get_documents(self, obj):
         return ClientDocumentSerializer(obj.documents.filter(is_deleted=False), many=True).data
@@ -185,6 +191,11 @@ class ClientDetailSerializer(serializers.ModelSerializer):
 
         pocs_data = data.get('pocs') if hasattr(data, 'get') else None
         documents_data = data.get('documents') if hasattr(data, 'get') else None
+        team_members_data = data.get('team_members') if hasattr(data, 'get') else None
+
+        # Convert QueryDict to mutable dict if necessary
+        if hasattr(data, '_mutable'):
+            data = data.copy()
 
         if isinstance(pocs_data, str):
             try:
@@ -195,6 +206,12 @@ class ClientDetailSerializer(serializers.ModelSerializer):
         if isinstance(documents_data, str):
             try:
                 documents_data = json.loads(documents_data)
+            except json.JSONDecodeError:
+                pass
+                
+        if isinstance(team_members_data, str):
+            try:
+                data['team_members'] = json.loads(team_members_data)
             except json.JSONDecodeError:
                 pass
 

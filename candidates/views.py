@@ -41,8 +41,7 @@ class CandidateViewSet(viewsets.ModelViewSet):
     filterset_class  = CandidateFilterSet
     search_fields    = [
         'candidate_name', 'email', 'contact', 'current_profile', 
-        'current_company', 'current_location', 'education', 
-        'skills', 'tags'
+        'current_company', 'current_location', 'education'
     ]
     ordering_fields  = ['candidate_name', 'created_at', 'experience']
     ordering         = ['-created_at']
@@ -318,6 +317,18 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         if self.action == 'destroy':
             return [IsAdmin()]
         return [IsAdminOrManager()]
+
+    def _check_job_manager_permission(self, request, job):
+        user = request.user
+        if user.role == UserRole.ADMIN:
+            return True
+        if user.role == UserRole.MANAGER:
+            if job.hiring_manager == user or job.created_by == user:
+                return True
+        raise ValidationError({
+            "error": "Permission Denied",
+            "detail": "Only the admin or the manager who created/manages this job can perform this action."
+        })
 
     def get_queryset(self):
         user = self.request.user
@@ -595,6 +606,9 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             cc_emails = []
 
         applications = self.get_queryset().filter(id__in=application_ids).select_related('job', 'candidate', 'job__client')
+        
+        for app in applications:
+            self._check_job_manager_permission(request, app.job)
         updated_count = 0
         errors = []
 
@@ -804,6 +818,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='approve-interview-schedule')
     def approve_interview_schedule(self, request, pk=None):
         application = self.get_object()
+        self._check_job_manager_permission(request, application.job)
         status = request.data.get('status')
         if status not in ['approved', 'rejected']:
             raise ValidationError({"error": "Status must be 'approved' or 'rejected'"})
@@ -821,7 +836,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             )
             send_interview_approval_result_email(schedule.id, action_user_id=request.user.id)
             if status == 'approved':
-                simulate_interview_reminder(schedule.id)
+                simulate_interview_reminder(schedule.id, action_user_id=request.user.id)
             return Response({"message": f"Interview schedule {status}"})
         except InterviewSchedule.DoesNotExist:
             raise ValidationError({"error": "No interview schedule found for this application"})
@@ -834,6 +849,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             raise ValidationError({"error": "Provide a list of application_ids"})
 
         applications = self.get_queryset().filter(id__in=application_ids).select_related('job', 'candidate', 'job__client', 'interview_schedule')
+        for app in applications:
+            self._check_job_manager_permission(request, app.job)
         
         updated_count = 0
         errors = []
@@ -923,6 +940,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='review')
     def review(self, request, pk=None):
         application = self.get_object()
+        self._check_job_manager_permission(request, application.job)
         status = request.data.get('status')
         notes = request.data.get('notes', '')
 
@@ -961,14 +979,38 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         except Exception as e:
             print(f"Failed to send manager review email: {e}")
 
-
+        # Automatically send to client if approved
+        if status == ManagerReviewStatus.ACCEPTED:
+            try:
+                if isinstance(request.data, dict):
+                    request.data['application_ids'] = [str(application.id)]
+                elif hasattr(request.data, '_mutable'):
+                    was_mutable = request.data._mutable
+                    request.data._mutable = True
+                    request.data.setlist('application_ids', [str(application.id)])
+                    request.data._mutable = was_mutable
+                self.send_to_client(request)
+            except Exception as e:
+                print(f"Auto-send to client failed: {e}")
 
         return Response(ApplicationDetailSerializer(application).data)
 
     @action(detail=False, methods=['get'], url_path='grouped-approval-queue')
     def grouped_approval_queue(self, request):
-        """Returns applications grouped by job, specifically for the approval queue."""
+        """Returns applications grouped by job, specifically for the approval queue.
+        Pending applications are sorted to appear at the top."""
+        from django.db.models import Case, When, Value, IntegerField
+        
         queryset = self.filter_queryset(self.get_queryset())
+        from django.db.models import Q
+        queryset = queryset.annotate(
+            is_pending=Case(
+                When(Q(manager_review_status='pending') | Q(interview_schedule__manager_approval_status='pending'), then=Value(0)),
+                default=Value(1),
+                output_field=IntegerField()
+            )
+        ).order_by('is_pending', '-created_at')
+        
         serializer = ApplicationListSerializer(queryset, many=True, context={'request': request})
         
         grouped_data = {}
@@ -1006,6 +1048,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             raise ValidationError({"error": "Provide a list of application_ids"})
 
         applications = self.get_queryset().filter(id__in=application_ids)
+        for app in applications:
+            self._check_job_manager_permission(request, app.job)
         updated_count = 0
 
         recruiter_apps = {}
@@ -1055,6 +1099,17 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 )
             except Exception as e:
                 print(f"Failed to send bulk manager review email to {email}: {e}")
+
+        # Automatically send to client if approved
+        if status == ManagerReviewStatus.ACCEPTED:
+            try:
+                client_res = self.send_to_client(request)
+                msg = client_res.data.get("message", "Sent to client.")
+                if client_res.data.get("errors"):
+                    msg += f" Errors: {', '.join(client_res.data['errors'])}"
+                return Response({"message": f"Successfully approved {updated_count} applications. {msg}", "status": status})
+            except Exception as e:
+                return Response({"message": f"Successfully approved {updated_count} applications, but auto-send to client failed: {str(e)}", "status": status})
 
         return Response({"message": f"Successfully updated {updated_count} applications", "status": status})
 

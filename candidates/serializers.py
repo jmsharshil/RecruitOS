@@ -11,9 +11,8 @@ class CandidateBriefSerializer(serializers.ModelSerializer):
         model = Candidate
         fields = [
             'id', 'candidate_name', 'email', 'contact', 'current_profile',
-            'current_company', 'experience', 'current_location', 'skills',
-            'education', 'linkedin_url', 'portfolio_url', 'certifications', 'tags',
-            'resume_file_name', 'is_duplicate', 'duplicate_of',
+            'current_company', 'experience', 'current_location',
+            'education', 'resume_file_name', 'is_duplicate', 'duplicate_of',
         ]
 
 
@@ -88,6 +87,7 @@ class ApplicationListSerializer(serializers.ModelSerializer):
         write_only=True, queryset=Stage.objects.all(), source='current_stage',
         required=False, allow_null=True
     )
+    synopsis = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     submitted_by   = serializers.SerializerMethodField()
     candidate_cv   = serializers.SerializerMethodField()
@@ -183,6 +183,7 @@ class ApplicationDetailSerializer(serializers.ModelSerializer):
         required=False, allow_null=True
     )
     notes = serializers.CharField(source='feedback', required=False, allow_blank=True)
+    synopsis = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = Application
@@ -345,7 +346,11 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Candidate
-        exclude = ['hike', 'preferred_location', 'offer_in_hand', 'reason_for_change', 'dob']
+        exclude = [
+            'hike', 'preferred_location', 'offer_in_hand', 'reason_for_change', 'dob',
+            'profile_name', 'linkedin_url', 'portfolio_url', 'skills', 'certifications',
+            'experience_details', 'tags'
+        ]
         read_only_fields = [
             'id', 'created_at', 'updated_at', 'is_deleted', 'deleted_at',
             'organization', 'uploaded_by',
@@ -360,16 +365,41 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
             
         return super().to_internal_value(mutable_data)
 
+    def validate(self, attrs):
+        required_fields = {
+            'current_ctc': 'Current CTC',
+            'expected_ctc': 'Expected CTC',
+            'notice_period': 'Notice Period',
+        }
+        
+        errors = {}
+        for field, label in required_fields.items():
+            val = attrs.get(field)
+            if self.instance and field not in attrs:
+                val = getattr(self.instance, field, None)
+            
+            if val in [None, '', 'Not specified', 'Not provided', 0, 0.0, '0', '0.0']:
+                errors[field] = f"{label} is required."
+                
+        if errors:
+            raise serializers.ValidationError(errors)
+            
+        return attrs
+
     def update(self, instance, validated_data):
         # Automatically keep profile_name synced with candidate_name if it's updated
-        if 'candidate_name' in validated_data and 'profile_name' not in validated_data:
-            validated_data['profile_name'] = validated_data['candidate_name']
+        if 'candidate_name' in validated_data:
+            instance.profile_name = validated_data['candidate_name']
         return super().update(instance, validated_data)
 
     def get_past_jobs(self, obj):
         from candidates.models import Application
+        from django.db.models import Q
+        
+        master_candidate = obj.duplicate_of if obj.duplicate_of else obj
+        
         apps = Application.objects.filter(
-            candidate=obj,
+            Q(candidate=master_candidate) | Q(candidate__duplicate_of=master_candidate),
             organization=obj.organization,
             is_deleted=False
         ).select_related(

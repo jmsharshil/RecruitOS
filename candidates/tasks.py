@@ -219,7 +219,7 @@ def simulate_bulk_client_submission_email(application_ids, client_email, recipie
 
 
 @run_in_thread
-def simulate_interview_reminder(interview_schedule_id):
+def simulate_interview_reminder(interview_schedule_id, action_user_id=None):
     """Send interview reminder notification (in-app) + email via org SMTP."""
     try:
         schedule = InterviewSchedule.objects.select_related(
@@ -228,6 +228,15 @@ def simulate_interview_reminder(interview_schedule_id):
         application = schedule.application
         candidate = application.candidate
         org = application.organization
+
+        from_email_override = None
+        if action_user_id:
+            try:
+                from accounts.models import User
+                action_user = User.objects.get(id=action_user_id)
+                from_email_override = action_user.email
+            except Exception as e:
+                logger.warning(f"Could not get action_user {action_user_id} for interview reminder email override: {e}")
 
         # In-app notifications for the uploader (ensure same organization)
         uploader = application.created_by or candidate.uploaded_by
@@ -270,6 +279,7 @@ def simulate_interview_reminder(interview_schedule_id):
                     template_name='interview_reminder',
                     context=context,
                     recipient_list=[uploader.email],
+                    from_email_override=from_email_override
                 )
             except Exception as email_err:
                 logger.warning(f"Interview reminder email failed for {uploader.email}: {email_err}")
