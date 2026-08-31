@@ -210,10 +210,12 @@ class ClientDetailSerializer(serializers.ModelSerializer):
                 pass
                 
         if isinstance(team_members_data, str):
-            try:
-                data['team_members'] = json.loads(team_members_data)
-            except json.JSONDecodeError:
-                pass
+            team_members_data = team_members_data.strip()
+            if not team_members_data:
+                data['team_members'] = "[]"
+            # DRF's JSONField will naturally parse the valid JSON string from the QueryDict.
+            # If you assign a Python list to the QueryDict, DRF's JSONField calls str() on it,
+            # which produces single-quotes (e.g. "[{'name': '...'}]") and fails valid JSON checks.
 
         internal_value = super().to_internal_value(data)
 
