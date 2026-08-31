@@ -336,7 +336,7 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
     """Full detail — all fields + nested applications + uploader info.
     Note: Fields like dob, doc, ctc, notice_period, reason_for_change moved to Application.
     """
-    applications         = ApplicationListSerializer(many=True, read_only=True)
+    applications         = serializers.SerializerMethodField()
     past_jobs            = serializers.SerializerMethodField()
     uploaded_by          = UserBriefSerializer(read_only=True)
     duplicate_of_detail  = CandidateBriefSerializer(source='duplicate_of', read_only=True)
@@ -391,6 +391,19 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
         if 'candidate_name' in validated_data:
             instance.profile_name = validated_data['candidate_name']
         return super().update(instance, validated_data)
+
+    def get_applications(self, obj):
+        from candidates.models import Application
+        from django.db.models import Q
+        
+        master_candidate = obj.duplicate_of if obj.duplicate_of else obj
+        
+        apps = Application.objects.filter(
+            Q(candidate=master_candidate) | Q(candidate__duplicate_of=master_candidate),
+            organization=obj.organization,
+            is_deleted=False
+        )
+        return ApplicationListSerializer(apps, many=True, context=self.context).data
 
     def get_past_jobs(self, obj):
         from candidates.models import Application

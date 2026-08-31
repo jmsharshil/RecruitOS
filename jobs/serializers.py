@@ -33,13 +33,14 @@ class JobListSerializer(serializers.ModelSerializer):
     hiring_manager_name = serializers.SerializerMethodField()
     budget              = serializers.CharField(read_only=True)
     created_at          = DateParserDateTimeField(read_only=True)
+    approval_stats      = serializers.SerializerMethodField()
 
     class Meta:
         model = Job
         fields = [
             'id', 'code', 'title', 'status',
             'location', 'min_experience', 'max_experience', 'budget',
-            'hiring_for', 'candidate_count',
+            'hiring_for', 'candidate_count', 'approval_stats',
             'created_by_name', 'hiring_manager_name', 'created_at',
         ]
 
@@ -51,6 +52,19 @@ class JobListSerializer(serializers.ModelSerializer):
 
     def get_hiring_manager_name(self, obj):
         return obj.hiring_manager.name if obj.hiring_manager else None
+
+    def get_approval_stats(self, obj):
+        from django.db.models import Count, Q
+        stats = obj.applications.filter(is_deleted=False).aggregate(
+            pending_count=Count('id', filter=Q(manager_review_status='pending') | Q(interview_schedule__manager_approval_status='pending')),
+            approved_count=Count('id', filter=Q(manager_review_status='accepted') | Q(interview_schedule__manager_approval_status='approved')),
+            rejected_count=Count('id', filter=Q(manager_review_status='rejected') | Q(interview_schedule__manager_approval_status='rejected'))
+        )
+        return [
+            {"status": "pending", "count": stats['pending_count'] or 0},
+            {"status": "approved", "count": stats['approved_count'] or 0},
+            {"status": "rejected", "count": stats['rejected_count'] or 0}
+        ]
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
@@ -88,6 +102,7 @@ class JobDetailSerializer(serializers.ModelSerializer):
     created_at          = DateParserDateTimeField(read_only=True)
     updated_at          = DateParserDateTimeField(read_only=True)
     deleted_at          = DateParserDateTimeField(read_only=True, allow_null=True)
+    approval_stats      = serializers.SerializerMethodField()
 
     # Write-only field for assigning recruiters
     assigned_recruiter_ids = serializers.PrimaryKeyRelatedField(
@@ -111,6 +126,19 @@ class JobDetailSerializer(serializers.ModelSerializer):
 
     def get_candidate_count(self, obj):
         return obj.applications.filter(is_deleted=False).count()
+
+    def get_approval_stats(self, obj):
+        from django.db.models import Count, Q
+        stats = obj.applications.filter(is_deleted=False).aggregate(
+            pending_count=Count('id', filter=Q(manager_review_status='pending') | Q(interview_schedule__manager_approval_status='pending')),
+            approved_count=Count('id', filter=Q(manager_review_status='accepted') | Q(interview_schedule__manager_approval_status='approved')),
+            rejected_count=Count('id', filter=Q(manager_review_status='rejected') | Q(interview_schedule__manager_approval_status='rejected'))
+        )
+        return [
+            {"status": "pending", "count": stats['pending_count'] or 0},
+            {"status": "approved", "count": stats['approved_count'] or 0},
+            {"status": "rejected", "count": stats['rejected_count'] or 0}
+        ]
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
@@ -147,7 +175,7 @@ class JobDetailSerializer(serializers.ModelSerializer):
             'budget', 'hiring_for', 'client', 'status',
             'assigned_recruiters', 'assigned_recruiter_ids',
             'created_by', 'hiring_manager', 'hiring_manager_id',
-            'stages', 'candidate_count', 'created_at', 'updated_at',
+            'stages', 'candidate_count', 'approval_stats', 'created_at', 'updated_at',
             'organization', 'is_deleted', 'deleted_at', 'team_member_id',
         ]
         read_only_fields = [
