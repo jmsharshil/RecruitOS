@@ -145,7 +145,7 @@ class ClientSubmission(BaseModel):
     sent_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='sent_submissions')
     status = models.CharField(max_length=20, choices=SubmissionStatus.choices, default=SubmissionStatus.PENDING)
     client_feedback = models.TextField(blank=True)
-    client_rating = models.PositiveSmallIntegerField(null=True, blank=True)  # 1-5
+    client_rating = models.CharField(max_length=50, null=True, blank=True)  # 1-5
 
 
 class ApplicationHistory(BaseModel):

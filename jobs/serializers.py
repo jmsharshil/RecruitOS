@@ -31,7 +31,7 @@ class JobListSerializer(serializers.ModelSerializer):
     candidate_count = serializers.SerializerMethodField()
     created_by_name = serializers.SerializerMethodField()
     hiring_manager_name = serializers.SerializerMethodField()
-    budget              = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    budget              = serializers.CharField(read_only=True)
     created_at          = DateParserDateTimeField(read_only=True)
 
     class Meta:
