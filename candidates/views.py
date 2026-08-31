@@ -341,17 +341,47 @@ class ApplicationViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         from rest_framework import status
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        self.perform_create(serializer)
+        is_many = isinstance(request.data, list)
+        has_candidate_ids = isinstance(request.data, dict) and 'candidate_ids' in request.data
         
-        application = serializer.instance
-        candidate = application.candidate
-        job = application.job
-        
-        return Response({
-            "message": f"{candidate.candidate_name} has been successfully submitted to {job.title}."
-        }, status=status.HTTP_201_CREATED)
+        if is_many or has_candidate_ids:
+            created_apps = []
+            
+            # Normalize the payload into a list of single-submission dicts
+            items = request.data if is_many else []
+            if has_candidate_ids:
+                job_id = request.data.get('job_id')
+                # Optional fields that might be passed at the top level
+                extra_data = {k: v for k, v in request.data.items() if k not in ['job_id', 'candidate_ids', 'candidate_id']}
+                for cid in request.data.get('candidate_ids', []):
+                    item = {"job_id": job_id, "candidate_id": cid}
+                    item.update(extra_data)
+                    items.append(item)
+                    
+            for item in items:
+                serializer = self.get_serializer(data=item)
+                serializer.is_valid(raise_exception=True)
+                self.perform_create(serializer)
+                created_apps.append(serializer.instance)
+                
+            job_title = created_apps[0].job.title if created_apps else "the job"
+            return Response({
+                "message": f"{len(created_apps)} candidates have been successfully submitted to {job_title}.",
+                "data": self.get_serializer(created_apps, many=True).data
+            }, status=status.HTTP_201_CREATED)
+        else:
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            self.perform_create(serializer)
+            
+            application = serializer.instance
+            candidate = application.candidate
+            job = application.job
+            
+            return Response({
+                "message": f"{candidate.candidate_name} has been successfully submitted to {job.title}.",
+                "data": self.get_serializer(application).data
+            }, status=status.HTTP_201_CREATED)
 
     def perform_create(self, serializer):
         # We fetch candidate to inherit default values
