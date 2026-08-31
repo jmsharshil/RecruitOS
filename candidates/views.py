@@ -980,6 +980,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 "detail": f"Status must be one of: {ManagerReviewStatus.values}"
             })
 
+        old_status = application.manager_review_status
+
         # Save review details
         application.manager_review_status = status
         application.manager_review_notes = notes
@@ -989,25 +991,27 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             application.status = CandidateStatus.REJECTED.value
 
         application.save()
-        log_action(
-            request.user, 'reviewed', 'Application', application.id,
-            f"Manager review action: {status} with notes: '{notes[:60]}'"
-        )
 
-        # Save manager review action to history
-        ApplicationHistory.objects.create(
-            application=application,
-            user=request.user,
-            action=status,
-            notes=notes,
-            organization=application.organization
-        )
+        if old_status != status:
+            log_action(
+                request.user, 'reviewed', 'Application', application.id,
+                f"Manager review action: {status} with notes: '{notes[:60]}'"
+            )
 
-        # Trigger email notification to recruiter
-        try:
-            send_manager_review_email(application, from_email=request.user.email)
-        except Exception as e:
-            print(f"Failed to send manager review email: {e}")
+            # Save manager review action to history
+            ApplicationHistory.objects.create(
+                application=application,
+                user=request.user,
+                action=status,
+                notes=notes,
+                organization=application.organization
+            )
+
+            # Trigger email notification to recruiter
+            try:
+                send_manager_review_email(application, from_email=request.user.email)
+            except Exception as e:
+                print(f"Failed to send manager review email: {e}")
 
         # Automatically send to client if approved
         if status == ManagerReviewStatus.ACCEPTED:
@@ -1084,35 +1088,38 @@ class ApplicationViewSet(viewsets.ModelViewSet):
 
         recruiter_apps = {}
         for app in applications:
+            old_status = app.manager_review_status
+            
             app.manager_review_status = status
             app.manager_review_notes = notes
             if status == ManagerReviewStatus.REJECTED:
                 app.status = CandidateStatus.REJECTED.value
             app.save()
 
-            log_action(
-                request.user, 'reviewed', 'Application', app.id,
-                f"Manager bulk review action: {status} with notes: '{notes[:60]}'"
-            )
-            ApplicationHistory.objects.create(
-                application=app,
-                user=request.user,
-                action=status,
-                notes=notes,
-                organization=app.organization
-            )
+            if old_status != status:
+                log_action(
+                    request.user, 'reviewed', 'Application', app.id,
+                    f"Manager bulk review action: {status} with notes: '{notes[:60]}'"
+                )
+                ApplicationHistory.objects.create(
+                    application=app,
+                    user=request.user,
+                    action=status,
+                    notes=notes,
+                    organization=app.organization
+                )
 
-            recruiter = app.created_by or app.candidate.uploaded_by
-            if recruiter and recruiter.email:
-                if recruiter.email not in recruiter_apps:
-                    recruiter_apps[recruiter.email] = {
-                        "recruiter": recruiter,
-                        "manager": app.job.hiring_manager or app.job.created_by,
-                        "org": app.organization,
-                        "apps": []
-                    }
-                recruiter_apps[recruiter.email]["apps"].append(app)
-            
+                recruiter = app.created_by or app.candidate.uploaded_by
+                if recruiter and recruiter.email:
+                    if recruiter.email not in recruiter_apps:
+                        recruiter_apps[recruiter.email] = {
+                            "recruiter": recruiter,
+                            "manager": app.job.hiring_manager or app.job.created_by,
+                            "org": app.organization,
+                            "apps": []
+                        }
+                    recruiter_apps[recruiter.email]["apps"].append(app)
+                
             updated_count += 1
 
         # Send bulk grouped emails to each recruiter
