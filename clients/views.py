@@ -28,6 +28,66 @@ class ClientViewSet(viewsets.ModelViewSet):
             return ClientListSerializer
         return ClientDetailSerializer
 
+    def create(self, request, *args, **kwargs):
+        import json
+        team_members_data = request.data.get('team_members')
+        
+        if team_members_data:
+            try:
+                team_members = json.loads(team_members_data) if isinstance(team_members_data, str) else team_members_data
+            except Exception:
+                return Response({"error": "Invalid format for team_members"}, status=status.HTTP_400_BAD_REQUEST)
+                
+            if not isinstance(team_members, list) or not team_members:
+                return Response({"error": "team_members must be a non-empty list"}, status=status.HTTP_400_BAD_REQUEST)
+                
+            responses = []
+            
+            # Use the first team member to validate and extract columns from the file
+            first_tm = team_members[0]
+            
+            # QueryDict is immutable, so we must make a mutable copy to override team_member_id
+            data = request.data.copy()
+            data['team_member_id'] = first_tm
+            
+            serializer = self.get_serializer(data=data)
+            serializer.is_valid(raise_exception=True)
+            
+            validated_data = serializer.validated_data
+            
+            # Save the first one using perform_create which also logs the action
+            self.perform_create(serializer)
+            responses.append(serializer.data)
+            
+            # For the remaining team members, use the extracted validated_data (so we don't parse the file again)
+            client = validated_data.get('client')
+            columns = validated_data.get('columns', [])
+            header_color = validated_data.get('header_color')
+            text_color = validated_data.get('text_color')
+            
+            for tm_id in team_members[1:]:
+                tracker, created = TeamMemberTrackerFormat.objects.update_or_create(
+                    client=client,
+                    team_member_id=tm_id,
+                    organization=self.request.user.organization,
+                    defaults={
+                        'columns': columns,
+                        'header_color': header_color,
+                        'text_color': text_color,
+                        'created_by': self.request.user,
+                        'is_deleted': False,
+                        'deleted_at': None
+                    }
+                )
+                from clients.models import log_action
+                action_str = 'created' if created else 'updated'
+                log_action(self.request.user, action_str, 'TeamMemberTrackerFormat', tracker.id, f"{action_str.capitalize()} tracker format for team member {tracker.team_member_id}")
+                responses.append(self.get_serializer(tracker).data)
+                
+            return Response(responses[0] if len(responses) == 1 else responses, status=status.HTTP_201_CREATED)
+            
+        return super().create(request, *args, **kwargs)
+
     def get_queryset(self):
         user = self.request.user
         qs = Client.objects.filter(
@@ -187,6 +247,66 @@ class TeamMemberTrackerFormatViewSet(viewsets.ModelViewSet):
     """
     serializer_class = TeamMemberTrackerFormatSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def create(self, request, *args, **kwargs):
+        import json
+        team_members_data = request.data.get('team_members')
+        
+        if team_members_data:
+            try:
+                team_members = json.loads(team_members_data) if isinstance(team_members_data, str) else team_members_data
+            except Exception:
+                return Response({"error": "Invalid format for team_members"}, status=status.HTTP_400_BAD_REQUEST)
+                
+            if not isinstance(team_members, list) or not team_members:
+                return Response({"error": "team_members must be a non-empty list"}, status=status.HTTP_400_BAD_REQUEST)
+                
+            responses = []
+            
+            # Use the first team member to validate and extract columns from the file
+            first_tm = team_members[0]
+            
+            # QueryDict is immutable, so we must make a mutable copy to override team_member_id
+            data = request.data.copy()
+            data['team_member_id'] = first_tm
+            
+            serializer = self.get_serializer(data=data)
+            serializer.is_valid(raise_exception=True)
+            
+            validated_data = serializer.validated_data
+            
+            # Save the first one using perform_create which also logs the action
+            self.perform_create(serializer)
+            responses.append(serializer.data)
+            
+            # For the remaining team members, use the extracted validated_data (so we don't parse the file again)
+            client = validated_data.get('client')
+            columns = validated_data.get('columns', [])
+            header_color = validated_data.get('header_color')
+            text_color = validated_data.get('text_color')
+            
+            for tm_id in team_members[1:]:
+                tracker, created = TeamMemberTrackerFormat.objects.update_or_create(
+                    client=client,
+                    team_member_id=tm_id,
+                    organization=self.request.user.organization,
+                    defaults={
+                        'columns': columns,
+                        'header_color': header_color,
+                        'text_color': text_color,
+                        'created_by': self.request.user,
+                        'is_deleted': False,
+                        'deleted_at': None
+                    }
+                )
+                from clients.models import log_action
+                action_str = 'created' if created else 'updated'
+                log_action(self.request.user, action_str, 'TeamMemberTrackerFormat', tracker.id, f"{action_str.capitalize()} tracker format for team member {tracker.team_member_id}")
+                responses.append(self.get_serializer(tracker).data)
+                
+            return Response(responses[0] if len(responses) == 1 else responses, status=status.HTTP_201_CREATED)
+            
+        return super().create(request, *args, **kwargs)
 
     def get_queryset(self):
         qs = TeamMemberTrackerFormat.objects.filter(

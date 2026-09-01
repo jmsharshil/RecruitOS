@@ -25,9 +25,8 @@ class IsOwnerOrAdmin(BasePermission):
         if getattr(obj, 'created_by', None) == request.user:
             return True
 
-        # Managers can VIEW admin/system-created users (read-only)
-        from rest_framework.permissions import SAFE_METHODS
-        if request.method in SAFE_METHODS and request.user.role == 'manager':
+        # Managers can view and edit admin/system-created users
+        if request.user.role == 'manager':
             creator = getattr(obj, 'created_by', None)
             if creator is None or getattr(creator, 'role', None) == 'admin':
                 return True
