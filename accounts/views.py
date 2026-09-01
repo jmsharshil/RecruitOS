@@ -586,6 +586,100 @@ class RecruiterDashboardView(APIView):
             "todays_interviews": interviews_today
         })
 
+class UnifiedDashboardView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        org = user.organization
+        
+        # 1. Total Candidates
+        total_candidates = Candidate.objects.filter(is_deleted=False, organization=org).count()
+        
+        # 2. Active Jobs grouped by status
+        job_qs = Job.objects.filter(is_deleted=False, organization=org)
+        
+        if user.role == UserRole.MANAGER:
+            job_qs = job_qs.filter(created_by=user)
+        elif user.role == UserRole.RECRUITER:
+            job_qs = job_qs.filter(assigned_recruiters=user)
+
+        active_jobs = list(job_qs.values('status').annotate(count=Count('id')))
+        
+        # 3. Interviews Upcoming (today to 3 days)
+        today = timezone.localdate()
+        three_days_later = today + timedelta(days=3)
+        
+        interview_qs = InterviewSchedule.objects.filter(
+            is_deleted=False,
+            application__job__in=job_qs,
+            date__range=[today, three_days_later],
+            application__is_deleted=False
+        ).select_related('application__candidate', 'application__job', 'application__current_stage')
+        
+        upcoming_interviews = []
+        for interview in interview_qs:
+            upcoming_interviews.append({
+                "candidate_name": interview.application.candidate.candidate_name,
+                "job_title": interview.application.job.title,
+                "date": str(interview.date),
+                "time": str(interview.time),
+                "round": getattr(interview.application.current_stage, 'name', 'Interview'),
+                "mode": interview.mode,
+                "interviewer_name": interview.interviewer_name or ""
+            })
+            
+        # 4. Active Clients
+        active_clients = Client.objects.filter(is_deleted=False, status=ClientStatus.ACTIVE, organization=org).count()
+        
+        # 5. Unread Activity
+        from notifications.models import Notification
+        unread_notifications = Notification.objects.filter(user=user, read=False, is_deleted=False).order_by('-created_at')[:10]
+        unread_activity = []
+        for notif in unread_notifications:
+            unread_activity.append({
+                "title": notif.title,
+                "message": notif.message,
+                "type": notif.type,
+                "created_at": notif.created_at
+            })
+            
+        # 6. Hires by Client
+        hires_qs = Application.objects.filter(
+            status=CandidateStatus.HIRED, 
+            is_deleted=False, 
+            job__in=job_qs
+        ).values('job__client__company_name').annotate(hires_count=Count('id')).order_by('-hires_count')
+        
+        hires_by_client = []
+        for h in hires_qs:
+            if h['job__client__company_name']:
+                hires_by_client.append({
+                    "client_name": h['job__client__company_name'],
+                    "hires_count": h['hires_count']
+                })
+
+        return Response({
+            "top_stats": {
+                "total_candidates": total_candidates,
+                "active_jobs_by_status": active_jobs,
+                "interviews_upcoming_count": len(upcoming_interviews),
+                "active_clients": active_clients,
+            },
+            "upcoming_interviews": upcoming_interviews,
+            "unread_activity": unread_activity,
+            "hires_by_client": hires_by_client,
+            "funnel_trend": [], 
+            "efficiency_metrics": {
+                "time_to_hire": "N/A",
+                "offer_acceptance": "N/A",
+                "cost_per_hire": "N/A",
+                "diversity_ratio": "N/A"
+            },
+            "top_sourcing_channels": []
+        })
+
+
 
 # ---------------------------------------------------------------------------
 # Organization Email Config — GET/PUT/PATCH (admin only)
