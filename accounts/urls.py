@@ -4,7 +4,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from accounts.views import (
     LoginView, LogoutView, ForgotPasswordView, MeView, RegisterOrganizationView,
     UserViewSet, SetPinView,
-    AdminDashboardView, ManagerDashboardView, RecruiterDashboardView, UnifiedDashboardView,
+    AdminDashboardView, ManagerDashboardView, RecruiterDashboardView, UnifiedDashboardView ,
     OrganizationEmailConfigView, EmailTemplateViewSet,
 )
 from accounts.views_google import GoogleLoginView, GoogleConfigView
@@ -32,7 +32,7 @@ urlpatterns = [
     path('dashboard/manager/', ManagerDashboardView.as_view(), name='dashboard-manager'),
     path('dashboard/recruiter/', RecruiterDashboardView.as_view(), name='dashboard-recruiter'),
 
-    path('dashboard/unified/', UnifiedDashboardView.as_view(), name='dashboard-unified'),
+    path('dashboard/', UnifiedDashboardView.as_view(), name='dashboard-unified'),
     
     # Users
     path('users/', include(router.urls)),

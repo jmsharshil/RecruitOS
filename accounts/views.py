@@ -669,14 +669,7 @@ class UnifiedDashboardView(APIView):
             "upcoming_interviews": upcoming_interviews,
             "unread_activity": unread_activity,
             "hires_by_client": hires_by_client,
-            "funnel_trend": [], 
-            "efficiency_metrics": {
-                "time_to_hire": "N/A",
-                "offer_acceptance": "N/A",
-                "cost_per_hire": "N/A",
-                "diversity_ratio": "N/A"
-            },
-            "top_sourcing_channels": []
+            "funnel_trend": []
         })
 
 
