@@ -336,7 +336,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         if user.role in [UserRole.ADMIN, UserRole.MANAGER]:
             return qs
         elif user.role == UserRole.RECRUITER:
-            return qs.filter(job__assigned_recruiters=user)
+            from django.db.models import Q
+            return qs.filter(Q(job__assigned_recruiters=user) | Q(created_by=user)).distinct()
         return qs.none()
 
     def create(self, request, *args, **kwargs):
