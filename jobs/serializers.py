@@ -187,6 +187,20 @@ class JobDetailSerializer(serializers.ModelSerializer):
         }
 
     def validate(self, attrs):
+        # Handle 'team_members' array sent by frontend and map it to team_member_id
+        team_members_data = self.initial_data.get('team_members')
+        if team_members_data:
+            import json
+            if isinstance(team_members_data, str):
+                try:
+                    parsed = json.loads(team_members_data)
+                    if isinstance(parsed, list) and parsed:
+                        attrs['team_member_id'] = str(parsed[0])
+                except Exception:
+                    pass
+            elif isinstance(team_members_data, list) and team_members_data:
+                attrs['team_member_id'] = str(team_members_data[0])
+
         attrs['hiring_for'] = 'client'
         
         description_file = attrs.get('description_file')

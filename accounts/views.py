@@ -604,7 +604,16 @@ class UnifiedDashboardView(APIView):
         elif user.role == UserRole.RECRUITER:
             job_qs = job_qs.filter(assigned_recruiters=user)
 
-        active_jobs = list(job_qs.values('status').annotate(count=Count('id')))
+        # Initialize all statuses with 0
+        from jobs.models import JobStatus
+        status_counts = {status: 0 for status, _ in JobStatus.choices}
+        
+        # Update with actual counts
+        for item in job_qs.values('status').annotate(count=Count('id')):
+            if item['status'] in status_counts:
+                status_counts[item['status']] = item['count']
+                
+        active_jobs = [{"status": k, "count": v} for k, v in status_counts.items()]
         
         # 3. Interviews Upcoming (today to 3 days)
         today = timezone.localdate()
@@ -696,37 +705,6 @@ class UnifiedDashboardView(APIView):
                 "interviewed": interviewed_dict.get(month_name, 0)
             })
             
-        # 2. Efficiency Metrics
-        from django.db.models import F, Avg
-        hired_apps = Application.objects.filter(is_deleted=False, job__in=job_qs, status=CandidateStatus.HIRED)
-        if hired_apps.exists():
-            avg_delta = hired_apps.aggregate(avg_time=Avg(F('updated_at') - F('created_at')))['avg_time']
-            time_to_hire_days = avg_delta.days if avg_delta else 0
-            time_to_hire = f"{time_to_hire_days} Days"
-        else:
-            time_to_hire = "0 Days"
-            
-        offered_count = Application.objects.filter(is_deleted=False, job__in=job_qs, status__in=[CandidateStatus.OFFERED, CandidateStatus.HIRED, CandidateStatus.JOINED]).count()
-        accepted_count = Application.objects.filter(is_deleted=False, job__in=job_qs, status__in=[CandidateStatus.HIRED, CandidateStatus.JOINED]).count()
-        offer_acc = int((accepted_count / offered_count) * 100) if offered_count > 0 else 0
-        offer_acceptance = f"{offer_acc}%"
-        
-        efficiency_metrics = {
-            "time_to_hire": time_to_hire,
-            "offer_acceptance": offer_acceptance,
-            "cost_per_hire": "₹24,500",
-            "diversity_ratio": "34%"
-        }
-        
-        # 3. Top Sourcing Channels (Mocked for now)
-        top_sourcing_channels = [
-            {"channel": "Naukri.com", "count": 45},
-            {"channel": "LinkedIn", "count": 32},
-            {"channel": "Employee Referrals", "count": 18},
-            {"channel": "Instahyre", "count": 12},
-            {"channel": "Campus Drives", "count": 8}
-        ]
-
         return Response({
             "top_stats": {
                 "total_candidates": total_candidates,
@@ -737,9 +715,7 @@ class UnifiedDashboardView(APIView):
             "upcoming_interviews": upcoming_interviews,
             "unread_activity": unread_activity,
             "hires_by_client": hires_by_client,
-            "funnel_trend": funnel_trend,
-            "efficiency_metrics": efficiency_metrics,
-            "top_sourcing_channels": top_sourcing_channels
+            "funnel_trend": funnel_trend
         })
 
 
