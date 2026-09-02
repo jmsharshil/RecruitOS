@@ -69,6 +69,8 @@ class CandidateFilterSet(django_filters.FilterSet):
                 valid_ids.append(candidate.id)
         return queryset.filter(id__in=valid_ids)
 
+class CharInFilter(django_filters.BaseInFilter, django_filters.CharFilter):
+    pass
 
 class ApplicationFilterSet(django_filters.FilterSet):
     """
@@ -79,14 +81,14 @@ class ApplicationFilterSet(django_filters.FilterSet):
     Note: Fields like current_ctc, expected_ctc, notice_period, reason_for_change
     now live on Application (moved from Candidate).
     """
-    status             = django_filters.CharFilter(field_name='status', lookup_expr='exact')
+    status             = CharInFilter(field_name='status', lookup_expr='in')
     job                = django_filters.UUIDFilter(field_name='job__id')
     candidate_name     = django_filters.CharFilter(field_name='candidate__candidate_name', lookup_expr='icontains')
     stage_name         = django_filters.CharFilter(field_name='current_stage__name', lookup_expr='icontains')
     notice_period      = django_filters.CharFilter(field_name='notice_period', lookup_expr='icontains')
     current_ctc        = django_filters.CharFilter(field_name='current_ctc', lookup_expr='icontains')
     expected_ctc       = django_filters.CharFilter(field_name='expected_ctc', lookup_expr='icontains')
-    manager_review_status = django_filters.CharFilter(field_name='manager_review_status', lookup_expr='exact')
+    manager_review_status = CharInFilter(field_name='manager_review_status', lookup_expr='in')
     created_after      = django_filters.DateFilter(field_name='created_at', lookup_expr='date__gte')
     created_before     = django_filters.DateFilter(field_name='created_at', lookup_expr='date__lte')
 

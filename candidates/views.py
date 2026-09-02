@@ -673,8 +673,28 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 status=SubmissionStatus.PENDING,
                 organization=request.user.organization
             )
+            
+            old_review_status = application.manager_review_status
+            application.manager_review_status = ManagerReviewStatus.ACCEPTED.value
+            if not application.manager_review_notes:
+                application.manager_review_notes = "Auto-approved while sending to client"
+
             application.status = CandidateStatus.SENT_TO_CLIENT.value
             application.save()
+            
+            if old_review_status != ManagerReviewStatus.ACCEPTED.value:
+                log_action(
+                    request.user, 'reviewed', 'Application', application.id,
+                    "Manager auto-approved application before sending to client"
+                )
+                ApplicationHistory.objects.create(
+                    application=application,
+                    user=request.user,
+                    action=ManagerReviewStatus.ACCEPTED.value,
+                    notes="Auto-approved while sending to client",
+                    organization=application.organization
+                )
+            
             log_action(request.user, 'sent', 'Application', application.id, f"Sent {application.candidate.candidate_name} to client")
 
             client_name = application.job.client.company_name if application.job.client else "client"

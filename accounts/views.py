@@ -670,7 +670,44 @@ class UnifiedDashboardView(APIView):
 
         # --- NEW METRICS IMPLEMENTATION ---
         
-        # 1. Funnel Trend (Last 7 Months)
+        # 1. Pipeline Overview (Candidate status breakdown for active jobs)
+        pipeline_counts = {s: 0 for s, _ in CandidateStatus.choices}
+        for item in Application.objects.filter(is_deleted=False, job__in=job_qs).values('status').annotate(count=Count('id')):
+            if item['status'] in pipeline_counts:
+                pipeline_counts[item['status']] = item['count']
+        pipeline_overview = [{'status': k, 'count': v} for k, v in pipeline_counts.items()]
+        
+        # 2. Top Performing Jobs (Jobs with highest active candidates)
+        active_statuses = [
+            CandidateStatus.SCREENING, CandidateStatus.INTERVIEW_SCHEDULED,
+            CandidateStatus.SENT_TO_CLIENT, CandidateStatus.INTERVIEW_ALIGN,
+            CandidateStatus.SELECT, CandidateStatus.OFFERED, CandidateStatus.HIRED, CandidateStatus.JOINED
+        ]
+        from django.db.models import Q
+        top_jobs_qs = job_qs.annotate(
+            active_apps=Count('applications', filter=Q(applications__status__in=active_statuses, applications__is_deleted=False))
+        ).order_by('-active_apps')[:5]
+        top_performing_jobs = [
+            {'job_id': j.id, 'title': j.title, 'active_candidates': j.active_apps} for j in top_jobs_qs
+        ]
+        
+        # 3. Offer Acceptance Rate
+        app_qs = Application.objects.filter(is_deleted=False, job__in=job_qs)
+        offered_apps = app_qs.filter(status__in=[CandidateStatus.OFFERED, CandidateStatus.HIRED, CandidateStatus.JOINED, CandidateStatus.BACKOUT]).count()
+        accepted_apps = app_qs.filter(status__in=[CandidateStatus.HIRED, CandidateStatus.JOINED]).count()
+        offer_acceptance_rate = round((accepted_apps / offered_apps * 100) if offered_apps > 0 else 0.0, 2)
+        
+        # 4. Average Time to Hire
+        hired_apps = app_qs.filter(status__in=[CandidateStatus.HIRED, CandidateStatus.JOINED])
+        times = [(app.updated_at - app.created_at).days for app in hired_apps if app.updated_at and app.created_at]
+        average_time_to_hire_days = round(sum(times) / len(times)) if times else 0
+        
+        # 5. Rejection Rate
+        total_apps = app_qs.count()
+        rejected_apps = app_qs.filter(status=CandidateStatus.REJECTED).count()
+        rejection_rate = round((rejected_apps / total_apps * 100) if total_apps > 0 else 0.0, 2)
+        
+        # Funnel Trend (Last 7 Months)
         from django.db.models.functions import TruncMonth
         from dateutil.relativedelta import relativedelta
         import calendar
@@ -715,7 +752,12 @@ class UnifiedDashboardView(APIView):
             "upcoming_interviews": upcoming_interviews,
             "unread_activity": unread_activity,
             "hires_by_client": hires_by_client,
-            "funnel_trend": funnel_trend
+            "funnel_trend": funnel_trend,
+            "pipeline_overview": pipeline_overview,
+            "top_performing_jobs": top_performing_jobs,
+            "offer_acceptance_rate": offer_acceptance_rate,
+            "average_time_to_hire_days": average_time_to_hire_days,
+            "rejection_rate": rejection_rate
         })
 
 
