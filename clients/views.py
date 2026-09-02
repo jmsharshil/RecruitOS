@@ -111,8 +111,6 @@ class ClientViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action in ['list', 'retrieve', 'general_dropdown']:
             return [permissions.IsAuthenticated()]
-        if self.action == 'destroy':
-            return [IsAdmin()]
         # Mutating actions (create, update, pocs, documents, status) restricted to admin/manager
         return [IsAdminOrManager()]
 
@@ -132,6 +130,34 @@ class ClientViewSet(viewsets.ModelViewSet):
             self.request.user, 'deleted', 'Client', instance.id,
             f"Deleted client '{instance.company_name}'"
         )
+
+    @action(detail=False, methods=['delete'], url_path='bulk-delete')
+    def bulk_delete(self, request):
+        """Bulk soft-delete clients."""
+        client_ids = request.data.get('client_ids', [])
+        if not isinstance(client_ids, list) or not client_ids:
+            return Response({"error": "client_ids must be a non-empty list."}, status=status.HTTP_400_BAD_REQUEST)
+
+        clients = Client.objects.filter(
+            id__in=client_ids,
+            organization=self.request.user.organization,
+            is_deleted=False
+        )
+        
+        count = clients.count()
+        if count == 0:
+            return Response({"error": "No valid clients found to delete."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Update database
+        clients.update(is_deleted=True, deleted_at=timezone.now())
+        
+        # Log action
+        log_action(
+            self.request.user, 'deleted', 'Client', None,
+            f"Bulk deleted {count} clients"
+        )
+
+        return Response({"message": f"Successfully deleted {count} clients."}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['patch'], url_path='status')
     def change_status(self, request, pk=None):

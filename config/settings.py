@@ -8,7 +8,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-dummy-key')
 DEBUG = config('DEBUG', default=False, cast=bool)
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,recruitos-c9bga4b9d9hjc3gh.centralindia-01.azurewebsites.net', cast=Csv())
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,recruitos-c9bga4b9d9hjc3gh.centralindia-01.azurewebsites.net,recruitos.dspe.in,victorious-plant-004ecb500.6.azurestaticapps.net', cast=Csv())
 
 # Frontend URLs for emails and CORS
 FRONTEND_URL = config('FRONTEND_URL', default='https://recruitos.jmstech.co')
@@ -227,8 +227,8 @@ if not DEBUG:
     CSRF_COOKIE_SECURE = True
     SESSION_COOKIE_SECURE = True
 
-CSRF_TRUSTED_ORIGINS = ["https://*.azurewebsites.net", "http://localhost:5173", "http://localhost:3000","https://app.apidog.com"]
-CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://localhost:5173,http://localhost:3000,https://app.apidog.com', cast=Csv())
+CSRF_TRUSTED_ORIGINS = ["https://*.azurewebsites.net", "http://localhost:5173", "http://localhost:3000", "https://app.apidog.com", "https://recruitos.dspe.in", "https://victorious-plant-004ecb500.6.azurestaticapps.net"]
+CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://localhost:5173,http://localhost:3000,https://app.apidog.com,https://recruitos.dspe.in,https://victorious-plant-004ecb500.6.azurestaticapps.net', cast=Csv())
 
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = [
