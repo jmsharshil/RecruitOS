@@ -209,16 +209,6 @@ class ClientDetailSerializer(serializers.ModelSerializer):
             except json.JSONDecodeError:
                 pass
                 
-        if isinstance(team_members_data, str):
-            team_members_data = team_members_data.strip()
-            if not team_members_data:
-                data['team_members'] = []
-            else:
-                try:
-                    data['team_members'] = json.loads(team_members_data)
-                except json.JSONDecodeError:
-                    raise serializers.ValidationError({'team_members': 'Invalid JSON string'})
-
         internal_value = super().to_internal_value(data)
 
         if pocs_data is not None:
