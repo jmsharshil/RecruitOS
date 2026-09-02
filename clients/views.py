@@ -413,12 +413,12 @@ class TeamMemberTrackerFormatViewSet(viewsets.ModelViewSet):
         client_id = first_app.job.client_id
         team_member_id = first_app.job.team_member_id
         
-        if not client_id or not team_member_id:
-            return Response({"error": "The job associated with these applications does not have a client or team member assigned."}, status=status.HTTP_400_BAD_REQUEST)
+        if not client_id:
+            return Response({"error": "The job associated with these applications does not have a client assigned."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Get team member details for tracker_receiver
         tracker_receiver = None
-        if first_app.job.client and isinstance(first_app.job.client.team_members, list):
+        if team_member_id and first_app.job.client and isinstance(first_app.job.client.team_members, list):
             for tm in first_app.job.client.team_members:
                 if isinstance(tm, dict) and str(tm.get('id')) == str(team_member_id):
                     tracker_receiver = {
@@ -431,14 +431,24 @@ class TeamMemberTrackerFormatViewSet(viewsets.ModelViewSet):
 
         # Get the format
         try:
-            tracker_format = TeamMemberTrackerFormat.objects.get(
-                client_id=client_id, 
-                team_member_id=team_member_id, 
-                is_deleted=False
-            )
+            if team_member_id:
+                tracker_format = TeamMemberTrackerFormat.objects.get(
+                    client_id=client_id, 
+                    team_member_id=team_member_id, 
+                    is_deleted=False
+                )
+            else:
+                # If no team member is assigned, fallback to the client's first available tracker format
+                tracker_format = TeamMemberTrackerFormat.objects.filter(
+                    client_id=client_id, 
+                    is_deleted=False
+                ).first()
+                if not tracker_format:
+                    raise TeamMemberTrackerFormat.DoesNotExist
+                    
             columns = tracker_format.columns
         except TeamMemberTrackerFormat.DoesNotExist:
-            return Response({"error": "Tracker format not found for this team member , please create tracker for this team member first "}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "Tracker format not found for this client/team member, please create a tracker format first."}, status=status.HTTP_404_NOT_FOUND)
         
         tracker_preview = []
         for app in apps:
