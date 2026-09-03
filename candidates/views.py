@@ -668,6 +668,33 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 errors.append(f"{application.candidate.candidate_name}: Submission already exists")
                 continue
 
+            client = application.job.client
+            client_email = client.email if client else None
+            recipient_name = client.company_name if client else "client"
+            
+            if client and application.job.team_member_id:
+                found_tm = False
+                tm_email = None
+                if isinstance(client.team_members, list):
+                    for tm in client.team_members:
+                        if isinstance(tm, dict) and str(tm.get('id')) == str(application.job.team_member_id):
+                            found_tm = True
+                            tm_email = tm.get('email')
+                            if tm.get('name'):
+                                recipient_name = tm.get('name')
+                            break
+                if not found_tm:
+                    errors.append(f"{application.candidate.candidate_name}: Assigned team member not found in client.")
+                    continue
+                if not tm_email:
+                    errors.append(f"{application.candidate.candidate_name}: Assigned team member does not have a valid email.")
+                    continue
+                client_email = tm_email
+                
+            if not client_email:
+                errors.append(f"{application.candidate.candidate_name}: Client does not have a valid email.")
+                continue
+
             submission = ClientSubmission.objects.create(
                 application=application,
                 sent_by=request.user,
@@ -698,30 +725,18 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             
             log_action(request.user, 'sent', 'Application', application.id, f"Sent {application.candidate.candidate_name} to client")
 
-            client_name = application.job.client.company_name if application.job.client else "client"
             ApplicationHistory.objects.create(
                 application=application,
                 user=request.user,
                 action="sent_to_client",
-                notes=f"Shared candidate profile with client: {client_name}",
+                notes=f"Shared candidate profile with client: {recipient_name}",
                 organization=application.organization
             )
 
-            if application.job.client:
-                client_email = application.job.client.email
-                recipient_name = application.job.client.company_name
-                if application.job.team_member_id and isinstance(application.job.client.team_members, list):
-                    for tm in application.job.client.team_members:
-                        if isinstance(tm, dict) and str(tm.get('id')) == str(application.job.team_member_id) and tm.get('email'):
-                            client_email = tm.get('email')
-                            recipient_name = tm.get('name', recipient_name)
-                            break
-                
-                if client_email:
-                    group_key = (application.job.id, client_email, recipient_name)
-                    if group_key not in valid_applications_by_client:
-                        valid_applications_by_client[group_key] = []
-                    valid_applications_by_client[group_key].append(application.id)
+            group_key = (application.job.id, client_email, recipient_name)
+            if group_key not in valid_applications_by_client:
+                valid_applications_by_client[group_key] = []
+            valid_applications_by_client[group_key].append(application.id)
             
             updated_count += 1
 
@@ -773,32 +788,47 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 errors.append(f"{application.candidate.candidate_name}: Job is not hiring for a client")
                 continue
 
+            client = application.job.client
+            client_email = client.email if client else None
+            recipient_name = client.company_name if client else "client"
+            
+            if client and application.job.team_member_id:
+                found_tm = False
+                tm_email = None
+                if isinstance(client.team_members, list):
+                    for tm in client.team_members:
+                        if isinstance(tm, dict) and str(tm.get('id')) == str(application.job.team_member_id):
+                            found_tm = True
+                            tm_email = tm.get('email')
+                            if tm.get('name'):
+                                recipient_name = tm.get('name')
+                            break
+                if not found_tm:
+                    errors.append(f"{application.candidate.candidate_name}: Assigned team member not found in client.")
+                    continue
+                if not tm_email:
+                    errors.append(f"{application.candidate.candidate_name}: Assigned team member does not have a valid email.")
+                    continue
+                client_email = tm_email
+                
+            if not client_email:
+                errors.append(f"{application.candidate.candidate_name}: Client does not have a valid email.")
+                continue
+
             log_action(request.user, 'sent', 'Application', application.id, f"Sent reminder to client for {application.candidate.candidate_name}")
             
-            client_name = application.job.client.company_name if application.job.client else "client"
             ApplicationHistory.objects.create(
                 application=application,
                 user=request.user,
                 action="client_reminder",
-                notes=f"Sent a reminder to client: {client_name}",
+                notes=f"Sent a reminder to client: {recipient_name}",
                 organization=application.organization
             )
 
-            if application.job.client:
-                client_email = application.job.client.email
-                recipient_name = application.job.client.company_name
-                if application.job.team_member_id and isinstance(application.job.client.team_members, list):
-                    for tm in application.job.client.team_members:
-                        if isinstance(tm, dict) and str(tm.get('id')) == str(application.job.team_member_id) and tm.get('email'):
-                            client_email = tm.get('email')
-                            recipient_name = tm.get('name', recipient_name)
-                            break
-                
-                if client_email:
-                    group_key = (application.job.id, client_email, recipient_name)
-                    if group_key not in valid_applications_by_client:
-                        valid_applications_by_client[group_key] = []
-                    valid_applications_by_client[group_key].append(application.id)
+            group_key = (application.job.id, client_email, recipient_name)
+            if group_key not in valid_applications_by_client:
+                valid_applications_by_client[group_key] = []
+            valid_applications_by_client[group_key].append(application.id)
             
             updated_count += 1
 
