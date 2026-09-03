@@ -29,6 +29,7 @@ class CandidateFilterSet(django_filters.FilterSet):
     skills             = django_filters.CharFilter(field_name='skills', lookup_expr='icontains')
     tags               = django_filters.CharFilter(field_name='tags', lookup_expr='icontains')
     is_duplicate       = django_filters.BooleanFilter(field_name='is_duplicate')
+    uploaded_by        = django_filters.CharFilter(field_name='uploaded_by')
     created_after      = django_filters.DateFilter(field_name='created_at', lookup_expr='date__gte')
     created_before     = django_filters.DateFilter(field_name='created_at', lookup_expr='date__lte')
 
@@ -40,7 +41,7 @@ class CandidateFilterSet(django_filters.FilterSet):
         fields = [
             'candidate_name', 'email', 'contact', 'current_profile', 'experience',
             'current_location', 'current_company', 'education',
-            'is_duplicate', 'created_after', 'created_before',
+            'is_duplicate', 'uploaded_by', 'created_after', 'created_before',
             'experience_min', 'experience_max',
         ]
 
