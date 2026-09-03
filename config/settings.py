@@ -228,7 +228,7 @@ if not DEBUG:
     SESSION_COOKIE_SECURE = True
 
 CSRF_TRUSTED_ORIGINS = ["https://*.azurewebsites.net", "http://localhost:5173", "http://localhost:3000", "https://app.apidog.com", "https://recruitos.dspe.in", "https://victorious-plant-004ecb500.6.azurestaticapps.net"]
-CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://localhost:5173,http://localhost:3000,https://app.apidog.com,https://recruitos.dspe.in,https://victorious-plant-004ecb500.6.azurestaticapps.net', cast=Csv())
+CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://localhost:5173,http://localhost:3000,https://app.apidog.com,https://recruitos.dspe.in,https://victorious-plant-004ecb500.6.azurestaticapps.net,https://recruitos.dspe.in', cast=Csv())
 
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = [
