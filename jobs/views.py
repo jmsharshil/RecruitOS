@@ -142,6 +142,30 @@ class JobViewSet(viewsets.ModelViewSet):
         instance.save()
         log_action(self.request.user, 'deleted', 'Job', instance.id, f"Deleted job '{instance.title}'")
 
+    @action(detail=False, methods=['delete'], url_path='bulk-delete')
+    def bulk_delete(self, request):
+        """Bulk soft-delete jobs."""
+        job_ids = request.data.get('job_ids', [])
+        if not isinstance(job_ids, list) or not job_ids:
+            return Response({"error": "job_ids must be a non-empty list."}, status=400)
+
+        jobs = Job.objects.filter(
+            id__in=job_ids,
+            organization=self.request.user.organization,
+            is_deleted=False
+        )
+        
+        count = jobs.count()
+        if count == 0:
+            return Response({"error": "No valid jobs found to delete."}, status=404)
+
+        jobs.update(is_deleted=True, deleted_at=timezone.now())
+        log_action(
+            self.request.user, 'deleted', 'Job', None,
+            f"Bulk deleted {count} jobs"
+        )
+        return Response({"message": f"Successfully deleted {count} jobs."}, status=200)
+
     @action(detail=True, methods=['patch'], url_path='status')
     def change_status(self, request, pk=None):
         job = self.get_object()

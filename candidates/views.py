@@ -97,6 +97,30 @@ class CandidateViewSet(viewsets.ModelViewSet):
         instance.save()
         log_action(self.request.user, 'deleted', 'Candidate', instance.id, f"Deleted candidate '{instance.candidate_name}'")
 
+    @action(detail=False, methods=['delete'], url_path='bulk-delete')
+    def bulk_delete(self, request):
+        """Bulk soft-delete candidates."""
+        candidate_ids = request.data.get('candidate_ids', [])
+        if not isinstance(candidate_ids, list) or not candidate_ids:
+            return Response({"error": "candidate_ids must be a non-empty list."}, status=400)
+
+        candidates = Candidate.objects.filter(
+            id__in=candidate_ids,
+            organization=self.request.user.organization,
+            is_deleted=False
+        )
+        
+        count = candidates.count()
+        if count == 0:
+            return Response({"error": "No valid candidates found to delete."}, status=404)
+
+        candidates.update(is_deleted=True, deleted_at=timezone.now())
+        log_action(
+            self.request.user, 'deleted', 'Candidate', None,
+            f"Bulk deleted {count} candidates"
+        )
+        return Response({"message": f"Successfully deleted {count} candidates."}, status=200)
+
     @action(detail=True, methods=['post'], url_path='upload-resume', parser_classes=[MultiPartParser, FormParser])
     def upload_resume(self, request, pk=None):
         """Upload resume to existing candidate. Parsing now runs in background via TASK_QUEUE
