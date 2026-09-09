@@ -174,7 +174,7 @@ class JobDetailSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'code', 'title', 'description', 'description_file', 'skills', 'education',
             'min_experience', 'max_experience', 'location',
-            'budget', 'hiring_for', 'client', 'status',
+            'budget', 'hiring_for', 'client', 'status', 'priority',
             'assigned_recruiters', 'assigned_recruiter_ids',
             'created_by', 'hiring_manager', 'hiring_manager_id',
             'stages', 'candidate_count', 'approval_stats', 'created_at', 'updated_at',
