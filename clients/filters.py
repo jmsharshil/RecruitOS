@@ -25,11 +25,12 @@ class ClientFilterSet(django_filters.FilterSet):
     agreement_date_after = django_filters.DateFilter(field_name='agreement_date', lookup_expr='gte')
     has_agreement      = django_filters.BooleanFilter(field_name='agreement_document', lookup_expr='isnull', exclude=True)
     commercial_decided = django_filters.CharFilter(field_name='commercial_decided', lookup_expr='icontains')
+    created_by_name    = django_filters.CharFilter(field_name='created_by__name', lookup_expr='icontains')
 
     class Meta:
         model = Client
         fields = [
             'city', 'state', 'country',
             'created_after', 'created_before', 'agreement_date_after',
-            'has_agreement', 'commercial_decided',
+            'has_agreement', 'commercial_decided', 'created_by_name',
         ]

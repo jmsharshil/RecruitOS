@@ -35,6 +35,13 @@ class JobFilterSet(django_filters.FilterSet):
     created_after   = django_filters.DateFilter(field_name='created_at', lookup_expr='date__gte')
     created_before  = django_filters.DateFilter(field_name='created_at', lookup_expr='date__lte')
     location        = django_filters.CharFilter(field_name='location', lookup_expr='icontains')
+    created_by_name = django_filters.CharFilter(field_name='created_by__name', lookup_expr='icontains')
+    title           = django_filters.CharFilter(field_name='title', lookup_expr='icontains')
+    code            = django_filters.CharFilter(field_name='code', lookup_expr='icontains')
+    client_name     = django_filters.CharFilter(field_name='client__company_name', lookup_expr='icontains')
+    hiring_manager_name = django_filters.CharFilter(field_name='hiring_manager__name', lookup_expr='icontains')
+    assigned_to     = django_filters.UUIDFilter(field_name='assigned_recruiters__id')
+    assigned_to_name= django_filters.CharFilter(field_name='assigned_recruiters__name', lookup_expr='icontains')
 
     class Meta:
         model = Job
@@ -43,5 +50,7 @@ class JobFilterSet(django_filters.FilterSet):
             'client', 'min_exp', 'max_exp',
             'closing_after', 'closing_before',
             'created_after', 'created_before',
-            'location',
+            'location', 'created_by_name',
+            'title', 'code', 'client_name', 'hiring_manager_name',
+            'assigned_to', 'assigned_to_name',
         ]

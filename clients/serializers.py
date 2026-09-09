@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from clients.models import Client, POC, ClientDocument, TeamMemberTrackerFormat
 from accounts.serializers import UserBriefSerializer
+from accounts.models import User
 from common.serializers import DateParserField, DateParserDateTimeField
 
 class POCSerializer(serializers.ModelSerializer):
@@ -136,6 +137,13 @@ class ClientListSerializer(serializers.ModelSerializer):
 class ClientDetailSerializer(serializers.ModelSerializer):
     documents      = serializers.SerializerMethodField()
     created_by     = UserBriefSerializer(read_only=True)
+    created_by_id  = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.all(),
+        source='created_by',
+        write_only=True,
+        required=False,
+        allow_null=True
+    )
     stats          = serializers.SerializerMethodField()
     agreement_date = DateParserField(required=False, allow_null=True)
     # Audit fields can accept input in some cases (e.g. CSV import backfills)
@@ -149,7 +157,7 @@ class ClientDetailSerializer(serializers.ModelSerializer):
             'alternative_email', 'alternative_contact', 'website', 'linkedin', 'client_location',
             'client_name', 'industry', 'status', 'email', 'contact'
         ]
-        read_only_fields = ['id', 'client_id', 'created_by', 'is_deleted', 'organization']
+        read_only_fields = ['id', 'client_id', 'is_deleted', 'organization']
 
 
     def get_documents(self, obj):

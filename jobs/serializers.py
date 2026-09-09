@@ -34,14 +34,16 @@ class JobListSerializer(serializers.ModelSerializer):
     budget              = serializers.CharField(read_only=True)
     created_at          = DateParserDateTimeField(read_only=True)
     approval_stats      = serializers.SerializerMethodField()
+    assigned_recruiters = UserBriefSerializer(many=True, read_only=True)
 
     class Meta:
         model = Job
         fields = [
-            'id', 'code', 'title', 'status',
+            'id', 'code', 'title', 'status', 'priority',
             'location', 'min_experience', 'max_experience', 'budget',
             'hiring_for', 'candidate_count', 'approval_stats',
             'created_by_name', 'hiring_manager_name', 'created_at',
+            'assigned_recruiters',
         ]
 
     def get_candidate_count(self, obj):
