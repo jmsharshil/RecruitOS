@@ -335,10 +335,15 @@ class UserViewSet(viewsets.ModelViewSet):
     - Use 'role' field in POST body: 'manager' or 'recruiter'.
     - Endpoint: /api/v1/users/
     """
-    permission_classes = [IsAdminOrManager, IsOwnerOrAdmin]
+    # permission_classes = [IsAdminOrManager, IsOwnerOrAdmin]
     filter_backends = [filters.SearchFilter]
     search_fields = ['name', 'email']
 
+    def get_permissions(self):
+        if self.action == 'create' and self.request.data.get('role') == UserRole.ADMIN.value:
+            return [IsAdmin()]
+        return [IsAdminOrManager(), IsOwnerOrAdmin()]
+    
     def get_serializer_class(self):
         if self.action == 'list':
             return UserListSerializer
@@ -371,9 +376,12 @@ class UserViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         role = serializer.validated_data.get('role')
+        # if role == UserRole.MANAGER.value and self.request.user.role != UserRole.ADMIN.value:
+        #     raise PermissionDenied("Only administrators can create manager accounts.")
+        if role == UserRole.ADMIN.value and self.request.user.role != UserRole.ADMIN.value:
+            raise PermissionDenied("Only administrators can create admin accounts.")
         if role == UserRole.MANAGER.value and self.request.user.role != UserRole.ADMIN.value:
             raise PermissionDenied("Only administrators can create manager accounts.")
-        
         user = serializer.save(
             created_by=self.request.user, 
             organization=self.request.user.organization

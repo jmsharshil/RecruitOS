@@ -86,7 +86,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
     role = serializers.ChoiceField(
         choices=UserRole.choices,
         required=True,
-        error_messages={'invalid_choice': "Role must be either 'manager' or 'recruiter'."}
+        error_messages={'invalid_choice': "Role must be 'admin', 'manager' or 'recruiter'."}
     )
 
     class Meta:
@@ -100,8 +100,8 @@ class UserDetailSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'date_joined', 'created_by', 'organization', 'jobs_count', 'recruiters_count']
 
     def validate_role(self, value):
-        if value not in [UserRole.MANAGER.value, UserRole.RECRUITER.value]:
-            raise serializers.ValidationError("Role must be manager or recruiter.")
+        if value not in [UserRole.MANAGER.value, UserRole.RECRUITER.value, UserRole.ADMIN.value]:
+            raise serializers.ValidationError("Role must be admin, manager or recruiter.")
         return value
 
 # ---------------------------------------------------------------------------

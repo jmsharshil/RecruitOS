@@ -154,8 +154,9 @@ class ClientDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Client
         exclude = [
-            'alternative_email', 'alternative_contact', 'website', 'linkedin', 'client_location',
-            'client_name', 'industry', 'status', 'email', 'contact'
+            'alternative_email', 'alternative_contact', 'linkedin', 'client_location',
+            'client_name', 'industry', 'status', 'email', 'contact',
+            'street', 'state', 'country'
         ]
         read_only_fields = ['id', 'client_id', 'is_deleted', 'organization']
 
