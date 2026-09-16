@@ -791,6 +791,155 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             "errors": errors
         }, status=200)
 
+    @action(detail=False, methods=['post'], url_path='resend-client')
+    def resend_to_client(self, request):
+        """Bulk resend applications to client without restriction."""
+        application_ids = request.data.get('application_ids', [])
+        
+        if not isinstance(application_ids, list) or not application_ids:
+            raise ValidationError({"error": "Provide a list of application_ids"})
+
+        header_color = request.data.get('header_color')
+        text_color = request.data.get('text_color')
+        
+        cc_emails_raw = request.data.get('cc_emails', [])
+        if isinstance(cc_emails_raw, str):
+            cc_emails = [e.strip() for e in cc_emails_raw.split(',') if e.strip()]
+        elif isinstance(cc_emails_raw, list):
+            cc_emails = [str(e).strip() for e in cc_emails_raw if str(e).strip()]
+        else:
+            cc_emails = []
+
+        applications = self.get_queryset().filter(id__in=application_ids).select_related('job', 'candidate', 'job__client')
+        
+        for app in applications:
+            self._check_job_manager_permission(request, app.job)
+        updated_count = 0
+        errors = []
+        
+        valid_applications_by_client = {}
+
+        for application in applications:
+            if application.job.hiring_for != 'client':
+                errors.append(f"{application.candidate.candidate_name}: Job is not hiring for a client")
+                continue
+
+            client = application.job.client
+            client_email = client.email if client else None
+            recipient_name = client.company_name if client else "client"
+            
+            if client and application.job.team_member_id:
+                found_tm = False
+                tm_email = None
+                if isinstance(client.team_members, list):
+                    for tm in client.team_members:
+                        if isinstance(tm, dict) and str(tm.get('id')) == str(application.job.team_member_id):
+                            found_tm = True
+                            tm_email = tm.get('email')
+                            if tm.get('name'):
+                                recipient_name = tm.get('name')
+                            break
+                if not found_tm:
+                    errors.append(f"{application.candidate.candidate_name}: Assigned team member not found in client.")
+                    continue
+                if not tm_email:
+                    errors.append(f"{application.candidate.candidate_name}: Assigned team member does not have a valid email.")
+                    continue
+                client_email = tm_email
+                
+            if not client_email:
+                errors.append(f"{application.candidate.candidate_name}: Client does not have a valid email.")
+                continue
+
+            # Instead of failing if submission exists, we ensure it exists
+            if not hasattr(application, 'client_submission'):
+                submission = ClientSubmission.objects.create(
+                    application=application,
+                    sent_by=request.user,
+                    status=SubmissionStatus.PENDING,
+                    organization=request.user.organization
+                )
+            else:
+                submission = application.client_submission
+                # Optionally update the user who sent it recently
+                submission.sent_by = request.user
+                submission.save(update_fields=['sent_by'])
+            
+            # Ensure status is SENT_TO_CLIENT
+            if application.status != CandidateStatus.SENT_TO_CLIENT.value:
+                old_review_status = application.manager_review_status
+                application.manager_review_status = ManagerReviewStatus.ACCEPTED.value
+                if not application.manager_review_notes:
+                    application.manager_review_notes = "Auto-approved while resending to client"
+
+                application.status = CandidateStatus.SENT_TO_CLIENT.value
+                application.save()
+                
+                if old_review_status != ManagerReviewStatus.ACCEPTED.value:
+                    log_action(
+                        request.user, 'reviewed', 'Application', application.id,
+                        "Manager auto-approved application before resending to client"
+                    )
+                    ApplicationHistory.objects.create(
+                        application=application,
+                        user=request.user,
+                        action=ManagerReviewStatus.ACCEPTED.value,
+                        notes="Auto-approved while resending to client",
+                        organization=application.organization
+                    )
+            
+            log_action(request.user, 'sent', 'Application', application.id, f"Resent {application.candidate.candidate_name} to client")
+
+            ApplicationHistory.objects.create(
+                application=application,
+                user=request.user,
+                action="resent_to_client",
+                notes=f"Reshared candidate profile with client: {recipient_name}",
+                organization=application.organization
+            )
+
+            group_key = (application.job.id, client_email, recipient_name)
+            if group_key not in valid_applications_by_client:
+                valid_applications_by_client[group_key] = []
+            valid_applications_by_client[group_key].append(application.id)
+            
+            updated_count += 1
+
+        if valid_applications_by_client:
+            from candidates.tasks import simulate_bulk_client_submission_email
+            from clients.models import TeamMemberTrackerFormat
+            from candidates.models import Job
+
+            for (job_id, client_email, recipient_name), app_ids in valid_applications_by_client.items():
+                final_header = header_color
+                final_text = text_color
+
+                if not (final_header and final_text):
+                    job = Job.objects.filter(id=job_id).select_related('client').first()
+                    if job and job.client:
+                        tf = TeamMemberTrackerFormat.objects.filter(
+                            client=job.client,
+                            team_member_id=str(job.team_member_id) if job.team_member_id else ""
+                        ).first()
+                        if tf:
+                            if not final_header: final_header = tf.header_color
+                            if not final_text: final_text = tf.text_color
+
+                simulate_bulk_client_submission_email(
+                    app_ids, 
+                    client_email, 
+                    recipient_name, 
+                    final_header, 
+                    final_text, 
+                    cc_emails=cc_emails,
+                    from_email_override=request.user.email
+                )
+
+        return Response({
+            "message": f"Successfully resent {updated_count} applications to client.",
+            "errors": errors
+        }, status=200)
+
     @action(detail=False, methods=['post'], url_path='client-reminder')
     def client_reminder(self, request):
         """Bulk send reminder for applications to client."""

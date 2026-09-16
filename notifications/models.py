@@ -2,6 +2,7 @@ import uuid
 from django.db import models
 from common.models import BaseModel
 from accounts.models import User, Organization
+from candidates.models import Candidate
 
 class NotificationType(models.TextChoices):
     INFO    = 'info'
@@ -25,3 +26,23 @@ class Notification(BaseModel):
 
     class Meta:
         ordering = ['-created_at']
+
+class EmailLog(BaseModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    sender = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='sent_emails')
+    recipient_email = models.EmailField()
+    cc_emails = models.JSONField(default=list, blank=True)
+    subject = models.CharField(max_length=255)
+    body_text = models.TextField(blank=True, null=True)
+    body_html = models.TextField()
+    event = models.CharField(max_length=100, blank=True, null=True)
+    email_type = models.CharField(max_length=50, blank=True, null=True)
+    candidate = models.ForeignKey(Candidate, on_delete=models.SET_NULL, null=True, blank=True)
+    candidate_name = models.CharField(max_length=255, blank=True, null=True)
+    status = models.CharField(max_length=50, default='sent')
+    error_message = models.TextField(blank=True)
+    sent_at = models.DateTimeField(auto_now_add=True)
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, null=True, blank=True)
+
+    class Meta:
+        ordering = ['-sent_at']

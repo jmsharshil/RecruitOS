@@ -2,8 +2,8 @@ from rest_framework import viewsets, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.utils import timezone
-from notifications.models import Notification
-from notifications.serializers import NotificationSerializer
+from notifications.models import Notification, EmailLog
+from notifications.serializers import NotificationSerializer, EmailLogSerializer
 from audit.utils import log_action
 
 class NotificationViewSet(viewsets.ModelViewSet):
@@ -95,3 +95,23 @@ class NotificationViewSet(viewsets.ModelViewSet):
     def mark_all_read(self, request):
         self.get_queryset().update(read=True)
         return Response({"message": "All notifications marked as read"})
+
+class EmailLogViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = EmailLogSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        
+        # Admin can see all email logs in their organization
+        if user.role and user.role.name == 'admin':
+            return EmailLog.objects.filter(
+                organization=user.organization,
+                is_deleted=False
+            )
+            
+        # Recruiter and Manager can see their own logs
+        return EmailLog.objects.filter(
+            sender=user,
+            is_deleted=False
+        )

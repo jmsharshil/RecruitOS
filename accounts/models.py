@@ -58,6 +58,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     google_refresh_token = models.TextField(blank=True, null=True)
     google_token_expiry = models.DateTimeField(blank=True, null=True)
 
+    # Microsoft OAuth fields for Graph API / Outlook Mail
+    microsoft_access_token = models.TextField(blank=True, null=True)
+    microsoft_refresh_token = models.TextField(blank=True, null=True)
+    microsoft_token_expiry = models.DateTimeField(blank=True, null=True)
+
     objects = CustomUserManager()
 
     USERNAME_FIELD  = 'email'

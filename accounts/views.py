@@ -372,6 +372,9 @@ class UserViewSet(viewsets.ModelViewSet):
                 Q(created_by__role=UserRole.ADMIN) |
                 Q(created_by__isnull=True)
             )
+            
+        # Order by active status first (True/1 before False/0), then by newest created
+        qs = qs.order_by('-is_active', '-created_at')
         return qs
 
     def perform_create(self, serializer):

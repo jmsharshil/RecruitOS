@@ -5,8 +5,24 @@ django-filters FilterSet classes for Candidate and Application resources.
 Registered on the respective ViewSets via filterset_class.
 """
 import django_filters
+from django.db.models import Q
 from candidates.models import Candidate, Application
 
+class CharInFilter(django_filters.BaseInFilter, django_filters.CharFilter):
+    pass
+
+class CharInContainsFilter(django_filters.CharFilter):
+    def filter(self, qs, value):
+        if not value:
+            return qs
+        values = [v.strip() for v in value.split(',') if v.strip()]
+        if not values:
+            return qs
+        q = Q()
+        lookup = self.lookup_expr or 'icontains'
+        for v in values:
+            q |= Q(**{f"{self.field_name}__{lookup}": v})
+        return qs.filter(q)
 
 class CandidateFilterSet(django_filters.FilterSet):
     """
@@ -18,18 +34,18 @@ class CandidateFilterSet(django_filters.FilterSet):
     Note: CTC, notice_period, experience_min/max filters moved to ApplicationFilterSet
     as those fields now live on the Application model (per-job data).
     """
-    candidate_name     = django_filters.CharFilter(field_name='candidate_name', lookup_expr='icontains')
-    email              = django_filters.CharFilter(field_name='email', lookup_expr='icontains')
-    contact            = django_filters.CharFilter(field_name='contact', lookup_expr='icontains')
-    current_profile    = django_filters.CharFilter(field_name='current_profile', lookup_expr='icontains')
-    experience         = django_filters.CharFilter(field_name='experience', lookup_expr='icontains')
-    current_location   = django_filters.CharFilter(field_name='current_location', lookup_expr='icontains')
-    current_company    = django_filters.CharFilter(field_name='current_company', lookup_expr='icontains')
-    education          = django_filters.CharFilter(field_name='education', lookup_expr='icontains')
-    skills             = django_filters.CharFilter(field_name='skills', lookup_expr='icontains')
-    tags               = django_filters.CharFilter(field_name='tags', lookup_expr='icontains')
+    candidate_name     = CharInContainsFilter(field_name='candidate_name', lookup_expr='icontains')
+    email              = CharInContainsFilter(field_name='email', lookup_expr='icontains')
+    contact            = CharInContainsFilter(field_name='contact', lookup_expr='icontains')
+    current_profile    = CharInContainsFilter(field_name='current_profile', lookup_expr='icontains')
+    experience         = CharInContainsFilter(field_name='experience', lookup_expr='icontains')
+    current_location   = CharInContainsFilter(field_name='current_location', lookup_expr='icontains')
+    current_company    = CharInContainsFilter(field_name='current_company', lookup_expr='icontains')
+    education          = CharInContainsFilter(field_name='education', lookup_expr='icontains')
+    skills             = CharInContainsFilter(field_name='skills', lookup_expr='icontains')
+    tags               = CharInContainsFilter(field_name='tags', lookup_expr='icontains')
     is_duplicate       = django_filters.BooleanFilter(field_name='is_duplicate')
-    uploaded_by        = django_filters.CharFilter(field_name='uploaded_by__name', lookup_expr='icontains')
+    uploaded_by        = CharInContainsFilter(field_name='uploaded_by__name', lookup_expr='icontains')
     created_after      = django_filters.DateFilter(field_name='created_at', lookup_expr='date__gte')
     created_before     = django_filters.DateFilter(field_name='created_at', lookup_expr='date__lte')
 
@@ -70,8 +86,6 @@ class CandidateFilterSet(django_filters.FilterSet):
                 valid_ids.append(candidate.id)
         return queryset.filter(id__in=valid_ids)
 
-class CharInFilter(django_filters.BaseInFilter, django_filters.CharFilter):
-    pass
 
 class ApplicationFilterSet(django_filters.FilterSet):
     """
@@ -84,14 +98,17 @@ class ApplicationFilterSet(django_filters.FilterSet):
     """
     status             = CharInFilter(field_name='status', lookup_expr='in')
     job                = django_filters.UUIDFilter(field_name='job__id')
-    candidate_name     = django_filters.CharFilter(field_name='candidate__candidate_name', lookup_expr='icontains')
-    stage_name         = django_filters.CharFilter(field_name='current_stage__name', lookup_expr='icontains')
-    notice_period      = django_filters.CharFilter(field_name='notice_period', lookup_expr='icontains')
-    current_ctc        = django_filters.CharFilter(field_name='current_ctc', lookup_expr='icontains')
-    expected_ctc       = django_filters.CharFilter(field_name='expected_ctc', lookup_expr='icontains')
+    candidate_name     = CharInContainsFilter(field_name='candidate__candidate_name', lookup_expr='icontains')
+    stage_name         = CharInContainsFilter(field_name='current_stage__name', lookup_expr='icontains')
+    notice_period      = CharInContainsFilter(field_name='notice_period', lookup_expr='icontains')
+    current_ctc        = CharInContainsFilter(field_name='current_ctc', lookup_expr='icontains')
+    expected_ctc       = CharInContainsFilter(field_name='expected_ctc', lookup_expr='icontains')
     manager_review_status = CharInFilter(field_name='manager_review_status', lookup_expr='in')
     created_after      = django_filters.DateFilter(field_name='created_at', lookup_expr='date__gte')
     created_before     = django_filters.DateFilter(field_name='created_at', lookup_expr='date__lte')
+    
+    # Exact multi-select filters
+    job_in             = CharInFilter(field_name='job__id', lookup_expr='in')
 
     class Meta:
         model = Application

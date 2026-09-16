@@ -158,7 +158,7 @@ def simulate_client_submission_email(application_id, client_email, recipient_nam
 
 
 @run_in_thread
-def simulate_bulk_client_submission_email(application_ids, client_email, recipient_name=None, header_color=None, text_color=None, cc_emails=None):
+def simulate_bulk_client_submission_email(application_ids, client_email, recipient_name=None, header_color=None, text_color=None, cc_emails=None, from_email_override=None):
     """Send a bulk client submission email containing a tracker of multiple candidates."""
     try:
         if not application_ids:
@@ -197,11 +197,12 @@ def simulate_bulk_client_submission_email(application_ids, client_email, recipie
         context['header_color'] = header_color
         context['text_color'] = text_color
 
-        from_email = None
-        if hasattr(first_app, 'client_submission') and first_app.client_submission.sent_by:
-            from_email = first_app.client_submission.sent_by.email
-        elif first_app.job.hiring_manager:
-            from_email = first_app.job.hiring_manager.email
+        from_email = from_email_override
+        if not from_email:
+            if hasattr(first_app, 'client_submission') and first_app.client_submission.sent_by:
+                from_email = first_app.client_submission.sent_by.email
+            elif first_app.job.hiring_manager:
+                from_email = first_app.job.hiring_manager.email
 
         send_org_email(
             organization=org,

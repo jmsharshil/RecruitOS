@@ -8,7 +8,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-dummy-key')
 DEBUG = config('DEBUG', default=False, cast=bool)
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,recruitos-c9bga4b9d9hjc3gh.centralindia-01.azurewebsites.net,recruitos.dspe.in,victorious-plant-004ecb500.6.azurestaticapps.net,recuitosdspe-e4bbhucfc3gvhbhj.centralindia-01.azurewebsites.net,recruitos.dspe.in', cast=Csv())
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,.devtunnels.ms,recruitos-c9bga4b9d9hjc3gh.centralindia-01.azurewebsites.net,recruitos.dspe.in,victorious-plant-004ecb500.6.azurestaticapps.net,recuitosdspe-e4bbhucfc3gvhbhj.centralindia-01.azurewebsites.net,recruitos.dspe.in', cast=Csv())
 
 # Frontend URLs for emails and CORS
 FRONTEND_URL = config('FRONTEND_URL', default='https://recruitos.jmstech.co')
@@ -308,3 +308,8 @@ else:
     MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 GOOGLE_OAUTH_CLIENT_ID = config('GOOGLE_OAUTH_CLIENT_ID', default='543573978646-hgopbbdj7gvl3uvuatf5no529shg1q8r.apps.googleusercontent.com')
 GOOGLE_OAUTH_CLIENT_SECRET = config('GOOGLE_OAUTH_CLIENT_SECRET', default='')
+
+# Microsoft OAuth settings for Microsoft Graph API
+MICROSOFT_OAUTH_CLIENT_ID = config('MICROSOFT_OAUTH_CLIENT_ID', default='')
+MICROSOFT_OAUTH_CLIENT_SECRET = config('MICROSOFT_OAUTH_CLIENT_SECRET', default='')
+MICROSOFT_OAUTH_TENANT_ID = config('MICROSOFT_OAUTH_TENANT_ID', default='common')

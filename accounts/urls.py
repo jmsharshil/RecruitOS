@@ -7,6 +7,8 @@ from accounts.views import (
     AdminDashboardView, ManagerDashboardView, RecruiterDashboardView, UnifiedDashboardView ,
     OrganizationEmailConfigView, EmailTemplateViewSet,
 )
+from accounts.views_microsoft import MicrosoftLoginView, MicrosoftConfigView
+
 from accounts.views_google import GoogleLoginView, GoogleConfigView
 
 router = DefaultRouter()
@@ -26,6 +28,9 @@ urlpatterns = [
     path('auth/me/', MeView.as_view(), name='me'),
     path('auth/logout/', LogoutView.as_view(), name='logout'),
     path('auth/set-pin/', SetPinView.as_view(), name='set-pin'),
+
+    path('auth/microsoft/', MicrosoftLoginView.as_view(), name='microsoft-login'),
+    path('auth/microsoft-config/', MicrosoftConfigView.as_view(), name='microsoft-config'),
 
     # Dashboard
     path('dashboard/admin/', AdminDashboardView.as_view(), name='dashboard-admin'),
