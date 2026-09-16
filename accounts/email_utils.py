@@ -170,7 +170,7 @@ def get_org_branding(organization, template_key: str) -> dict:
 # Main send helper
 # ---------------------------------------------------------------------------
 
-def send_org_email(organization, subject: str, template_name: str, context: dict, recipient_list: list, from_email_override: str = None, attachments: list = None, cc_list: list = None):
+def send_org_email(organization, subject: str, template_name: str, context: dict, recipient_list: list, from_email_override: str = None, attachments: list = None, cc_list: list = None, log_kwargs: dict = None):
     """
     Render an email template with org branding and send via the org's SMTP
     (or Django default if not configured). **Enforces fallback to global
@@ -247,6 +247,30 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
             )
     except Exception as e:
         logger.error(f"Failed to create in-app notifications in send_org_email: {e}")
+
+    def _save_email_log(status='sent', error_msg=''):
+        try:
+            from notifications.models import EmailLog
+            
+            kwargs = log_kwargs or {}
+            # Allow log_kwargs to override sender if provided
+            final_sender = kwargs.pop('sender', sender_user)
+            
+            EmailLog.objects.create(
+                organization=organization,
+                sender=final_sender,
+                recipient_email=recipient_list[0] if recipient_list else '',
+                cc_emails=cc_list or [],
+                subject=subject,
+                body_html=html_message,
+                email_type=template_name,
+                status=status,
+                error_message=error_msg,
+                **kwargs
+            )
+        except Exception as e:
+            logger.error(f"Failed to save EmailLog: {e}")
+
 
     
     if from_email_override:
@@ -335,6 +359,7 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
             try:
                 sent_msg = service.users().messages().send(userId='me', body={'raw': raw_message}).execute()
                 logger.info(f"Successfully sent via Gmail API! Message ID: {sent_msg['id']}")
+                _save_email_log(status='sent')
                 return  # Exit early, we sent it successfully via API
             except Exception as e:
                 logger.error(f"Gmail API send failed: {e}. Falling back to standard SMTP.")
@@ -365,6 +390,7 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
             f"Email '{template_name}' sent to {recipient_list} "
             f"via org={getattr(organization, 'name', 'default')}"
         )
+        _save_email_log(status='sent')
         return
     except (smtplib.SMTPAuthenticationError, smtplib.SMTPException, OSError) as exc:
         print(f"==========> [DEBUG] Org SMTP FAILED (Auth/Connection): {exc}")
@@ -400,9 +426,11 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
             f"Email '{template_name}' sent to {recipient_list} "
             f"via GLOBAL fallback credentials (settings.EMAIL_*)"
         )
+        _save_email_log(status='sent')
     except Exception as fallback_exc:
         print(f"==========> [DEBUG] Global Fallback SMTP FAILED: {fallback_exc}")
         logger.error(
             f"Global fallback ALSO failed for '{template_name}' to {recipient_list}: {fallback_exc}"
         )
+        _save_email_log(status='failed', error_msg=str(fallback_exc))
         raise

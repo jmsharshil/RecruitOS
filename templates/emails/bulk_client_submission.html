@@ -2,7 +2,7 @@
 {% block title %}Candidate Profiles — {{ job_title }}{% endblock %}
 
 {% block content %}
-  <p>Dear <strong>{{ client_name }}</strong>,</p>
+  <p>Dear {{ client_name }},</p>
   <p>{{ plain_message|default:"Please review the profiles below." }}</p>
 
   {% if synopses %}
