@@ -104,7 +104,7 @@ class EmailLogViewSet(viewsets.ReadOnlyModelViewSet):
         user = self.request.user
         
         # Admin can see all email logs in their organization
-        if user.role and user.role.name == 'admin':
+        if user.role == 'admin':
             return EmailLog.objects.filter(
                 organization=user.organization,
                 is_deleted=False
