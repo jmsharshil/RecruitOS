@@ -15,39 +15,13 @@
 </p>
 {% endif %}
 
-<table style="width: 100%; border-collapse: collapse; margin-top: 15px; border: 1px solid #e2e8f0; font-size: 14px;">
-  <tr style="background-color: #f8fafc;">
-    <th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left; width: 30%;">Name</th>
-    <td style="padding: 10px; border: 1px solid #e2e8f0;">{{ candidate_name }}</td>
-  </tr>
-  <tr>
-    <th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left;">Email</th>
-    <td style="padding: 10px; border: 1px solid #e2e8f0;">{{ candidate_email }}</td>
-  </tr>
-  <tr style="background-color: #f8fafc;">
-    <th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left;">Contact</th>
-    <td style="padding: 10px; border: 1px solid #e2e8f0;">{{ contact }}</td>
-  </tr>
-  <tr>
-    <th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left;">Profile</th>
-    <td style="padding: 10px; border: 1px solid #e2e8f0;">{{ current_profile }}</td>
-  </tr>
-  <tr style="background-color: #f8fafc;">
-    <th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left;">Company</th>
-    <td style="padding: 10px; border: 1px solid #e2e8f0;">{{ current_company }}</td>
-  </tr>
-  <tr>
-    <th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left;">Location</th>
-    <td style="padding: 10px; border: 1px solid #e2e8f0;">{{ current_location }}</td>
-  </tr>
-  <tr style="background-color: #f8fafc;">
-    <th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left;">Education</th>
-    <td style="padding: 10px; border: 1px solid #e2e8f0;">{{ education }}</td>
-  </tr>
-  <tr>
-    <th style="padding: 10px; border: 1px solid #e2e8f0; text-align: left;">Skills</th>
-    <td style="padding: 10px; border: 1px solid #e2e8f0;">{{ skills }}</td>
-  </tr>
+<table style="width: 100%; border-collapse: collapse; margin-top: 15px; border: 1px solid black; font-size: 14px;">
+    {% for field in tracker_fields %}
+    <tr {% if forloop.counter|divisibleby:2 %}style="background-color: #f8fafc;"{% endif %}>
+      <th style="padding: 10px; border: 1px solid black; text-align: left; width: 30%; background-color: {{ header_color|default:'transparent' }}; color: {{ text_color|default:'inherit' }};">{{ field.label }}</th>
+      <td style="padding: 10px; border: 1px solid black;">{{ field.value }}</td>
+    </tr>
+    {% endfor %}
 </table>
 
 <br />

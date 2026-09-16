@@ -19,6 +19,71 @@ def shorten_location(location):
             return part
     return parts[0]
 
+def build_tracker_fields(application, candidate):
+    """Builds a list of dicts [{'label': ..., 'value': ...}] for emails based on client tracker format."""
+    tracker_fields = []
+    if application.job.team_member_id:
+        try:
+            from clients.models import TeamMemberTrackerFormat
+            tracker_format = TeamMemberTrackerFormat.objects.get(
+                client_id=application.job.client_id, 
+                team_member_id=application.job.team_member_id, 
+                is_deleted=False
+            )
+            for col in tracker_format.columns:
+                val = ""
+                col_norm = col.strip().lower().replace(' ', '_')
+                
+                if col_norm in ['candidate_name', 'name', 'candidate']: val = candidate.candidate_name
+                elif col_norm in ['email', 'candidate_email_id', 'candidate_email', 'email_id']: val = candidate.email
+                elif col_norm in ['phone', 'contact', 'contacts', 'mobile_no.', 'mobile_no', 'mobile_number', 'mobile']: val = candidate.contact
+                elif col_norm in ['total_experience', 'experience', 'total_exp', 'exp']: val = candidate.experience
+                elif col_norm in ['current_company', 'company', 'organization']: val = candidate.current_company
+                elif col_norm in ['current_designation', 'current_profile', 'designation', 'role', 'c._designation', 'c_designation']: val = candidate.current_profile
+                elif col_norm in ['current_ctc', 'ctc', 'cctc']: 
+                    c_val = application.current_ctc or candidate.current_ctc
+                    val = f"₹{c_val}" if c_val else ""
+                elif col_norm in ['expected_ctc', 'expected_ctc', 'ectc']: 
+                    e_val = application.expected_ctc or candidate.expected_ctc
+                    val = f"₹{e_val}" if e_val else ""
+                elif col_norm in ['notice_period', 'notice']: val = application.notice_period or candidate.notice_period
+                elif col_norm in ['current_location', 'address', 'location']: val = shorten_location(candidate.current_location)
+                elif col_norm == 'preferred_location': val = shorten_location(candidate.preferred_location)
+                elif col_norm == 'hike': val = application.hike
+                elif col_norm == 'skills': val = ", ".join(candidate.skills) if isinstance(candidate.skills, list) else candidate.skills
+                elif col_norm == 'education': val = ", ".join([e.get('degree', '') if isinstance(e, dict) else str(e) for e in candidate.education]) if isinstance(candidate.education, list) else candidate.education
+                else:
+                    custom_fields = application.tracker_custom_fields if isinstance(application.tracker_custom_fields, dict) else {}
+                    val = custom_fields.get(col, custom_fields.get(col_norm, ""))
+                
+                if isinstance(val, str) and val.strip().lower() == "not specified":
+                    val = ""
+                    
+                label = col.replace('_', ' ').title()
+                tracker_fields.append({'label': label, 'value': val})
+        except Exception as e:
+            logger.warning(f"Could not load tracker format for team member {application.job.team_member_id}: {e}")
+    
+    # Fallback to standard fields if no format found
+    if not tracker_fields:
+        tracker_fields = [
+            {'label': 'Candidate Name', 'value': candidate.candidate_name},
+            {'label': 'Contact', 'value': candidate.contact},
+            {'label': 'Email', 'value': candidate.email},
+            {'label': 'Current Role', 'value': candidate.current_profile},
+            {'label': 'Experience', 'value': candidate.experience},
+            {'label': 'Location', 'value': shorten_location(candidate.current_location)},
+        ]
+        c_ctc = application.current_ctc or candidate.current_ctc
+        e_ctc = application.expected_ctc or candidate.expected_ctc
+        np = application.notice_period or candidate.notice_period
+        
+        if c_ctc: tracker_fields.append({'label': 'Current CTC', 'value': f"₹{c_ctc}"})
+        if e_ctc: tracker_fields.append({'label': 'Expected CTC', 'value': f"₹{e_ctc}"})
+        if np: tracker_fields.append({'label': 'Notice Period', 'value': np})
+
+    return tracker_fields
+
 def run_in_thread(func):
     def wrapper(*args, **kwargs):
         thread = threading.Thread(target=func, args=args, kwargs=kwargs)
@@ -57,66 +122,7 @@ def simulate_client_submission_email(application_id, client_email, recipient_nam
         }
         
         # Build dynamic tracker fields based on assigned team member format
-        tracker_fields = []
-        if application.job.team_member_id:
-            try:
-                from clients.models import TeamMemberTrackerFormat
-                tracker_format = TeamMemberTrackerFormat.objects.get(
-                    client_id=application.job.client_id, 
-                    team_member_id=application.job.team_member_id, 
-                    is_deleted=False
-                )
-                for col in tracker_format.columns:
-                    val = ""
-                    col_norm = col.strip().lower().replace(' ', '_')
-                    
-                    if col_norm in ['candidate_name', 'name', 'candidate']: val = candidate.candidate_name
-                    elif col_norm in ['email', 'candidate_email_id', 'candidate_email', 'email_id']: val = candidate.email
-                    elif col_norm in ['phone', 'contact', 'contacts', 'mobile_no.', 'mobile_no', 'mobile_number', 'mobile']: val = candidate.contact
-                    elif col_norm in ['total_experience', 'experience', 'total_exp', 'exp']: val = candidate.experience
-                    elif col_norm in ['current_company', 'company', 'organization']: val = candidate.current_company
-                    elif col_norm in ['current_designation', 'current_profile', 'designation', 'role', 'c._designation', 'c_designation']: val = candidate.current_profile
-                    elif col_norm in ['current_ctc', 'ctc', 'cctc']: 
-                        c_val = application.current_ctc or candidate.current_ctc
-                        val = f"₹{c_val}" if c_val else ""
-                    elif col_norm in ['expected_ctc', 'expected_ctc', 'ectc']: 
-                        e_val = application.expected_ctc or candidate.expected_ctc
-                        val = f"₹{e_val}" if e_val else ""
-                    elif col_norm in ['notice_period', 'notice']: val = application.notice_period or candidate.notice_period
-                    elif col_norm in ['current_location', 'address', 'location']: val = shorten_location(candidate.current_location)
-                    elif col_norm == 'preferred_location': val = shorten_location(candidate.preferred_location)
-                    elif col_norm == 'hike': val = application.hike
-                    elif col_norm == 'skills': val = ", ".join(candidate.skills) if isinstance(candidate.skills, list) else candidate.skills
-                    elif col_norm == 'education': val = ", ".join([e.get('degree', '') if isinstance(e, dict) else str(e) for e in candidate.education]) if isinstance(candidate.education, list) else candidate.education
-                    else:
-                        custom_fields = application.tracker_custom_fields if isinstance(application.tracker_custom_fields, dict) else {}
-                        val = custom_fields.get(col, custom_fields.get(col_norm, ""))
-                    
-                    if isinstance(val, str) and val.strip().lower() == "not specified":
-                        val = ""
-                        
-                    label = col.replace('_', ' ').title()
-                    tracker_fields.append({'label': label, 'value': val})
-            except Exception as e:
-                logger.warning(f"Could not load tracker format for team member {application.job.team_member_id}: {e}")
-        
-        # Fallback to standard fields if no format found
-        if not tracker_fields:
-            tracker_fields = [
-                {'label': 'Candidate Name', 'value': candidate.candidate_name},
-                {'label': 'Contact', 'value': candidate.contact},
-                {'label': 'Email', 'value': candidate.email},
-                {'label': 'Current Role', 'value': candidate.current_profile},
-                {'label': 'Experience', 'value': candidate.experience},
-                {'label': 'Location', 'value': shorten_location(candidate.current_location)},
-            ]
-            c_ctc = application.current_ctc or candidate.current_ctc
-            e_ctc = application.expected_ctc or candidate.expected_ctc
-            np = application.notice_period or candidate.notice_period
-            
-            if c_ctc: tracker_fields.append({'label': 'Current CTC', 'value': f"₹{c_ctc}"})
-            if e_ctc: tracker_fields.append({'label': 'Expected CTC', 'value': f"₹{e_ctc}"})
-            if np: tracker_fields.append({'label': 'Notice Period', 'value': np})
+        tracker_fields = build_tracker_fields(application, candidate)
 
         context['tracker_fields'] = tracker_fields
         context['header_color'] = header_color
@@ -308,13 +314,7 @@ def simulate_resume_submission_notification(obj_id):
         context = {
             'recipient_name': manager.name if manager else 'Manager',
             'candidate_name': candidate.candidate_name,
-            'candidate_email': candidate.email,
-            'contact': candidate.contact,
-            'current_profile': candidate.current_profile or 'N/A',
-            'current_company': candidate.current_company or 'N/A',
-            'current_location': candidate.current_location or 'N/A',
-            'education': ', '.join([e.get('degree', '') if isinstance(e, dict) else str(e) for e in candidate.education]) if candidate.education and isinstance(candidate.education, list) else 'N/A',
-            'skills': ', '.join(candidate.skills) if candidate.skills else 'N/A',
+            'tracker_fields': build_tracker_fields(application, candidate),
             'synopsis': application.synopsis if application.synopsis else None,
             'url': f"{frontend_base}/approvals/{application.job.id}",
             'plain_message': f"A new candidate, {candidate.candidate_name}, has been added for {application.job.title}.\nPlease review the candidate profile and take the necessary action.",
