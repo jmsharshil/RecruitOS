@@ -374,7 +374,7 @@ class UserViewSet(viewsets.ModelViewSet):
             )
             
         # Order by active status first (True/1 before False/0), then by newest created
-        qs = qs.order_by('-is_active', '-created_at')
+        qs = qs.order_by('-is_active', '-date_joined')
         return qs
 
     def perform_create(self, serializer):
