@@ -42,10 +42,10 @@ def build_tracker_fields(application, candidate):
                 elif col_norm in ['current_designation', 'current_profile', 'designation', 'role', 'c._designation', 'c_designation']: val = candidate.current_profile
                 elif col_norm in ['current_ctc', 'ctc', 'cctc']: 
                     c_val = application.current_ctc or candidate.current_ctc
-                    val = f"₹{c_val}" if c_val else ""
+                    val = f"{c_val}" if c_val else ""
                 elif col_norm in ['expected_ctc', 'expected_ctc', 'ectc']: 
                     e_val = application.expected_ctc or candidate.expected_ctc
-                    val = f"₹{e_val}" if e_val else ""
+                    val = f"{e_val}" if e_val else ""
                 elif col_norm in ['notice_period', 'notice']: val = application.notice_period or candidate.notice_period
                 elif col_norm in ['current_location', 'address', 'location']: val = shorten_location(candidate.current_location)
                 elif col_norm == 'preferred_location': val = shorten_location(candidate.preferred_location)
@@ -78,8 +78,8 @@ def build_tracker_fields(application, candidate):
         e_ctc = application.expected_ctc or candidate.expected_ctc
         np = application.notice_period or candidate.notice_period
         
-        if c_ctc: tracker_fields.append({'label': 'Current CTC', 'value': f"₹{c_ctc}"})
-        if e_ctc: tracker_fields.append({'label': 'Expected CTC', 'value': f"₹{e_ctc}"})
+        if c_ctc: tracker_fields.append({'label': 'Current CTC', 'value': f"{c_ctc}"})
+        if e_ctc: tracker_fields.append({'label': 'Expected CTC', 'value': f"{e_ctc}"})
         if np: tracker_fields.append({'label': 'Notice Period', 'value': np})
 
     return tracker_fields
@@ -548,10 +548,10 @@ def _build_tracker_and_attachments_for_apps(applications, job):
             elif col_norm in ['current_designation', 'current_profile', 'designation', 'role', 'c._designation', 'c_designation']: val = candidate.current_profile
             elif col_norm in ['current_ctc', 'ctc', 'cctc']: 
                 c_val = app.current_ctc or candidate.current_ctc
-                val = f"₹{c_val}" if c_val else ""
+                val = f"{c_val}" if c_val else ""
             elif col_norm in ['expected_ctc', 'ectc']: 
                 e_val = app.expected_ctc or candidate.expected_ctc
-                val = f"₹{e_val}" if e_val else ""
+                val = f"{e_val}" if e_val else ""
             elif col_norm in ['notice_period', 'notice']: val = app.notice_period or candidate.notice_period
             elif col_norm in ['current_location', 'address', 'location']: val = shorten_location(candidate.current_location)
             elif col_norm == 'preferred_location': val = shorten_location(candidate.preferred_location)
