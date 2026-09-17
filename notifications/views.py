@@ -1,4 +1,6 @@
 from rest_framework import viewsets, permissions
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.utils import timezone
@@ -99,6 +101,10 @@ class NotificationViewSet(viewsets.ModelViewSet):
 class EmailLogViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = EmailLogSerializer
     permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['status', 'email_type']
+    search_fields = ['recipient_email', 'subject', 'candidate_name', 'event']
+    ordering_fields = ['sent_at', 'status']
 
     def get_queryset(self):
         user = self.request.user

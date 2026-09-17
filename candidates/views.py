@@ -309,6 +309,44 @@ class CandidateViewSet(viewsets.ModelViewSet):
         education = parse_json_field('education', [])
         skills = parse_json_field('skills', [])
 
+        parsed_data = {}
+        try:
+            from .utils import parse_resume_task
+            parsed_data = parse_resume_task(resume_file, organization=organization)
+            if not isinstance(parsed_data, dict) or "error" in parsed_data:
+                parsed_data = {}
+        except Exception:
+            pass
+
+        if candidate_name == 'Unnamed Candidate' or not candidate_name.strip():
+            candidate_name = parsed_data.get("candidate_name") or parsed_data.get("name") or parsed_data.get("profile_name") or candidate_name
+        if not email:
+            email = (parsed_data.get("email") or "").strip().lower()
+        if not contact:
+            contact = parsed_data.get("contact") or parsed_data.get("phone_number") or parsed_data.get("phone") or ""
+        if current_profile == 'Not provided' or not current_profile.strip():
+            current_profile = parsed_data.get("current_profile") or parsed_data.get("title") or 'Not provided'
+        if current_company == 'Not provided' or not current_company.strip():
+            current_company = parsed_data.get("current_company") or parsed_data.get("current_employer") or 'Not provided'
+        if current_location == 'Not specified' or not current_location.strip():
+            current_location = parsed_data.get("current_location") or parsed_data.get("location") or 'Not specified'
+        if experience == '0 years' or not experience.strip():
+            experience = parsed_data.get("experience") or '0 years'
+        if not education:
+            ed = parsed_data.get("education")
+            if isinstance(ed, (list, dict)): education = ed
+        if not skills:
+            skills = parsed_data.get("skills") or []
+            
+        if candidate_name == "Unnamed Candidate" or not candidate_name.strip():
+            from pathlib import Path
+            candidate_name = Path(getattr(resume_file, "name", "Unnamed Candidate")).stem
+            
+        try:
+            resume_file.seek(0)
+        except (AttributeError, OSError):
+            pass
+
         candidate = Candidate.objects.create(
             candidate_name=candidate_name,
             profile_name=candidate_name,
@@ -354,13 +392,9 @@ class CandidateViewSet(viewsets.ModelViewSet):
             created_by=user,
         )
 
-        from .utils import background_parse_resume
-        TASK_QUEUE.enqueue(
-            background_parse_resume,
-            user,
-            str(candidate.id),
-            str(organization.id)
-        )
+        # We parse synchronously now, so no need for background_parse_resume
+        
+        simulate_resume_submission_notification(application.id)
         
         log_action(user, 'created', 'Candidate', candidate.id, "Created candidate via add-and-apply")
         log_action(user, 'created', 'Application', application.id, f"Applied candidate to job '{job.title}' via add-and-apply")
