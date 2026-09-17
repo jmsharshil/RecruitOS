@@ -269,6 +269,104 @@ class CandidateViewSet(viewsets.ModelViewSet):
         }
         return Response(response_data, status=201)
 
+    @action(detail=False, methods=['post'], url_path='add-and-apply', parser_classes=[MultiPartParser, FormParser])
+    def add_and_apply(self, request):
+        """Unified endpoint to upload a resume, create a candidate profile, and link to a job application."""
+        if 'resume' not in request.FILES:
+            raise ValidationError({"error": "No resume file provided"})
+        
+        job_id = request.data.get('job_id')
+        if not job_id:
+            raise ValidationError({"error": "job_id is required"})
+            
+        try:
+            job = Job.objects.get(id=job_id, organization=request.user.organization, is_deleted=False)
+        except Job.DoesNotExist:
+            raise ValidationError({"error": "Job not found"})
+            
+        resume_file = request.FILES['resume']
+        user = request.user
+        organization = user.organization
+        
+        # Parse fields from request
+        import json
+        def parse_json_field(field_name, default=[]):
+            val = request.data.get(field_name)
+            if isinstance(val, str):
+                try:
+                    return json.loads(val)
+                except:
+                    return [v.strip() for v in val.split(',') if v.strip()]
+            return val if val else default
+
+        candidate_name = request.data.get('candidate_name', 'Unnamed Candidate')
+        email = request.data.get('email', '').strip().lower()
+        contact = request.data.get('contact', '')
+        current_profile = request.data.get('current_profile', 'Not provided')
+        current_company = request.data.get('current_company', 'Not provided')
+        current_location = request.data.get('current_location', 'Not specified')
+        experience = request.data.get('experience', '0 years')
+        education = parse_json_field('education', [])
+        skills = parse_json_field('skills', [])
+
+        candidate = Candidate.objects.create(
+            candidate_name=candidate_name,
+            profile_name=candidate_name,
+            email=email,
+            contact=contact,
+            current_profile=current_profile,
+            current_company=current_company,
+            current_location=current_location,
+            experience=experience,
+            education=education,
+            skills=skills,
+            resume=resume_file,
+            resume_file_name=resume_file.name,
+            organization=organization,
+            uploaded_by=user,
+        )
+        
+        # Application fields
+        synopsis = request.data.get('synopsis', '')
+        current_ctc = request.data.get('current_ctc', '')
+        expected_ctc = request.data.get('expected_ctc', '')
+        notice_period = request.data.get('notice_period', '')
+        
+        # Get stage
+        stage_id = request.data.get('current_stage_id')
+        if stage_id:
+            try:
+                stage = Stage.objects.get(id=stage_id, job=job)
+            except Stage.DoesNotExist:
+                stage = job.stages.order_by('order').first()
+        else:
+            stage = job.stages.order_by('order').first()
+
+        application = Application.objects.create(
+            candidate=candidate,
+            job=job,
+            organization=organization,
+            current_stage=stage,
+            synopsis=synopsis,
+            current_ctc=current_ctc,
+            expected_ctc=expected_ctc,
+            notice_period=notice_period,
+            created_by=user,
+        )
+
+        from .utils import background_parse_resume
+        TASK_QUEUE.enqueue(
+            background_parse_resume,
+            user,
+            str(candidate.id),
+            str(organization.id)
+        )
+        
+        log_action(user, 'created', 'Candidate', candidate.id, "Created candidate via add-and-apply")
+        log_action(user, 'created', 'Application', application.id, f"Applied candidate to job '{job.title}' via add-and-apply")
+        
+        return Response(ApplicationDetailSerializer(application, context={'request': request}).data, status=201)
+
     @action(detail=True, methods=['post'], url_path='mark-duplicate')
     def mark_duplicate(self, request, pk=None):
         """
