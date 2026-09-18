@@ -2,36 +2,40 @@
 {% block title %}Bulk Application Review Decision — {{ org_name }}{% endblock %}
 
 {% block content %}
-  <p>Hi <strong>{{ recruiter.name }}</strong>,</p>
+  <p>Hi {{ recruiter.name }},</p>
   <p>
-    A total of <strong>{{ app_list|length }}</strong> applications have been reviewed with the status <strong>{{ status }}</strong>.<br>
+    A total of {{ app_list|length }} applications have been reviewed with the status {{ status }}.
     Please review the updated applications and proceed with the next steps accordingly.
   </p>
 
   {% if status == 'accepted' %}
     <div class="info-box" style="border-left: 4px solid #10b981;">
-      <p><strong>Decision:</strong> <span style="text-transform: uppercase; font-weight: bold; color: #10b981;">ACCEPTED</span></p>
+      <p>Decision: <span style="text-transform: uppercase; color: #10b981;">ACCEPTED</span></p>
   {% elif status == 'rejected' %}
     <div class="info-box" style="border-left: 4px solid #ef4444;">
-      <p><strong>Decision:</strong> <span style="text-transform: uppercase; font-weight: bold; color: #ef4444;">REJECTED</span></p>
+      <p>Decision: <span style="text-transform: uppercase; color: #ef4444;">REJECTED</span></p>
   {% else %}
     <div class="info-box" style="border-left: 4px solid #f59e0b;">
-      <p><strong>Decision:</strong> <span style="text-transform: uppercase; font-weight: bold; color: #f59e0b;">{{ status }}</span></p>
+      <p>Decision: <span style="text-transform: uppercase; color: #f59e0b;">{{ status }}</span></p>
   {% endif %}
       {% if notes %}
-        <p><strong>Manager Review Comments:</strong></p>
+        <p>Manager Review Comments:</p>
         <p style="font-style: italic; background-color: #f1f5f9; padding: 10px; border-radius: 4px; color: #334155; margin: 5px 0 0 0;">
           "{{ notes }}"
         </p>
       {% endif %}
     </div>
 
-  <p><strong>Reviewed Candidates:</strong></p>
+  <p>Reviewed Candidates:</p>
   <ul>
     {% for app in app_list %}
-      <li><a href="{{ app.url }}">{{ app.candidate_name }}</a> ({{ app.job_title }})</li>
+      <li>{{ app.candidate_name }} ({{ app.job_title }})</li>
     {% endfor %}
   </ul>
+
+  <div class="btn-wrapper">
+    <a href="{{ approvals_url }}" class="btn">View Approvals</a>
+  </div>
 
   <div class="divider"></div>
 

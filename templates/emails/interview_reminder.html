@@ -2,23 +2,23 @@
 {% block title %}Interview Reminder — {{ candidate_name }}{% endblock %}
 
 {% block content %}
-  <p>Hi <strong>{{ recruiter_name }}</strong>,</p>
+  <p>Hi {{ recruiter_name }},</p>
   <p>
-    This is a reminder that the interview for <strong>{{ candidate_name }}</strong> for <strong>{{ job_title }}</strong> is scheduled for tomorrow.<br>
+    This is a reminder that the interview for {{ candidate_name }} for {{ job_title }} is scheduled for tomorrow.
     Please review the interview details and ensure all necessary arrangements are in place.
   </p>
 
   <div class="info-box">
-    <p><strong>Candidate:</strong> {{ candidate_name }}</p>
-    <p><strong>Position:</strong> {{ job_title }}</p>
-    <p><strong>Date:</strong> {{ interview_date }}</p>
-    <p><strong>Time:</strong> {{ interview_time }}</p>
-    <p><strong>Mode:</strong> {{ interview_mode|title }}</p>
+    <p>Candidate: {{ candidate_name }}</p>
+    <p>Position: {{ job_title }}</p>
+    <p>Date: {{ interview_date }}</p>
+    <p>Time: {{ interview_time }}</p>
+    <p>Mode: {{ interview_mode|title }}</p>
     {% if interviewer_name %}
-      <p><strong>Interviewer:</strong> {{ interviewer_name }}</p>
+      <p>Interviewer: {{ interviewer_name }}</p>
     {% endif %}
     {% if notes %}
-      <p><strong>Notes:</strong> {{ notes }}</p>
+      <p>Notes: {{ notes }}</p>
     {% endif %}
   </div>
 

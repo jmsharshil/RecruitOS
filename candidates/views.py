@@ -1520,6 +1520,8 @@ def send_manager_bulk_review_email(recruiter, manager, apps, status, notes, from
             "url": f"{frontend_base}/positions/{app.job.id}/pipeline"
         })
         
+    approvals_url = f"{frontend_base}/approvals/{apps[0].job.id}" if apps else f"{frontend_base}/approvals"
+        
     context = {
         "recruiter": recruiter,
         "manager_name": manager_name,
@@ -1528,6 +1530,7 @@ def send_manager_bulk_review_email(recruiter, manager, apps, status, notes, from
         "notes": notes,
         "app_list": app_list,
         "org_name": org.name if org else "RecruitOS",
+        "approvals_url": approvals_url,
         "plain_message": f"A total of {len(apps)} applications have been reviewed with the status {status}.\nPlease review the updated applications and proceed with the next steps accordingly."
     }
 

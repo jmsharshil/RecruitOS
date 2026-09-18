@@ -4,13 +4,13 @@
 {% block content %}
 <p>Dear {{ recipient_name }},</p>
 <p>
-  A new candidate, {{ candidate_name }}, has been added for {{ job_title }}.<br>
+  A new candidate, {{ candidate_name }}, has been added for {{ job_title }}.
   Please review the candidate profile and take the necessary action.
 </p>
 
 {% if synopsis %}
 <p style="margin-top: 15px; font-size: 14px;">
-  <strong>Synopsis:</strong><br>
+  Synopsis:
   {{ synopsis|linebreaksbr }}
 </p>
 {% endif %}
@@ -34,7 +34,7 @@
   </table>
 </div>
 
-<br />
+
 {% if url %}
 <div class="btn-wrapper">
   <a href="{{ url }}" class="btn">View Candidate</a>

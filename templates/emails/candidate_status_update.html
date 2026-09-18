@@ -4,12 +4,12 @@
 <div class="content">
     <p>Hi {{ manager_name }},</p>
     
-    <p>The stage/status of <strong>{{ candidate_name }}</strong> for <strong>{{ job_title }}</strong> has been updated.<br>
+    <p>The stage/status of {{ candidate_name }} for {{ job_title }} has been updated.
     Please review the latest status and take the necessary action.</p>
     
-    <p><strong>Action:</strong> {{ action }}</p>
-    <p><strong>Notes:</strong> {{ notes }}</p>
-    <p><strong>Updated by:</strong> {{ recruiter_name }}</p>
+    <p>Action: {{ action }}</p>
+    <p>Notes: {{ notes }}</p>
+    <p>Updated by: {{ recruiter_name }}</p>
     
     <div style="margin-top: 30px;">
         <a href="{{ url }}" class="button">View Candidate</a>
