@@ -58,7 +58,7 @@ class CandidateViewSet(viewsets.ModelViewSet):
         Destroy restricted to admin only.
         """
         if self.action in ['list', 'retrieve', 'create', 'update', 'partial_update',
-                           'parse_resume', 'upload_resume', 'mark_duplicate', 'unmark_duplicate']:
+                           'parse_resume', 'upload_resume', 'mark_duplicate', 'unmark_duplicate', 'add_and_apply']:
             return [permissions.IsAuthenticated()]
         if self.action == 'destroy':
             return [IsAdmin()]
