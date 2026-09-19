@@ -86,14 +86,16 @@ def build_tracker_fields(application, candidate):
 
 def run_in_thread(func):
     def wrapper(*args, **kwargs):
+        if kwargs.get('preview_only'):
+            return func(*args, **kwargs)
         thread = threading.Thread(target=func, args=args, kwargs=kwargs)
         thread.start()
         return thread
     return wrapper
 
 @run_in_thread
-def simulate_client_submission_email(application_id, client_email, recipient_name=None, header_color=None, text_color=None):
-    """Send a real (or simulated) client submission email using org branding."""
+def simulate_client_submission_email(application_id, client_email, recipient_name=None, header_color=None, text_color=None, subject_override=None, text_override=None, preview_only=False):
+    """Send a real (or simulated) client submission email using org branding. Can also be used to preview."""
     try:
         application = Application.objects.select_related(
             'candidate', 'job', 'job__client', 'client_submission__sent_by'
@@ -147,11 +149,17 @@ def simulate_client_submission_email(application_id, client_email, recipient_nam
         elif application.job.hiring_manager:
             from_email = application.job.hiring_manager.email
             
-        context['plain_message'] = f"PFA resume for {application.job.title} – {application.job.location}."
+        context['plain_message'] = text_override if text_override else f"PFA resume for {application.job.title} – {application.job.location}."
+        
+        final_subject = subject_override if subject_override else f"Resume for {application.job.title} – {application.job.location}."
+
+        if preview_only:
+            from accounts.email_utils import render_org_email
+            return render_org_email(org, final_subject, 'client_submission', context)
 
         send_org_email(
             organization=org,
-            subject=f"Resume for {application.job.title} – {application.job.location}.",
+            subject=final_subject,
             template_name='client_submission',
             context=context,
             recipient_list=[client_email],
@@ -159,13 +167,16 @@ def simulate_client_submission_email(application_id, client_email, recipient_nam
             from_email_override=from_email
         )
         logger.info(f"Client submission email sent for application {application_id} to {client_email}")
+        return True
     except Exception as e:
         logger.error(f"Client submission email failed for application {application_id}: {e}")
+        if preview_only:
+            raise
 
 
 @run_in_thread
-def simulate_bulk_client_submission_email(application_ids, client_email, recipient_name=None, header_color=None, text_color=None, cc_emails=None, from_email_override=None):
-    """Send a bulk client submission email containing a tracker of multiple candidates."""
+def simulate_bulk_client_submission_email(application_ids, client_email, recipient_name=None, header_color=None, text_color=None, cc_emails=None, from_email_override=None, subject_override=None, text_override=None, preview_only=False):
+    """Send a bulk client submission email containing a tracker of multiple candidates. Can also be used to preview."""
     try:
         if not application_ids:
             return
@@ -192,7 +203,7 @@ def simulate_bulk_client_submission_email(application_ids, client_email, recipie
             'org_name': org.name,
             'sent_by': getattr(first_app, 'client_submission', None) and
                        getattr(first_app.client_submission.sent_by, 'name', 'RecruitOS') or 'RecruitOS',
-            'plain_message': f"PFA resumes for {job.title} – {job.location}.",
+            'plain_message': text_override if text_override else f"PFA resumes for {job.title} – {job.location}.",
         }
 
         tracker_headers, candidates_data, attachments, synopses = _build_tracker_and_attachments_for_apps(applications, job)
@@ -210,9 +221,15 @@ def simulate_bulk_client_submission_email(application_ids, client_email, recipie
             elif first_app.job.hiring_manager:
                 from_email = first_app.job.hiring_manager.email
 
+        final_subject = subject_override if subject_override else f"Resumes for {job.title} – {job.location}."
+
+        if preview_only:
+            from accounts.email_utils import render_org_email
+            return render_org_email(org, final_subject, 'bulk_client_submission', context)
+
         send_org_email(
             organization=org,
-            subject=f"Resumes for {job.title} – {job.location}.",
+            subject=final_subject,
             template_name='bulk_client_submission',
             context=context,
             recipient_list=[client_email],
@@ -221,8 +238,11 @@ def simulate_bulk_client_submission_email(application_ids, client_email, recipie
             cc_list=cc_emails
         )
         logger.info(f"Bulk client submission email sent for {len(applications)} apps to {client_email}")
+        return True
     except Exception as e:
         logger.error(f"Bulk client submission email failed: {e}")
+        if preview_only:
+            raise
 
 
 @run_in_thread

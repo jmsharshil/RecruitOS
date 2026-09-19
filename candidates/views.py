@@ -792,6 +792,9 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         else:
             cc_emails = []
 
+        subject_override = request.data.get('subject_override')
+        text_override = request.data.get('text_override')
+
         applications = self.get_queryset().filter(id__in=application_ids).select_related('job', 'candidate', 'job__client')
         
         for app in applications:
@@ -916,12 +919,84 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                             if not final_header: final_header = tf.header_color
                             if not final_text: final_text = tf.text_color
 
-                simulate_bulk_client_submission_email(app_ids, client_email, recipient_name, final_header, final_text, cc_emails=cc_emails)
+                simulate_bulk_client_submission_email(
+                    app_ids, client_email, recipient_name, final_header, final_text, 
+                    cc_emails=cc_emails, subject_override=subject_override, text_override=text_override
+                )
 
         return Response({
             "message": f"Successfully sent {updated_count} applications to client.",
             "errors": errors
         }, status=200)
+
+    @action(detail=False, methods=['post'], url_path='preview-client-submission')
+    def preview_client_submission(self, request):
+        """Preview bulk applications email to client without sending."""
+        application_ids = request.data.get('application_ids', [])
+        
+        if not isinstance(application_ids, list) or not application_ids:
+            raise ValidationError({"error": "Provide a list of application_ids"})
+
+        header_color = request.data.get('header_color')
+        text_color = request.data.get('text_color')
+        subject_override = request.data.get('subject_override')
+        text_override = request.data.get('text_override')
+
+        applications = self.get_queryset().filter(id__in=application_ids).select_related('job', 'candidate', 'job__client')
+        if not applications.exists():
+            return Response({"error": "No valid applications found"}, status=400)
+
+        first_app = applications.first()
+        client = first_app.job.client
+        client_email = client.email if client else "client@example.com"
+        recipient_name = client.company_name if client else "Client"
+
+        if client and first_app.job.team_member_id:
+            if isinstance(client.team_members, list):
+                for tm in client.team_members:
+                    if isinstance(tm, dict) and str(tm.get('id')) == str(first_app.job.team_member_id):
+                        client_email = tm.get('email')
+                        if tm.get('name'):
+                            recipient_name = tm.get('name')
+                        break
+
+        from candidates.tasks import simulate_bulk_client_submission_email
+        from clients.models import TeamMemberTrackerFormat
+
+        final_header = header_color
+        final_text = text_color
+        if not (final_header and final_text) and client:
+            tf = TeamMemberTrackerFormat.objects.filter(
+                client=client,
+                team_member_id=str(first_app.job.team_member_id) if first_app.job.team_member_id else ""
+            ).first()
+            if tf:
+                if not final_header: final_header = tf.header_color
+                if not final_text: final_text = tf.text_color
+
+        try:
+            preview_result = simulate_bulk_client_submission_email(
+                [app.id for app in applications], 
+                client_email, 
+                recipient_name, 
+                final_header, 
+                final_text, 
+                subject_override=subject_override,
+                text_override=text_override,
+                preview_only=True
+            )
+
+            if preview_result:
+                subject, html_message, plain_message = preview_result
+                return Response({
+                    "subject": subject,
+                    "html_message": html_message,
+                    "plain_message": plain_message
+                }, status=200)
+            else:
+                return Response({"error": "Failed to generate preview. The operation returned None."}, status=400)
+        except Exception as e:
+            return Response({"error": f"Failed to generate preview: {str(e)}"}, status=500)
 
     @action(detail=False, methods=['post'], url_path='resend-client')
     def resend_to_client(self, request):
@@ -941,6 +1016,9 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             cc_emails = [str(e).strip() for e in cc_emails_raw if str(e).strip()]
         else:
             cc_emails = []
+
+        subject_override = request.data.get('subject_override')
+        text_override = request.data.get('text_override')
 
         applications = self.get_queryset().filter(id__in=application_ids).select_related('job', 'candidate', 'job__client')
         
@@ -1064,7 +1142,9 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                     final_header, 
                     final_text, 
                     cc_emails=cc_emails,
-                    from_email_override=request.user.email
+                    from_email_override=request.user.email,
+                    subject_override=subject_override,
+                    text_override=text_override
                 )
 
         return Response({

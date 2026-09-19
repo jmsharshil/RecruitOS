@@ -170,7 +170,29 @@ def get_org_branding(organization, template_key: str) -> dict:
 # Main send helper
 # ---------------------------------------------------------------------------
 
-def send_org_email(organization, subject: str, template_name: str, context: dict, recipient_list: list, from_email_override: str = None, attachments: list = None, cc_list: list = None, log_kwargs: dict = None):
+def render_org_email(organization, subject: str, template_name: str, context: dict):
+    """
+    Render an email template with org branding without sending it.
+    Returns (subject, html_message, plain_message).
+    """
+    branding = get_org_branding(organization, template_name)
+    context.update(branding)
+
+    # Check for custom_html override first
+    if branding.get('custom_html'):
+        try:
+            html_message = Template(branding['custom_html']).render(Context(context))
+        except Exception as exc:
+            logger.warning(f"Custom HTML render failed for {template_name}: {exc}")
+            html_message = render_to_string(f'emails/{template_name}.html', context)
+    else:
+        html_message = render_to_string(f'emails/{template_name}.html', context)
+
+    plain_message = context.get('plain_message', subject)
+    return subject, html_message, plain_message
+
+
+def send_org_email(organization, subject: str, template_name: str, context: dict, recipient_list: list, from_email_override: str = None, attachments: list = None, cc_list: list = None, log_kwargs: dict = None, html_message_override: str = None):
     """
     Render an email template with org branding and send via the org's SMTP
     (or Django default if not configured). **Enforces fallback to global
@@ -189,17 +211,11 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
     branding = get_org_branding(organization, template_name)
     context.update(branding)
 
-    # Check for custom_html override first
-    if branding.get('custom_html'):
-        try:
-            html_message = Template(branding['custom_html']).render(Context(context))
-        except Exception as exc:
-            logger.warning(f"Custom HTML render failed for {template_name}: {exc}")
-            html_message = render_to_string(f'emails/{template_name}.html', context)
+    if html_message_override:
+        html_message = html_message_override
+        plain_message = context.get('plain_message', subject)
     else:
-        html_message = render_to_string(f'emails/{template_name}.html', context)
-
-    plain_message = context.get('plain_message', subject)
+        _, html_message, plain_message = render_org_email(organization, subject, template_name, context)
     
     sender_user = None
     if from_email_override:
