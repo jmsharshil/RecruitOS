@@ -45,7 +45,7 @@ class MicrosoftLoginView(APIView):
 
                 result = msal_app.acquire_token_by_authorization_code(
                     code=auth_code,
-                    scopes=['User.Read', 'Mail.Send'],
+                    scopes=['User.Read', 'Mail.Send', 'MailboxSettings.Read'],
                     redirect_uri=getattr(settings, 'MICROSOFT_OAUTH_REDIRECT_URI', 'postmessage'),
                 )
 
