@@ -50,6 +50,7 @@ def send_set_pin_email(user, sender_email=None):
     url = f"{frontend_url}/login"
 
     org = getattr(user, 'organization', None)
+    org_name = org.name if org else "our platform"
     plain_message = (
         f"Welcome to the team! Your account has been created successfully, and you can now access the platform using your login credentials.\n"
         f"We’re excited to have you on board and look forward to working with you.\n\n"
@@ -60,12 +61,13 @@ def send_set_pin_email(user, sender_email=None):
         'user': user,
         'url': url,
         'plain_message': plain_message,
+        'org_name': org_name,
     }
 
     try:
         send_org_email(
             organization=org,
-            subject='Welcome to DSP Eminence Consulting Services',
+            subject=f'Welcome to {org_name}',
             template_name='set_pin',
             context=context,
             recipient_list=[user.email],

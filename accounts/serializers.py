@@ -9,10 +9,21 @@ class OrganizationSerializer(serializers.ModelSerializer):
 
 class UserBriefSerializer(serializers.ModelSerializer):
     organization = OrganizationSerializer(read_only=True)
+    avatar = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = ['id', 'name', 'email', 'phone', 'avatar', 'role', 'organization']
+
+    def get_avatar(self, obj):
+        if not obj.avatar:
+            return None
+        if str(obj.avatar).startswith('http'):
+            return str(obj.avatar)
+        try:
+            return self.context['request'].build_absolute_uri(obj.avatar.url) if 'request' in self.context else obj.avatar.url
+        except Exception:
+            return None
 
 class OrganizationRegisterSerializer(serializers.Serializer):
     org_name       = serializers.CharField(max_length=200, required=True)
@@ -56,6 +67,7 @@ class UserListSerializer(serializers.ModelSerializer):
     jobs_count        = serializers.IntegerField(read_only=True, default=0)
     recruiters_count  = serializers.IntegerField(read_only=True, default=0)
     created_by_name   = serializers.SerializerMethodField()
+    avatar            = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -64,6 +76,16 @@ class UserListSerializer(serializers.ModelSerializer):
             'organization_name', 'jobs_count', 'recruiters_count',
             'created_by_name', 'date_joined', 'is_active',
         ]
+
+    def get_avatar(self, obj):
+        if not obj.avatar:
+            return None
+        if str(obj.avatar).startswith('http'):
+            return str(obj.avatar)
+        try:
+            return self.context['request'].build_absolute_uri(obj.avatar.url) if 'request' in self.context else obj.avatar.url
+        except Exception:
+            return None
 
     def get_organization_name(self, obj):
         return obj.organization.name if obj.organization else None
@@ -83,6 +105,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
     created_by   = UserBriefSerializer(read_only=True)
     jobs_count       = serializers.IntegerField(read_only=True, default=0)
     recruiters_count = serializers.IntegerField(read_only=True, default=0)
+    avatar = serializers.SerializerMethodField()
     role = serializers.ChoiceField(
         choices=UserRole.choices,
         required=True,
@@ -98,6 +121,16 @@ class UserDetailSerializer(serializers.ModelSerializer):
             'date_joined', 'is_active',
         ]
         read_only_fields = ['id', 'date_joined', 'created_by', 'organization', 'jobs_count', 'recruiters_count']
+
+    def get_avatar(self, obj):
+        if not obj.avatar:
+            return None
+        if str(obj.avatar).startswith('http'):
+            return str(obj.avatar)
+        try:
+            return self.context['request'].build_absolute_uri(obj.avatar.url) if 'request' in self.context else obj.avatar.url
+        except Exception:
+            return None
 
     def validate_role(self, value):
         if value not in [UserRole.MANAGER.value, UserRole.RECRUITER.value, UserRole.ADMIN.value]:

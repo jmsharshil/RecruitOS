@@ -89,16 +89,11 @@ class GoogleLoginView(APIView):
                 logger.info(f"Google Login successful for existing user: {email_clean}")
                 log_action(user, 'logged_in', 'User', user.id, "Logged in via Google SSO", organization=getattr(user, 'organization', None))
 
-                # If user doesn't have an avatar, try to download and save their Google picture
-                if not user.avatar and picture_url:
-                    try:
-                        import requests as http_requests
-                        from django.core.files.base import ContentFile
-                        response = http_requests.get(picture_url, timeout=5)
-                        if response.status_code == 200:
-                            user.avatar.save(f"{user.id}_google_avatar.jpg", ContentFile(response.content), save=True)
-                    except Exception as e:
-                        logger.warning(f"Failed to fetch or save Google avatar for {email_clean}: {e}")
+                # If user doesn't have an avatar or it's a broken google avatar path, save the Google picture URL directly
+                if picture_url:
+                    if not user.avatar or '_google_avatar.jpg' in str(user.avatar):
+                        user.avatar = picture_url
+                        user.save(update_fields=['avatar'])
 
                 # Save Google Tokens if provided
                 if access_token:
