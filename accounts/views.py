@@ -367,13 +367,7 @@ class UserViewSet(viewsets.ModelViewSet):
             )
         )
 
-        if self.request.user.role == UserRole.MANAGER:
-            # Managers see their own recruiters OR managers/recruiters created by the Admin
-            qs = qs.filter(
-                Q(role=UserRole.RECRUITER, created_by=self.request.user) |
-                Q(created_by__role=UserRole.ADMIN) |
-                Q(created_by__isnull=True)
-            )
+        # Remove the manager-specific filter so all roles in the organization can see all users in the organization
             
         # Order by active status first (True/1 before False/0), then by newest created
         qs = qs.order_by('-is_active', '-date_joined')
