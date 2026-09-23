@@ -289,9 +289,11 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
 
 
     
+    # For APIs (Gmail/Graph), we will attempt to send from the override email.
+    # For SMTP, we will use the verified org email and set Reply-To to avoid spoofing.
+    smtp_reply_to = []
+    
     if from_email_override:
-        from_email = from_email_override
-        
         # --- NEW: Check if the override user has Google API Tokens ---
         if sender_user and sender_user.google_access_token:
             logger.info(f"Attempting to send email via Gmail API for {from_email_override}")
@@ -489,8 +491,15 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
                     
             except Exception as e:
                 logger.error(f"Microsoft Graph API email process failed: {e}. Falling back to standard SMTP.")
-    else:
-        from_email = get_org_from_email(organization)
+                
+    # --- SMTP Fallback Logic ---
+    # We must not spoof the From address in SMTP. Use the verified org email.
+    from_email = get_org_from_email(organization)
+    
+    # Set Reply-To if the sender override was provided so replies go to the user
+    if from_email_override and from_email_override != from_email:
+        smtp_reply_to.append(from_email_override)
+
 
     # Try org-specific connection first (may raise SMTP auth errors at send time)
     connection = get_org_email_connection(organization)
@@ -502,6 +511,7 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
             from_email=from_email,
             to=recipient_list,
             cc=cc_list,
+            reply_to=smtp_reply_to or None,
             connection=connection,
         )
         msg.attach_alternative(html_message, 'text/html')
@@ -538,6 +548,7 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
             from_email=getattr(settings, 'EMAIL_HOST_USER', settings.DEFAULT_FROM_EMAIL),
             to=recipient_list,
             cc=cc_list,
+            reply_to=smtp_reply_to or None,
             connection=global_conn,
         )
         msg_fallback.attach_alternative(html_message, 'text/html')
