@@ -35,7 +35,7 @@ class CandidateFilterSet(django_filters.FilterSet):
     as those fields now live on the Application model (per-job data).
     """
     candidate_name     = django_filters.CharFilter(method='filter_candidate_name_or_role')
-    email              = CharInContainsFilter(field_name='email', lookup_expr='icontains')
+    email              = django_filters.CharFilter(method='filter_email_or_contact')
     contact            = CharInContainsFilter(field_name='contact', lookup_expr='icontains')
     current_profile    = CharInContainsFilter(field_name='current_profile', lookup_expr='icontains')
     experience         = CharInContainsFilter(field_name='experience', lookup_expr='icontains')
@@ -95,6 +95,17 @@ class CandidateFilterSet(django_filters.FilterSet):
         q = Q()
         for v in values:
             q |= Q(candidate_name__icontains=v) | Q(current_profile__icontains=v)
+        return queryset.filter(q)
+
+    def filter_email_or_contact(self, queryset, name, value):
+        if not value:
+            return queryset
+        values = [v.strip() for v in value.split(',') if v.strip()]
+        if not values:
+            return queryset
+        q = Q()
+        for v in values:
+            q |= Q(email__icontains=v) | Q(contact__icontains=v)
         return queryset.filter(q)
 
 
