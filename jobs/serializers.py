@@ -205,12 +205,6 @@ class JobDetailSerializer(serializers.ModelSerializer):
 
         attrs['hiring_for'] = 'client'
         
-        description_file = attrs.get('description_file')
-        description = attrs.get('description')
-
-        if not description and not description_file:
-            raise serializers.ValidationError({"description": "You must either provide a plain text description or upload a description file."})
-
         if not attrs.get('client'):
             raise serializers.ValidationError({"client": "Client is required since all positions are client-scoped."})
         return attrs

@@ -40,7 +40,7 @@ class Job(BaseModel):
     education           = models.CharField(max_length=200, blank=True)
     min_experience      = models.CharField(max_length=50, blank=True, null=True, default="0")
     max_experience      = models.CharField(max_length=50, blank=True, null=True, default="0")
-    location            = models.CharField(max_length=150)
+    location            = models.CharField(max_length=150, blank=True, null=True)
     openings            = models.CharField(max_length=50, default="1", blank=True, null=True)
     priority            = models.CharField(max_length=10, choices=Priority.choices, default=Priority.MEDIUM)
     budget              = models.CharField(max_length=50, default="0", blank=True, null=True)
