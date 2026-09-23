@@ -27,6 +27,9 @@ class UserAdmin(DefaultUserAdmin):
         ('Google OAuth', {
             'fields': ('google_access_token', 'google_refresh_token', 'google_token_expiry')
         }),
+        ('Microsoft OAuth', {
+            'fields': ('microsoft_access_token', 'microsoft_refresh_token', 'microsoft_token_expiry')
+        }),
         ('Important dates', {'fields': ('last_login', 'date_joined')}),
     )
     add_fieldsets = (
