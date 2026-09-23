@@ -34,7 +34,7 @@ class CandidateFilterSet(django_filters.FilterSet):
     Note: CTC, notice_period, experience_min/max filters moved to ApplicationFilterSet
     as those fields now live on the Application model (per-job data).
     """
-    candidate_name     = CharInContainsFilter(field_name='candidate_name', lookup_expr='icontains')
+    candidate_name     = django_filters.CharFilter(method='filter_candidate_name_or_role')
     email              = CharInContainsFilter(field_name='email', lookup_expr='icontains')
     contact            = CharInContainsFilter(field_name='contact', lookup_expr='icontains')
     current_profile    = CharInContainsFilter(field_name='current_profile', lookup_expr='icontains')
@@ -86,6 +86,17 @@ class CandidateFilterSet(django_filters.FilterSet):
                 valid_ids.append(candidate.id)
         return queryset.filter(id__in=valid_ids)
 
+    def filter_candidate_name_or_role(self, queryset, name, value):
+        if not value:
+            return queryset
+        values = [v.strip() for v in value.split(',') if v.strip()]
+        if not values:
+            return queryset
+        q = Q()
+        for v in values:
+            q |= Q(candidate_name__icontains=v) | Q(current_profile__icontains=v)
+        return queryset.filter(q)
+
 
 class ApplicationFilterSet(django_filters.FilterSet):
     """
@@ -98,7 +109,7 @@ class ApplicationFilterSet(django_filters.FilterSet):
     """
     status             = CharInFilter(field_name='status', lookup_expr='in')
     job                = django_filters.UUIDFilter(field_name='job__id')
-    candidate_name     = CharInContainsFilter(field_name='candidate__candidate_name', lookup_expr='icontains')
+    candidate_name     = django_filters.CharFilter(method='filter_candidate_name_or_role')
     stage_name         = CharInContainsFilter(field_name='current_stage__name', lookup_expr='icontains')
     notice_period      = CharInContainsFilter(field_name='notice_period', lookup_expr='icontains')
     current_ctc        = CharInContainsFilter(field_name='current_ctc', lookup_expr='icontains')
@@ -117,3 +128,14 @@ class ApplicationFilterSet(django_filters.FilterSet):
             'current_ctc', 'expected_ctc',
             'created_after', 'created_before', 'manager_review_status'
         ]
+
+    def filter_candidate_name_or_role(self, queryset, name, value):
+        if not value:
+            return queryset
+        values = [v.strip() for v in value.split(',') if v.strip()]
+        if not values:
+            return queryset
+        q = Q()
+        for v in values:
+            q |= Q(candidate__candidate_name__icontains=v) | Q(candidate__current_profile__icontains=v)
+        return queryset.filter(q)
