@@ -379,116 +379,116 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
                 return  # Exit early, we sent it successfully via API
             except Exception as e:
                 logger.error(f"Gmail API send failed: {e}. Falling back to standard SMTP.")
-    elif sender_user and sender_user.microsoft_access_token:
-        logger.info(f"Attempting to send email via Microsoft Graph API for {from_email_override}")
-        try:
-            import msal
-            import requests as http_requests
-            from django.utils import timezone
-            
-            access_token = sender_user.microsoft_access_token
-            if not sender_user.microsoft_token_expiry or sender_user.microsoft_token_expiry <= timezone.now():
-                if sender_user.microsoft_refresh_token:
-                    tenant = getattr(settings, 'MICROSOFT_OAUTH_TENANT_ID', 'common')
-                    authority = f"https://login.microsoftonline.com/{tenant}"
-                    msal_app = msal.ConfidentialClientApplication(
-                        client_id=getattr(settings, 'MICROSOFT_OAUTH_CLIENT_ID', ''),
-                        client_credential=getattr(settings, 'MICROSOFT_OAUTH_CLIENT_SECRET', ''),
-                        authority=authority,
-                    )
-                    result = msal_app.acquire_token_by_refresh_token(
-                        refresh_token=sender_user.microsoft_refresh_token,
-                        scopes=['User.Read', 'Mail.Send', 'MailboxSettings.Read']
-                    )
-                    if "access_token" in result:
-                        access_token = result["access_token"]
-                        sender_user.microsoft_access_token = access_token
-                        if "refresh_token" in result:
-                            sender_user.microsoft_refresh_token = result["refresh_token"]
-                        if "expires_in" in result:
-                            from datetime import timedelta
-                            sender_user.microsoft_token_expiry = timezone.now() + timedelta(seconds=int(result["expires_in"]))
-                        sender_user.save(update_fields=['microsoft_access_token', 'microsoft_refresh_token', 'microsoft_token_expiry'])
-                    else:
-                        logger.error(f"Microsoft token refresh failed: {result.get('error_description')}")
-                        raise Exception("Failed to refresh Microsoft token")
-                else:
-                    raise Exception("Microsoft token expired and no refresh token available")
-            
-            signature = ""
+        elif sender_user and sender_user.microsoft_access_token:
+            logger.info(f"Attempting to send email via Microsoft Graph API for {from_email_override}")
             try:
-                sig_resp = http_requests.get(
-                    "https://graph.microsoft.com/v1.0/me/mailboxSettings/signature",
-                    headers={"Authorization": f"Bearer {access_token}"},
-                    timeout=5
-                )
-                if sig_resp.status_code == 200:
-                    sig_data = sig_resp.json()
-                    # We usually want the HTML version if available, graph API returns HTML usually.
-                    signature = sig_data.get('value', '') 
-            except Exception as e:
-                logger.error(f"Failed to fetch Microsoft signature: {e}")
+                import msal
+                import requests as http_requests
+                from django.utils import timezone
                 
-            if signature:
-                if '</div>' in html_message:
-                    last_div_idx = html_message.rfind('</div>')
-                    html_message = html_message[:last_div_idx] + f"<br><br>{signature}" + html_message[last_div_idx:]
-                elif '</body>' in html_message:
-                    html_message = html_message.replace('</body>', f'<br><br>{signature}</body>')
-                else:
-                    html_message += f"<br><br>{signature}"
+                access_token = sender_user.microsoft_access_token
+                if not sender_user.microsoft_token_expiry or sender_user.microsoft_token_expiry <= timezone.now():
+                    if sender_user.microsoft_refresh_token:
+                        tenant = getattr(settings, 'MICROSOFT_OAUTH_TENANT_ID', 'common')
+                        authority = f"https://login.microsoftonline.com/{tenant}"
+                        msal_app = msal.ConfidentialClientApplication(
+                            client_id=getattr(settings, 'MICROSOFT_OAUTH_CLIENT_ID', ''),
+                            client_credential=getattr(settings, 'MICROSOFT_OAUTH_CLIENT_SECRET', ''),
+                            authority=authority,
+                        )
+                        result = msal_app.acquire_token_by_refresh_token(
+                            refresh_token=sender_user.microsoft_refresh_token,
+                            scopes=['User.Read', 'Mail.Send', 'MailboxSettings.Read']
+                        )
+                        if "access_token" in result:
+                            access_token = result["access_token"]
+                            sender_user.microsoft_access_token = access_token
+                            if "refresh_token" in result:
+                                sender_user.microsoft_refresh_token = result["refresh_token"]
+                            if "expires_in" in result:
+                                from datetime import timedelta
+                                sender_user.microsoft_token_expiry = timezone.now() + timedelta(seconds=int(result["expires_in"]))
+                            sender_user.save(update_fields=['microsoft_access_token', 'microsoft_refresh_token', 'microsoft_token_expiry'])
+                        else:
+                            logger.error(f"Microsoft token refresh failed: {result.get('error_description')}")
+                            raise Exception("Failed to refresh Microsoft token")
+                    else:
+                        raise Exception("Microsoft token expired and no refresh token available")
+                
+                signature = ""
+                try:
+                    sig_resp = http_requests.get(
+                        "https://graph.microsoft.com/v1.0/me/mailboxSettings/signature",
+                        headers={"Authorization": f"Bearer {access_token}"},
+                        timeout=5
+                    )
+                    if sig_resp.status_code == 200:
+                        sig_data = sig_resp.json()
+                        # We usually want the HTML version if available, graph API returns HTML usually.
+                        signature = sig_data.get('value', '') 
+                except Exception as e:
+                    logger.error(f"Failed to fetch Microsoft signature: {e}")
                     
-                import re
-                plain_signature = re.sub('<[^<]+?>', '', signature)
-                plain_message += f"\n\n{plain_signature}"
-                
-            mail_body = {
-                "message": {
-                    "subject": subject,
-                    "body": {
-                        "contentType": "HTML",
-                        "content": html_message
+                if signature:
+                    if '</div>' in html_message:
+                        last_div_idx = html_message.rfind('</div>')
+                        html_message = html_message[:last_div_idx] + f"<br><br>{signature}" + html_message[last_div_idx:]
+                    elif '</body>' in html_message:
+                        html_message = html_message.replace('</body>', f'<br><br>{signature}</body>')
+                    else:
+                        html_message += f"<br><br>{signature}"
+                        
+                    import re
+                    plain_signature = re.sub('<[^<]+?>', '', signature)
+                    plain_message += f"\n\n{plain_signature}"
+                    
+                mail_body = {
+                    "message": {
+                        "subject": subject,
+                        "body": {
+                            "contentType": "HTML",
+                            "content": html_message
+                        },
+                        "toRecipients": [{"emailAddress": {"address": email}} for email in recipient_list],
+                        "ccRecipients": [{"emailAddress": {"address": email}} for email in (cc_list or [])],
+                        "attachments": []
                     },
-                    "toRecipients": [{"emailAddress": {"address": email}} for email in recipient_list],
-                    "ccRecipients": [{"emailAddress": {"address": email}} for email in (cc_list or [])],
-                    "attachments": []
-                },
-                "saveToSentItems": True
-            }
-            
-            if attachments:
-                import base64
-                for filename, content, mimetype in attachments:
-                    if isinstance(content, str):
-                        content = content.encode('utf-8')
-                    encoded_content = base64.b64encode(content).decode('utf-8')
-                    mail_body["message"]["attachments"].append({
-                        "@odata.type": "#microsoft.graph.fileAttachment",
-                        "name": filename,
-                        "contentType": mimetype,
-                        "contentBytes": encoded_content
-                    })
-                    
-            send_resp = http_requests.post(
-                "https://graph.microsoft.com/v1.0/me/sendMail",
-                headers={
-                    "Authorization": f"Bearer {access_token}",
-                    "Content-Type": "application/json"
-                },
-                json=mail_body,
-                timeout=10
-            )
-            
-            if send_resp.status_code in [200, 202]:
-                logger.info("Successfully sent via Microsoft Graph API!")
-                _save_email_log(status='sent')
-                return
-            else:
-                logger.error(f"Microsoft Graph API send failed: {send_resp.text}")
-                raise Exception(f"Graph API Error: {send_resp.status_code}")
+                    "saveToSentItems": True
+                }
                 
-        except Exception as e:
-            logger.error(f"Microsoft Graph API email process failed: {e}. Falling back to standard SMTP.")
+                if attachments:
+                    import base64
+                    for filename, content, mimetype in attachments:
+                        if isinstance(content, str):
+                            content = content.encode('utf-8')
+                        encoded_content = base64.b64encode(content).decode('utf-8')
+                        mail_body["message"]["attachments"].append({
+                            "@odata.type": "#microsoft.graph.fileAttachment",
+                            "name": filename,
+                            "contentType": mimetype,
+                            "contentBytes": encoded_content
+                        })
+                        
+                send_resp = http_requests.post(
+                    "https://graph.microsoft.com/v1.0/me/sendMail",
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Content-Type": "application/json"
+                    },
+                    json=mail_body,
+                    timeout=10
+                )
+                
+                if send_resp.status_code in [200, 202]:
+                    logger.info("Successfully sent via Microsoft Graph API!")
+                    _save_email_log(status='sent')
+                    return
+                else:
+                    logger.error(f"Microsoft Graph API send failed: {send_resp.text}")
+                    raise Exception(f"Graph API Error: {send_resp.status_code}")
+                    
+            except Exception as e:
+                logger.error(f"Microsoft Graph API email process failed: {e}. Falling back to standard SMTP.")
     else:
         from_email = get_org_from_email(organization)
 
