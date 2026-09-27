@@ -344,12 +344,19 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
                 message = MIMEMultipart('alternative')
                 
             from email.utils import make_msgid, formatdate
-            message['Message-ID'] = make_msgid()
+            domain = 'recruitos.jmstech.co'
+            message['Message-ID'] = make_msgid(domain=domain)
             message['Date'] = formatdate(localtime=True)
             message['To'] = ", ".join(recipient_list)
             if cc_list:
                 message['Cc'] = ", ".join(cc_list)
-            message['From'] = from_email
+            
+            # Use name if available
+            if sender_user and sender_user.name:
+                message['From'] = f"{sender_user.name} <{from_email}>"
+            else:
+                message['From'] = from_email
+                
             message['Subject'] = subject
 
             # The text parts go into an 'alternative' block if we have attachments (mixed root)
@@ -452,7 +459,12 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
                             "contentType": "HTML",
                             "content": html_message
                         },
-                        "from": {"emailAddress": {"address": from_email}},
+                        "from": {
+                            "emailAddress": {
+                                "address": from_email,
+                                "name": sender_user.name if sender_user else ""
+                            }
+                        },
                         "toRecipients": [{"emailAddress": {"address": email}} for email in recipient_list],
                         "ccRecipients": [{"emailAddress": {"address": email}} for email in (cc_list or [])],
                         "attachments": []
@@ -500,6 +512,7 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
     connection = get_org_email_connection(organization)
 
     try:
+        from email.utils import make_msgid
         msg = EmailMultiAlternatives(
             subject=subject,
             body=plain_message,
@@ -507,6 +520,7 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
             to=recipient_list,
             cc=cc_list,
             connection=connection,
+            headers={'Message-ID': make_msgid(domain='recruitos.jmstech.co')}
         )
         msg.attach_alternative(html_message, 'text/html')
         
@@ -535,6 +549,7 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
 
     # === GLOBAL FALLBACK ===
     try:
+        from email.utils import make_msgid
         global_conn = get_connection(fail_silently=False)
         msg_fallback = EmailMultiAlternatives(
             subject=subject,
@@ -543,6 +558,7 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
             to=recipient_list,
             cc=cc_list,
             connection=global_conn,
+            headers={'Message-ID': make_msgid(domain='recruitos.jmstech.co')}
         )
         msg_fallback.attach_alternative(html_message, 'text/html')
         
