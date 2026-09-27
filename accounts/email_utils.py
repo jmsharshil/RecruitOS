@@ -343,11 +343,14 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
             else:
                 message = MIMEMultipart('alternative')
                 
-            message['to'] = ", ".join(recipient_list)
+            from email.utils import make_msgid, formatdate
+            message['Message-ID'] = make_msgid()
+            message['Date'] = formatdate(localtime=True)
+            message['To'] = ", ".join(recipient_list)
             if cc_list:
-                message['cc'] = ", ".join(cc_list)
-            message['from'] = from_email
-            message['subject'] = subject
+                message['Cc'] = ", ".join(cc_list)
+            message['From'] = from_email
+            message['Subject'] = subject
 
             # The text parts go into an 'alternative' block if we have attachments (mixed root)
             # or directly into the root if we don't (alternative root).
@@ -449,6 +452,7 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
                             "contentType": "HTML",
                             "content": html_message
                         },
+                        "from": {"emailAddress": {"address": from_email}},
                         "toRecipients": [{"emailAddress": {"address": email}} for email in recipient_list],
                         "ccRecipients": [{"emailAddress": {"address": email}} for email in (cc_list or [])],
                         "attachments": []
