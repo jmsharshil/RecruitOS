@@ -343,21 +343,11 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
             else:
                 message = MIMEMultipart('alternative')
                 
-            from email.utils import make_msgid, formatdate
-            domain = 'recruitos.jmstech.co'
-            message['Message-ID'] = make_msgid(domain=domain)
-            message['Date'] = formatdate(localtime=True)
-            message['To'] = ", ".join(recipient_list)
+            message['to'] = ", ".join(recipient_list)
             if cc_list:
-                message['Cc'] = ", ".join(cc_list)
-            
-            # Use name if available
-            if sender_user and sender_user.name:
-                message['From'] = f"{sender_user.name} <{from_email}>"
-            else:
-                message['From'] = from_email
-                
-            message['Subject'] = subject
+                message['cc'] = ", ".join(cc_list)
+            message['from'] = from_email
+            message['subject'] = subject
 
             # The text parts go into an 'alternative' block if we have attachments (mixed root)
             # or directly into the root if we don't (alternative root).
