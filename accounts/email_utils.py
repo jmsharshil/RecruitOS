@@ -338,37 +338,25 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
             except Exception as e:
                 logger.error(f"Failed to fetch Gmail signature: {e}")
 
-            if attachments:
-                message = MIMEMultipart('mixed')
-            else:
-                message = MIMEMultipart('alternative')
-                
-            message['to'] = ", ".join(recipient_list)
+            from email.message import EmailMessage
+            import mimetypes
+            
+            message = EmailMessage()
+            message['To'] = ", ".join(recipient_list)
             if cc_list:
-                message['cc'] = ", ".join(cc_list)
-            message['from'] = from_email
-            message['subject'] = subject
+                message['Cc'] = ", ".join(cc_list)
+            message['From'] = from_email
+            message['Subject'] = subject
 
-            # The text parts go into an 'alternative' block if we have attachments (mixed root)
-            # or directly into the root if we don't (alternative root).
+            message.set_content(plain_message)
+            message.add_alternative(html_message, subtype='html')
+            
             if attachments:
-                alt_part = MIMEMultipart('alternative')
-                alt_part.attach(MIMEText(plain_message, 'plain'))
-                alt_part.attach(MIMEText(html_message, 'html'))
-                message.attach(alt_part)
-                
-                from email.mime.base import MIMEBase
-                from email import encoders
                 for filename, content, mimetype in attachments:
                     maintype, subtype = mimetype.split('/', 1)
-                    part = MIMEBase(maintype, subtype)
-                    part.set_payload(content)
-                    encoders.encode_base64(part)
-                    part.add_header('Content-Disposition', f'attachment; filename="{filename}"')
-                    message.attach(part)
-            else:
-                message.attach(MIMEText(plain_message, 'plain'))
-                message.attach(MIMEText(html_message, 'html'))
+                    if isinstance(content, str):
+                        content = content.encode('utf-8')
+                    message.add_attachment(content, maintype=maintype, subtype=subtype, filename=filename)
 
             raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
             
