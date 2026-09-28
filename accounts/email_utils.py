@@ -451,7 +451,6 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
                 }
                 
                 if attachments:
-                    import base64
                     for filename, content, mimetype in attachments:
                         if isinstance(content, str):
                             content = content.encode('utf-8')
@@ -491,12 +490,18 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
 
     try:
         from email.utils import make_msgid
+        
+        # Prevent spoofing rejection by using the authorized sender for SMTP
+        actual_from_email = get_org_from_email(organization)
+        reply_to = [from_email_override] if from_email_override else None
+        
         msg = EmailMultiAlternatives(
             subject=subject,
             body=plain_message,
-            from_email=from_email,
+            from_email=actual_from_email,
             to=recipient_list,
             cc=cc_list,
+            reply_to=reply_to,
             connection=connection,
             headers={'Message-ID': make_msgid(domain='recruitos.jmstech.co')}
         )
@@ -529,12 +534,15 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
     try:
         from email.utils import make_msgid
         global_conn = get_connection(fail_silently=False)
+        reply_to = [from_email_override] if from_email_override else None
+        
         msg_fallback = EmailMultiAlternatives(
             subject=subject,
             body=plain_message,
             from_email=getattr(settings, 'EMAIL_HOST_USER', settings.DEFAULT_FROM_EMAIL),
             to=recipient_list,
             cc=cc_list,
+            reply_to=reply_to,
             connection=global_conn,
             headers={'Message-ID': make_msgid(domain='recruitos.jmstech.co')}
         )
