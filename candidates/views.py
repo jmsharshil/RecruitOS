@@ -489,11 +489,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = Application.objects.filter(is_deleted=False, organization=user.organization)
-        if user.role in [UserRole.ADMIN, UserRole.MANAGER]:
+        if user.role in [UserRole.ADMIN, UserRole.MANAGER, UserRole.RECRUITER]:
             return qs
-        elif user.role == UserRole.RECRUITER:
-            from django.db.models import Q
-            return qs.filter(Q(job__assigned_recruiters=user) | Q(created_by=user)).distinct()
         return qs.none()
 
     def create(self, request, *args, **kwargs):
@@ -1721,12 +1718,9 @@ class CalendarEventsView(APIView):
             organization=user.organization
         )
 
-        if user.role == UserRole.MANAGER:
-            # Managers can see all events in their organization
+        if user.role in [UserRole.MANAGER, UserRole.RECRUITER]:
+            # Managers and recruiters can see all events in their organization
             pass
-        elif user.role == UserRole.RECRUITER:
-            interviews_qs   = interviews_qs.filter(application__job__assigned_recruiters=user)
-            applications_qs = applications_qs.filter(job__assigned_recruiters=user)
 
         events_by_date = {}
 
