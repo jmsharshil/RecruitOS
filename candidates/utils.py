@@ -199,8 +199,9 @@ def parse_resume_ai(file_input):
 
         # Get client lazily (only when actually parsing resumes)
         client = get_openai_client()
+        model_name = getattr(settings, 'OPENAI_MODEL_NAME', 'gpt-4o-mini')
         res = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=model_name,
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             response_format={"type": "json_object"},

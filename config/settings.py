@@ -258,6 +258,8 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024   # 10 MB
 OPENAI_API_KEY = config('OPENAI_API_KEY', default='dummy-azure-key')
 AZURE_OPENAI_ENDPOINT = config('AZURE_OPENAI_ENDPOINT', default='https://your-resource.openai.azure.com/')
 OPENAI_API_VERSION = config('OPENAI_API_VERSION', default='2024-10-01')
+OPENAI_MODEL_NAME = config('OPENAI_MODEL_NAME', default='gpt-4o-mini')
+
 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 
