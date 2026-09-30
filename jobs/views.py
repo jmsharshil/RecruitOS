@@ -121,6 +121,32 @@ class JobViewSet(viewsets.ModelViewSet):
         new_recruiters = set(job.assigned_recruiters.all())
         if new_recruiters:
             self._notify_new_recruiters(job, new_recruiters)
+        else:
+            emails = list(User.objects.filter(organization=job.organization, is_active=True).exclude(id=self.request.user.id).values_list('email', flat=True))
+            if emails:
+                try:
+                    frontend_base = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))
+                    url = f"{frontend_base}/positions/{job.id}"
+                    
+                    context = {
+                        'job_title': job.title,
+                        'creator_name': self.request.user.name,
+                        'url': url,
+                        'plain_message': f"A new job '{job.title}' was created by {self.request.user.name}.",
+                        'notification_name': 'Job Created',
+                        'notification_event': 'job_created',
+                        'notification_process': 'job_management',
+                    }
+                    send_org_email(
+                        organization=job.organization,
+                        subject=f"New Job Created: {job.title}",
+                        template_name='job_created_unassigned',
+                        context=context,
+                        recipient_list=emails,
+                        from_email_override=self.request.user.email,
+                    )
+                except Exception:
+                    pass
 
         log_action(self.request.user, 'created', 'Job', job.id, f"Created job '{job.title}'")
 

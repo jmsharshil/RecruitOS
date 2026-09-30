@@ -1,0 +1,14 @@
+{% extends "emails/base_email.html" %}
+{% block title %}New Job Created{% endblock %}
+{% block content %}
+<div class="content">
+    <p>Hi Team,</p>
+    
+    <p>A new job '{{ job_title }}' has been created by {{ creator_name }}.</p>
+    <p>Please review the job details.</p>
+    
+    <div style="margin-top: 30px;">
+        <a href="{{ url }}" class="button">View Job Details</a>
+    </div>
+</div>
+{% endblock %}
