@@ -309,9 +309,13 @@ else:
     MEDIA_URL  = "/media/"
     MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 GOOGLE_OAUTH_CLIENT_ID = config('GOOGLE_OAUTH_CLIENT_ID', default='543573978646-hgopbbdj7gvl3uvuatf5no529shg1q8r.apps.googleusercontent.com')
+GOOGLE_OAUTH_IOS_CLIENT_ID = config('GOOGLE_OAUTH_IOS_CLIENT_ID', default='543573978646-5r2s25qrt1o5ebstp85tcdj6j5j0ta5u.apps.googleusercontent.com')
+GOOGLE_OAUTH_ANDROID_CLIENT_ID = config('GOOGLE_OAUTH_ANDROID_CLIENT_ID', default='543573978646-hofpvfvsdpmjekqlm01s5bpk4p6l0mo8.apps.googleusercontent.com')
 GOOGLE_OAUTH_CLIENT_SECRET = config('GOOGLE_OAUTH_CLIENT_SECRET', default='')
 
 # Microsoft OAuth settings for Microsoft Graph API
 MICROSOFT_OAUTH_CLIENT_ID = config('MICROSOFT_OAUTH_CLIENT_ID', default='')
+MICROSOFT_OAUTH_IOS_CLIENT_ID = config('MICROSOFT_OAUTH_IOS_CLIENT_ID', default='36042359-21bd-4e40-ac2e-15ace7af2d64')
+MICROSOFT_OAUTH_ANDROID_CLIENT_ID = config('MICROSOFT_OAUTH_ANDROID_CLIENT_ID', default='36042359-21bd-4e40-ac2e-15ace7af2d64')
 MICROSOFT_OAUTH_CLIENT_SECRET = config('MICROSOFT_OAUTH_CLIENT_SECRET', default='')
 MICROSOFT_OAUTH_TENANT_ID = config('MICROSOFT_OAUTH_TENANT_ID', default='common')

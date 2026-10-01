@@ -139,7 +139,14 @@ class GoogleConfigView(APIView):
 
     def get(self, request):
         client_id = getattr(settings, 'GOOGLE_OAUTH_CLIENT_ID', None)
+        ios_client_id = getattr(settings, 'GOOGLE_OAUTH_IOS_CLIENT_ID', None)
+        android_client_id = getattr(settings, 'GOOGLE_OAUTH_ANDROID_CLIENT_ID', None)
+        
         if not client_id:
             return Response({"error": "Google Client ID not configured"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
-        return Response({"client_id": client_id}, status=status.HTTP_200_OK)
+        return Response({
+            "client_id": client_id,
+            "ios_client_id": ios_client_id,
+            "android_client_id": android_client_id
+        }, status=status.HTTP_200_OK)

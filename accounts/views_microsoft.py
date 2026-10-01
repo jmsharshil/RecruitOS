@@ -146,6 +146,10 @@ class MicrosoftLoginView(APIView):
 
         tenant = getattr(settings, 'MICROSOFT_OAUTH_TENANT_ID', 'common')
         client_id = getattr(settings, 'MICROSOFT_OAUTH_CLIENT_ID', '')
+        ios_client_id = getattr(settings, 'MICROSOFT_OAUTH_IOS_CLIENT_ID', '')
+        android_client_id = getattr(settings, 'MICROSOFT_OAUTH_ANDROID_CLIENT_ID', '')
+        
+        valid_audiences = [c for c in [client_id, ios_client_id, android_client_id] if c]
 
         jwks_url = f"https://login.microsoftonline.com/{tenant}/discovery/v2.0/keys"
 
@@ -157,7 +161,7 @@ class MicrosoftLoginView(APIView):
                 token,
                 signing_key.key,
                 algorithms=["RS256"],
-                audience=client_id,
+                audience=valid_audiences,
                 options={"verify_exp": True},
             )
             return idinfo
@@ -174,9 +178,16 @@ class MicrosoftConfigView(APIView):
 
     def get(self, request):
         client_id = getattr(settings, 'MICROSOFT_OAUTH_CLIENT_ID', None)
+        ios_client_id = getattr(settings, 'MICROSOFT_OAUTH_IOS_CLIENT_ID', None)
+        android_client_id = getattr(settings, 'MICROSOFT_OAUTH_ANDROID_CLIENT_ID', None)
         tenant_id = getattr(settings, 'MICROSOFT_OAUTH_TENANT_ID', 'common')
 
         if not client_id:
             return Response({"error": "Microsoft Client ID not configured"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        return Response({"client_id": client_id, "tenant_id": tenant_id}, status=status.HTTP_200_OK)
+        return Response({
+            "client_id": client_id, 
+            "ios_client_id": ios_client_id, 
+            "android_client_id": android_client_id, 
+            "tenant_id": tenant_id
+        }, status=status.HTTP_200_OK)
