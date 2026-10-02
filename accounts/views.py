@@ -638,6 +638,7 @@ class UnifiedDashboardView(APIView):
             upcoming_interviews.append({
                 "candidate_name": interview.application.candidate.candidate_name,
                 "job_title": interview.application.job.title,
+                "job_id": interview.application.job.id,
                 "date": str(interview.date),
                 "time": str(interview.time),
                 "round": getattr(interview.application.current_stage, 'name', 'Interview'),
@@ -657,6 +658,7 @@ class UnifiedDashboardView(APIView):
                 "title": notif.title,
                 "message": notif.message,
                 "type": notif.type,
+                "link": getattr(notif, 'link', ''),
                 "created_at": notif.created_at
             })
             
