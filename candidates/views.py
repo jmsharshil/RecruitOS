@@ -1543,15 +1543,42 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 Q(manager_review_status='rejected') | Q(interview_schedule__manager_approval_status='rejected')
             )
             
-        queryset = queryset.order_by('-created_at')
+        queryset = queryset.select_related(
+            'candidate', 'job', 'interview_schedule', 
+            'current_stage', 'created_by', 'candidate__uploaded_by'
+        ).order_by('-created_at')
         
+        # Enforce 20 items per page for this specific view
+        if hasattr(self, 'paginator') and hasattr(self.paginator, 'page_size'):
+            self.paginator.page_size = 20
+            
         page = self.paginate_queryset(queryset)
+        apps_to_serialize = page if page is not None else queryset
+        
+        serializer = ApplicationListSerializer(apps_to_serialize, many=True, context={'request': request})
+        
+        grouped_data = {}
+        for app, app_data in zip(apps_to_serialize, serializer.data):
+            if not app.job:
+                continue
+                
+            job_id = str(app.job.id)
+            job_title = app.job.title
+            
+            if job_id not in grouped_data:
+                grouped_data[job_id] = {
+                    "job_id": job_id,
+                    "job_title": job_title,
+                    "applications": []
+                }
+            grouped_data[job_id]["applications"].append(app_data)
+            
+        final_data = list(grouped_data.values())
+        
         if page is not None:
-            serializer = ApplicationDetailSerializer(page, many=True, context={'request': request})
-            return self.get_paginated_response(serializer.data)
-
-        serializer = ApplicationDetailSerializer(queryset, many=True, context={'request': request})
-        return Response(serializer.data)
+            return self.get_paginated_response(final_data)
+            
+        return Response(final_data)
 
     @action(detail=False, methods=['get'], url_path='grouped-approval-queue')
     def grouped_approval_queue(self, request):
