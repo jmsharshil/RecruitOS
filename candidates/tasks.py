@@ -819,3 +819,66 @@ def simulate_bulk_client_reminder_email(application_ids, client_email, recipient
         logger.info(f"Bulk client reminder email sent for {len(applications)} apps to {client_email}")
     except Exception as e:
         logger.error(f"Bulk client reminder email failed: {e}")
+
+@run_in_thread
+def simulate_manager_reminder_email(application_ids, action_user_id=None):
+    try:
+        if not application_ids:
+            return
+
+        applications = Application.objects.select_related(
+            'candidate', 'job', 'job__hiring_manager', 'job__created_by', 'organization'
+        ).filter(id__in=application_ids)
+
+        if not applications.exists():
+            return
+
+        manager_groups = {}
+        for app in applications:
+            manager = app.job.hiring_manager or app.job.created_by
+            if manager and manager.email:
+                if manager.email not in manager_groups:
+                    manager_groups[manager.email] = {
+                        'manager': manager,
+                        'apps': []
+                    }
+                manager_groups[manager.email]['apps'].append(app)
+        
+        from accounts.email_utils import send_org_email
+        
+        from_email = None
+        if action_user_id:
+            from accounts.models import User
+            action_user = User.objects.filter(id=action_user_id).first()
+            if action_user:
+                from_email = action_user.email
+                
+        frontend_base = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))
+
+        for m_email, group in manager_groups.items():
+            manager = group['manager']
+            apps = group['apps']
+            
+            lines = []
+            for app in apps:
+                lines.append(f"- {app.candidate.candidate_name} for {app.job.title}")
+            app_list_str = "\n".join(lines)
+            
+            context = {
+                'manager_name': manager.name,
+                'plain_message': f"This is a reminder to review the following candidate applications pending your approval:\n\n{app_list_str}\n\nPlease visit the Approval Queue on your dashboard: {frontend_base}/approval-queue",
+            }
+            
+            send_org_email(
+                organization=apps[0].organization,
+                subject=f"Reminder: {len(apps)} applications pending review",
+                template_name='generic_email',
+                context=context,
+                recipient_list=[m_email],
+                from_email_override=from_email,
+            )
+            logger.info(f"Sent manager reminder email to {m_email} for {len(apps)} applications")
+
+    except Exception as e:
+        logger.error(f"Failed to send manager reminder email: {e}")
+

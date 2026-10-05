@@ -17,6 +17,7 @@ class CandidateStatus(models.TextChoices):
     OFFERED             = 'offered'
     JOINED              = 'joined'
     BACKOUT             = 'backout'
+    DUPLICATE           = 'duplicate'
 
 class InterviewMode(models.TextChoices):
     ONLINE     = 'online'

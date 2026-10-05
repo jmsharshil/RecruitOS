@@ -642,7 +642,15 @@ class UnifiedDashboardView(APIView):
             app = interview.application
             cand = app.candidate
             worker = app.created_by or cand.uploaded_by
-            worker_name = worker.name if worker else "System/Candidate"
+            
+            if worker:
+                worker_info = {
+                    "id": str(worker.id),
+                    "name": worker.name,
+                    "role": getattr(worker, 'role', '')
+                }
+            else:
+                worker_info = None
 
             upcoming_interviews.append({
                 "candidate_name": cand.candidate_name,
@@ -653,7 +661,7 @@ class UnifiedDashboardView(APIView):
                 "round": getattr(app.current_stage, 'name', 'Interview'),
                 "mode": interview.mode,
                 "interviewer_name": interview.interviewer_name or "",
-                "worked_by": worker_name
+                "worked_by": worker_info
             })
             
         # 4. Active Clients

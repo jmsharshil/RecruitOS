@@ -468,7 +468,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         if self.action in ['list', 'retrieve', 'create', 'update', 'partial_update',
                            'move_stage', 'schedule_interview', 'send_to_client',
                            'submit_for_review', 'review', 'bulk_review', 'grouped_approval_queue',
-                           'send_interview_to_client', 'update_interview_attendance']:
+                           'approval_queue_list', 'manager_reminder', 'send_interview_to_client', 'update_interview_attendance']:
             return [permissions.IsAuthenticated()]
         if self.action == 'destroy':
             return [IsAdmin()]
@@ -1166,6 +1166,40 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             "errors": errors
         }, status=200)
 
+    @action(detail=False, methods=['post'], url_path='manager-reminder')
+    def manager_reminder(self, request):
+        """Bulk send reminder for applications to manager."""
+        application_ids = request.data.get('application_ids', [])
+        
+        if not isinstance(application_ids, list) or not application_ids:
+            raise ValidationError({"error": "Provide a list of application_ids"})
+
+        applications = self.get_queryset().filter(id__in=application_ids).select_related('job', 'candidate')
+        if not applications.exists():
+            raise ValidationError({"error": "No valid applications found."})
+
+        from candidates.models import ApplicationHistory
+        for app in applications:
+            manager = app.job.hiring_manager or app.job.created_by
+            manager_name = manager.name if manager else "manager"
+            
+            log_action(request.user, 'sent', 'Application', app.id, f"Sent reminder to manager for {app.candidate.candidate_name}")
+            
+            ApplicationHistory.objects.create(
+                application=app,
+                user=request.user,
+                action="manager_reminder",
+                notes=f"Sent a review reminder to manager: {manager_name}",
+                organization=app.organization
+            )
+
+        from candidates.tasks import simulate_manager_reminder_email
+        simulate_manager_reminder_email(application_ids, action_user_id=request.user.id)
+
+        return Response({
+            "message": f"Successfully sent reminders for {applications.count()} applications to managers."
+        }, status=200)
+
     @action(detail=False, methods=['post'], url_path='client-reminder')
     def client_reminder(self, request):
         """Bulk send reminder for applications to client."""
@@ -1478,6 +1512,46 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 print(f"Auto-send to client failed: {e}")
 
         return Response(ApplicationDetailSerializer(application).data)
+
+    @action(detail=False, methods=['get'], url_path='approval-queue-list')
+    def approval_queue_list(self, request):
+        """
+        API to get a list of applications filtered by a specific approval status.
+        Query params:
+        - job_id: UUID
+        - approval_status: 'pending', 'approved', or 'rejected'
+        """
+        job_id = request.query_params.get('job_id')
+        approval_status = request.query_params.get('approval_status')
+        
+        queryset = self.filter_queryset(self.get_queryset())
+        
+        from django.db.models import Q
+        if job_id:
+            queryset = queryset.filter(job_id=job_id)
+            
+        if approval_status == 'pending':
+            queryset = queryset.filter(
+                Q(manager_review_status='pending') | Q(interview_schedule__manager_approval_status='pending')
+            )
+        elif approval_status == 'approved':
+            queryset = queryset.filter(
+                Q(manager_review_status='accepted') | Q(interview_schedule__manager_approval_status='approved')
+            )
+        elif approval_status == 'rejected':
+            queryset = queryset.filter(
+                Q(manager_review_status='rejected') | Q(interview_schedule__manager_approval_status='rejected')
+            )
+            
+        queryset = queryset.order_by('-created_at')
+        
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = ApplicationDetailSerializer(page, many=True, context={'request': request})
+            return self.get_paginated_response(serializer.data)
+
+        serializer = ApplicationDetailSerializer(queryset, many=True, context={'request': request})
+        return Response(serializer.data)
 
     @action(detail=False, methods=['get'], url_path='grouped-approval-queue')
     def grouped_approval_queue(self, request):

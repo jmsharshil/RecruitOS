@@ -318,6 +318,7 @@ class JobViewSet(viewsets.ModelViewSet):
             CandidateStatus.ON_HOLD,
             CandidateStatus.REJECTED,
             CandidateStatus.BACKOUT,
+            CandidateStatus.DUPLICATE,
         ]
         
         apps = Application.objects.filter(job=job, is_deleted=False, status__in=allowed_stages).select_related('candidate', 'interview_schedule')
