@@ -659,7 +659,9 @@ def simulate_client_interview_details_email(schedule_id, action_user_id=None):
 @run_in_thread
 def simulate_bulk_client_interview_details_email(schedule_ids, client_email, recipient_name, action_user_id=None):
     try:
-        schedules = InterviewSchedule.objects.filter(id__in=schedule_ids).select_related('application__candidate', 'application__job', 'organization')
+        schedules = InterviewSchedule.objects.filter(id__in=schedule_ids).select_related(
+            'application__candidate', 'application__job', 'organization'
+        ).order_by('date', 'time')
         if not schedules.exists():
             return
             

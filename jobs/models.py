@@ -97,4 +97,5 @@ DEFAULT_STAGES = [
     {"name": "Client Round", "order": 4, "color": "sky"},
     {"name": "Offer",        "order": 5, "color": "amber"},
     {"name": "Hired",        "order": 6, "color": "green"},
+    {"name": "Duplicate",    "order": 7, "color": "red"},
 ]

@@ -672,8 +672,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='move-stage')
     def move_stage(self, request, pk=None):
-        if request.user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
-            return Response({"error": "Only Admins and Managers can change the pipeline stage."}, status=403)
+        if request.user.role not in [UserRole.ADMIN, UserRole.MANAGER, UserRole.RECRUITER]:
+            return Response({"error": "Only Admins, Managers and Recruiters can change the pipeline stage."}, status=403)
             
         application = self.get_object()
         stage_id = request.data.get('stage_id')
@@ -696,14 +696,31 @@ class ApplicationViewSet(viewsets.ModelViewSet):
 
             if request.user.role == UserRole.RECRUITER:
                 try:
-                    send_candidate_status_update_email(
-                        application,
-                        action=f"Stage moved to {stage.name}",
-                        notes="",
-                        recruiter=request.user
-                    )
+                    frontend_base = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))
+                    url = f"{frontend_base}/positions/{application.job.id}/pipeline"
+                    
+                    manager = application.job.hiring_manager or application.job.created_by
+                    if manager and manager.email:
+                        context = {
+                            "manager_name": manager.name,
+                            "candidate_name": application.candidate.candidate_name,
+                            "job_title": application.job.title,
+                            "status": stage.name,
+                            "url": url,
+                            "org_name": application.organization.name if application.organization else "RecruitOS",
+                            "plain_message": f"The stage/status of {application.candidate.candidate_name} for {application.job.title} has been updated to {stage.name} by recruiter {request.user.name}.\nPlease review the latest status and take the necessary action."
+                        }
+                        
+                        send_org_email(
+                            organization=application.organization,
+                            subject=f"Stage Update: {application.candidate.candidate_name} — {application.job.title}",
+                            template_name="generic_email",
+                            context=context,
+                            recipient_list=[manager.email],
+                            from_email_override=request.user.email
+                        )
                 except Exception as e:
-                    logger.error(f"Failed to send status update email: {e}")
+                    logger.error(f"Failed to notify manager of stage change: {e}")
             elif request.user.role in [UserRole.MANAGER, UserRole.ADMIN]:
                 try:
                     frontend_base = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))

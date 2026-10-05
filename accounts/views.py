@@ -631,19 +631,29 @@ class UnifiedDashboardView(APIView):
             application__job__in=job_qs,
             date__range=[today, three_days_later],
             application__is_deleted=False
-        ).select_related('application__candidate', 'application__job', 'application__current_stage')
+        ).select_related(
+            'application__candidate', 'application__job', 
+            'application__current_stage', 'application__created_by', 
+            'application__candidate__uploaded_by'
+        ).order_by('date', 'time')
         
         upcoming_interviews = []
         for interview in interview_qs:
+            app = interview.application
+            cand = app.candidate
+            worker = app.created_by or cand.uploaded_by
+            worker_name = worker.name if worker else "System/Candidate"
+
             upcoming_interviews.append({
-                "candidate_name": interview.application.candidate.candidate_name,
-                "job_title": interview.application.job.title,
-                "job_id": interview.application.job.id,
+                "candidate_name": cand.candidate_name,
+                "job_title": app.job.title,
+                "job_id": app.job.id,
                 "date": str(interview.date),
                 "time": str(interview.time),
-                "round": getattr(interview.application.current_stage, 'name', 'Interview'),
+                "round": getattr(app.current_stage, 'name', 'Interview'),
                 "mode": interview.mode,
-                "interviewer_name": interview.interviewer_name or ""
+                "interviewer_name": interview.interviewer_name or "",
+                "worked_by": worker_name
             })
             
         # 4. Active Clients
