@@ -632,7 +632,7 @@ class UnifiedDashboardView(APIView):
             date__range=[today, three_days_later],
             application__is_deleted=False
         ).select_related(
-            'application__candidate', 'application__job', 
+            'application__candidate', 'application__job', 'application__job__client',
             'application__current_stage', 'application__created_by', 
             'application__candidate__uploaded_by'
         ).order_by('date', 'time')
@@ -652,10 +652,20 @@ class UnifiedDashboardView(APIView):
             else:
                 worker_info = None
 
+            client = app.job.client
+            client_info = None
+            if client:
+                client_info = {
+                    "id": str(client.id),
+                    "name": client.company_name
+                }
+
             upcoming_interviews.append({
                 "candidate_name": cand.candidate_name,
                 "job_title": app.job.title,
                 "job_id": app.job.id,
+                "client": client_info,
+                "client_name": client.company_name if client else "",
                 "date": str(interview.date),
                 "time": str(interview.time),
                 "round": getattr(app.current_stage, 'name', 'Interview'),

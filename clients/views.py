@@ -485,17 +485,17 @@ class TeamMemberTrackerFormatViewSet(viewsets.ModelViewSet):
             for col in columns:
                 col_norm = col.strip().lower().replace(' ', '_')
                 
-                if col_norm in ['candidate_name', 'name']:
+                if col_norm in ['candidate_name', 'name', 'candidate', 'name_of_candidate']:
                     row[col] = candidate.candidate_name
-                elif col_norm == 'email':
+                elif col_norm in ['email', 'candidate_email_id', 'candidate_email', 'email_id', 'e-mail_id', 'e-mail']:
                     row[col] = candidate.email
-                elif col_norm in ['phone', 'contact', 'contacts', 'contact_no.', 'contact_no']:
+                elif col_norm in ['phone', 'contact', 'contacts', 'mobile_no.', 'mobile_no', 'mobile_number', 'mobile', 'contact_no.', 'contact_no']:
                     row[col] = candidate.contact
-                elif col_norm in ['total_experience', 'experience', 'total_exp']:
+                elif col_norm in ['total_experience', 'experience', 'total_exp', 'exp', 'total_years_of_exp', 'total_years_of_experience']:
                     row[col] = candidate.experience if candidate.experience else ""
-                elif col_norm == 'current_company':
+                elif col_norm in ['current_company', 'company', 'organization']:
                     row[col] = candidate.current_company
-                elif col_norm in ['current_designation', 'current_profile', 'designation', 'role']:
+                elif col_norm in ['current_designation', 'current_profile', 'designation', 'role', 'c._designation', 'c_designation']:
                     row[col] = candidate.current_profile
                 elif col_norm in ['current_ctc', 'ctc', 'cctc']:
                     val = app.current_ctc if app.current_ctc else candidate.current_ctc

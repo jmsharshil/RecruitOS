@@ -511,7 +511,18 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
             for filename, content, mimetype in attachments:
                 msg.attach(filename, content, mimetype)
                 
-        msg.send()
+        import time
+        try:
+            msg.send()
+        except Exception as org_retry_exc:
+            logger.warning(f"Org SMTP send failed initially: {org_retry_exc}. Retrying in 5s...")
+            try:
+                msg.connection.close()
+            except Exception: pass
+            time.sleep(5)
+            msg.connection = get_org_email_connection(organization)
+            msg.send()
+            
         print(f"==========> [DEBUG] Org SMTP send SUCCESS to {recipient_list}")
         logger.info(
             f"Email '{template_name}' sent to {recipient_list} "
@@ -552,7 +563,18 @@ def send_org_email(organization, subject: str, template_name: str, context: dict
             for filename, content, mimetype in attachments:
                 msg_fallback.attach(filename, content, mimetype)
                 
-        msg_fallback.send()
+        import time
+        try:
+            msg_fallback.send()
+        except Exception as retry_exc:
+            logger.warning(f"Fallback send failed: {retry_exc}. Retrying in 5s...")
+            try:
+                msg_fallback.connection.close()
+            except Exception: pass
+            time.sleep(5)
+            msg_fallback.connection = get_connection(fail_silently=False)
+            msg_fallback.send()
+            
         print(f"==========> [DEBUG] Global Fallback SMTP send SUCCESS to {recipient_list}")
         logger.info(
             f"Email '{template_name}' sent to {recipient_list} "

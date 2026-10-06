@@ -1,4 +1,5 @@
 import logging
+import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
 from django.utils import timezone
 from candidates.models import InterviewSchedule
@@ -10,7 +11,8 @@ logger = logging.getLogger(__name__)
 
 def send_daily_interview_reminders():
     try:
-        today = timezone.localdate()
+        ist_tz = pytz.timezone('Asia/Kolkata')
+        today = timezone.localdate(timezone=ist_tz)
         logger.info(f"Running daily interview reminders for {today}")
         
         interviews_today = InterviewSchedule.objects.filter(
@@ -73,8 +75,9 @@ def send_daily_interview_reminders():
         logger.error(f"Error in send_daily_interview_reminders job: {e}")
 
 def start_scheduler():
-    scheduler = BackgroundScheduler(timezone=settings.TIME_ZONE)
-    # Schedule the job to run daily at 10:00 AM
+    ist_tz = pytz.timezone('Asia/Kolkata')
+    scheduler = BackgroundScheduler(timezone=ist_tz)
+    # Schedule the job to run daily at 10:00 AM IST
     scheduler.add_job(send_daily_interview_reminders, 'cron', hour=10, minute=0)
     scheduler.start()
-    logger.info("APScheduler started: Daily interview reminder scheduled for 10:00 AM.")
+    logger.info("APScheduler started: Daily interview reminder scheduled for 10:00 AM IST.")

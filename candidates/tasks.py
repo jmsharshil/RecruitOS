@@ -34,10 +34,10 @@ def build_tracker_fields(application, candidate):
                 val = ""
                 col_norm = col.strip().lower().replace(' ', '_')
                 
-                if col_norm in ['candidate_name', 'name', 'candidate']: val = candidate.candidate_name
-                elif col_norm in ['email', 'candidate_email_id', 'candidate_email', 'email_id']: val = candidate.email
-                elif col_norm in ['phone', 'contact', 'contacts', 'mobile_no.', 'mobile_no', 'mobile_number', 'mobile']: val = candidate.contact
-                elif col_norm in ['total_experience', 'experience', 'total_exp', 'exp']: val = candidate.experience
+                if col_norm in ['candidate_name', 'name', 'candidate', 'name_of_candidate']: val = candidate.candidate_name
+                elif col_norm in ['email', 'candidate_email_id', 'candidate_email', 'email_id', 'e-mail_id', 'e-mail']: val = candidate.email
+                elif col_norm in ['phone', 'contact', 'contacts', 'mobile_no.', 'mobile_no', 'mobile_number', 'mobile', 'contact_no.', 'contact_no']: val = candidate.contact
+                elif col_norm in ['total_experience', 'experience', 'total_exp', 'exp', 'total_years_of_exp', 'total_years_of_experience']: val = candidate.experience
                 elif col_norm in ['current_company', 'company', 'organization']: val = candidate.current_company
                 elif col_norm in ['current_designation', 'current_profile', 'designation', 'role', 'c._designation', 'c_designation']: val = candidate.current_profile
                 elif col_norm in ['current_ctc', 'ctc', 'cctc']: 
@@ -559,11 +559,11 @@ def _build_tracker_and_attachments_for_apps(applications, job):
             val = ""
             col_norm = col.strip().lower().replace(' ', '_')
             
-            if col_norm in ['sr._no.', 'sr._no', 'sr_no.', 'sr_no', 'serial_no', 's._no.', 's_no', 's.no.', 's.no', 'sr']: val = idx + 1
-            elif col_norm in ['candidate_name', 'name', 'candidate']: val = candidate.candidate_name
-            elif col_norm in ['email', 'candidate_email_id', 'candidate_email', 'email_id']: val = candidate.email
-            elif col_norm in ['phone', 'contact', 'contacts', 'mobile_no.', 'mobile_no', 'mobile_number', 'mobile']: val = candidate.contact
-            elif col_norm in ['total_experience', 'experience', 'total_exp', 'exp']: val = candidate.experience
+            if col_norm in ['sr._no.', 'sr._no', 'sr_no.', 'sr_no', 'serial_no', 's._no.', 's_no', 's.no.', 's.no', 'sr', 'sr.no']: val = idx + 1
+            elif col_norm in ['candidate_name', 'name', 'candidate', 'name_of_candidate']: val = candidate.candidate_name
+            elif col_norm in ['email', 'candidate_email_id', 'candidate_email', 'email_id', 'e-mail_id', 'e-mail']: val = candidate.email
+            elif col_norm in ['phone', 'contact', 'contacts', 'mobile_no.', 'mobile_no', 'mobile_number', 'mobile', 'contact_no.', 'contact_no']: val = candidate.contact
+            elif col_norm in ['total_experience', 'experience', 'total_exp', 'exp', 'total_years_of_exp', 'total_years_of_experience']: val = candidate.experience
             elif col_norm in ['current_company', 'company', 'organization']: val = candidate.current_company
             elif col_norm in ['current_designation', 'current_profile', 'designation', 'role', 'c._designation', 'c_designation']: val = candidate.current_profile
             elif col_norm in ['current_ctc', 'ctc', 'cctc']: 
@@ -596,7 +596,8 @@ def _build_tracker_and_attachments_for_apps(applications, job):
                 import os
                 resume_filename = os.path.basename(candidate.resume.name)
                 safe_name = candidate.candidate_name.replace(' ', '_')
-                resume_filename = f"{safe_name}_{resume_filename}"
+                if safe_name.lower() not in resume_filename.lower():
+                    resume_filename = f"{safe_name}_{resume_filename}"
                 mimetype = 'application/pdf' if resume_filename.lower().endswith('.pdf') else 'application/octet-stream'
                 attachments.append((resume_filename, resume_content, mimetype))
             except Exception as e:
