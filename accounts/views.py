@@ -814,6 +814,52 @@ class UnifiedDashboardView(APIView):
                 "interviewed": interviewed_dict.get(month_name, 0)
             })
             
+        if request.GET.get('export') == 'true':
+            import openpyxl
+            from django.http import HttpResponse
+            
+            wb = openpyxl.Workbook()
+            
+            # Sheet 1: Overview
+            ws1 = wb.active
+            ws1.title = 'Overview'
+            ws1.append(['Metric', 'Value'])
+            ws1.append(['Total Candidates', total_candidates])
+            ws1.append(['Active Clients', active_clients])
+            ws1.append(['Upcoming Interviews', len(upcoming_interviews)])
+            ws1.append(['Offer Acceptance Rate (%)', offer_acceptance_rate])
+            ws1.append(['Average Time to Hire (Days)', average_time_to_hire_days])
+            ws1.append(['Rejection Rate (%)', rejection_rate])
+            ws1.append([])
+            ws1.append(['Active Jobs by Status', 'Count'])
+            for aj in active_jobs:
+                ws1.append([aj['status'], aj['count']])
+                
+            # Sheet 2: Pipeline & Jobs
+            ws2 = wb.create_sheet(title='Pipeline & Jobs')
+            ws2.append(['Candidate Status', 'Count'])
+            for po in pipeline_overview:
+                ws2.append([po['status'], po['count']])
+            ws2.append([])
+            ws2.append(['Top Performing Jobs', 'Active Candidates'])
+            for tp in top_performing_jobs:
+                ws2.append([tp['title'], tp['active_candidates']])
+            ws2.append([])
+            ws2.append(['Hires by Client', 'Hires Count'])
+            for hc in hires_by_client:
+                ws2.append([hc['client_name'], hc['hires_count']])
+                
+            # Sheet 3: Upcoming Interviews
+            ws3 = wb.create_sheet(title='Upcoming Interviews')
+            ws3.append(['Candidate Name', 'Job Title', 'Client Name', 'Date', 'Time', 'Round', 'Mode', 'Interviewer'])
+            for ui in upcoming_interviews:
+                ws3.append([ui['candidate_name'], ui['job_title'], ui['client_name'], ui['date'], ui['time'], ui['round'], ui['mode'], ui['interviewer_name']])
+            
+            response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            response['Content-Disposition'] = 'attachment; filename="dashboard_export.xlsx"'
+            wb.save(response)
+            return response
+
         return Response({
             "top_stats": {
                 "total_candidates": total_candidates,
