@@ -600,11 +600,40 @@ class UnifiedDashboardView(APIView):
         user = request.user
         org = user.organization
         
+        target_user_id = request.GET.get('user_id')
+        if target_user_id:
+            try:
+                from accounts.models import User
+                target_user = User.objects.get(id=target_user_id, organization=org)
+                user = target_user
+            except Exception:
+                pass
+        
+        from_date_str = request.GET.get('from_date')
+        to_date_str = request.GET.get('to_date')
+        
+        from django.utils.dateparse import parse_date
+        
+        date_filter = {}
+        if from_date_str:
+            parsed_from = parse_date(from_date_str)
+            if parsed_from:
+                date_filter['created_at__gte'] = parsed_from
+        if to_date_str:
+            parsed_to = parse_date(to_date_str)
+            if parsed_to:
+                # To make it inclusive of the end date, we could add 1 day or use date() on the field, but simple __lte works for DateField. Since created_at is DateTimeField, we should use __date__lte or similar. 
+                date_filter['created_at__date__lte'] = parsed_to
+                if 'created_at__gte' in date_filter:
+                    date_filter['created_at__date__gte'] = parsed_from
+                    del date_filter['created_at__gte']
+
+        
         # 1. Total Candidates
-        total_candidates = Candidate.objects.filter(is_deleted=False, organization=org).count()
+        total_candidates = Candidate.objects.filter(is_deleted=False, organization=org, **date_filter).count()
         
         # 2. Active Jobs grouped by status
-        job_qs = Job.objects.filter(is_deleted=False, organization=org)
+        job_qs = Job.objects.filter(is_deleted=False, organization=org, **date_filter)
         
         if user.role == UserRole.MANAGER:
             job_qs = job_qs.filter(created_by=user)
@@ -623,13 +652,16 @@ class UnifiedDashboardView(APIView):
         active_jobs = [{"status": k, "count": v} for k, v in status_counts.items()]
         
         # 3. Interviews Upcoming (today to 3 days)
-        today = timezone.localdate()
-        three_days_later = today + timedelta(days=3)
-        
+        if from_date_str and to_date_str:
+            date_range = [parse_date(from_date_str), parse_date(to_date_str)]
+        else:
+            today = timezone.localdate()
+            date_range = [today, today + timedelta(days=3)]
+            
         interview_qs = InterviewSchedule.objects.filter(
             is_deleted=False,
             application__job__in=job_qs,
-            date__range=[today, three_days_later],
+            date__range=date_range,
             application__is_deleted=False
         ).select_related(
             'application__candidate', 'application__job', 'application__job__client',
@@ -675,7 +707,10 @@ class UnifiedDashboardView(APIView):
             })
             
         # 4. Active Clients
-        active_clients = Client.objects.filter(is_deleted=False, status=ClientStatus.ACTIVE, organization=org).count()
+        client_qs = Client.objects.filter(is_deleted=False, status=ClientStatus.ACTIVE, organization=org, **date_filter)
+        if user.role == UserRole.RECRUITER:
+            client_qs = client_qs.filter(jobs__is_deleted=False, jobs__assigned_recruiters=user).distinct()
+        active_clients = client_qs.count()
         
         # 5. Unread Activity
         from notifications.models import Notification
@@ -709,7 +744,7 @@ class UnifiedDashboardView(APIView):
         
         # 1. Pipeline Overview (Candidate status breakdown for active jobs)
         pipeline_counts = {s: 0 for s, _ in CandidateStatus.choices}
-        for item in Application.objects.filter(is_deleted=False, job__in=job_qs).values('status').annotate(count=Count('id')):
+        for item in Application.objects.filter(is_deleted=False, job__in=job_qs, **date_filter).values('status').annotate(count=Count('id')):
             if item['status'] in pipeline_counts:
                 pipeline_counts[item['status']] = item['count']
         pipeline_overview = [{'status': k, 'count': v} for k, v in pipeline_counts.items()]
@@ -729,7 +764,7 @@ class UnifiedDashboardView(APIView):
         ]
         
         # 3. Offer Acceptance Rate
-        app_qs = Application.objects.filter(is_deleted=False, job__in=job_qs)
+        app_qs = Application.objects.filter(is_deleted=False, job__in=job_qs, **date_filter)
         offered_apps = app_qs.filter(status__in=[CandidateStatus.OFFERED, CandidateStatus.HIRED, CandidateStatus.JOINED, CandidateStatus.BACKOUT]).count()
         accepted_apps = app_qs.filter(status__in=[CandidateStatus.HIRED, CandidateStatus.JOINED]).count()
         offer_acceptance_rate = round((accepted_apps / offered_apps * 100) if offered_apps > 0 else 0.0, 2)
