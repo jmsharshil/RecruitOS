@@ -1524,7 +1524,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         """
         job_id = request.query_params.get('job_id')
         approval_status = request.query_params.get('approval_status')
-        stage_name = request.query_params.get('stage')
+        stage_name = request.query_params.get('stage') or request.query_params.get('stage_name')
         
         queryset = self.filter_queryset(self.get_queryset())
         
@@ -1545,14 +1545,18 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 Q(manager_review_status='rejected') | Q(interview_schedule__manager_approval_status='rejected')
             )
             
-        from jobs.models import DEFAULT_STAGES
+        from candidates.models import CandidateStatus
         if stage_name:
-            # Support multiple comma-separated stages
             stage_names_list = [s.strip() for s in stage_name.split(',')]
-            queryset = queryset.filter(current_stage__name__in=stage_names_list)
+            queryset = queryset.filter(status__in=stage_names_list)
         else:
-            default_stage_names = [s['name'] for s in DEFAULT_STAGES]
-            queryset = queryset.filter(current_stage__name__in=default_stage_names)
+            default_statuses = [
+                CandidateStatus.SENT_TO_CLIENT, CandidateStatus.INTERVIEW_ALIGN, 
+                CandidateStatus.SELECT, CandidateStatus.OFFERED, CandidateStatus.JOINED, 
+                CandidateStatus.ON_HOLD, CandidateStatus.REJECTED, 
+                CandidateStatus.BACKOUT, CandidateStatus.DUPLICATE
+            ]
+            queryset = queryset.filter(status__in=default_statuses)
             
         queryset = queryset.select_related(
             'candidate', 'job', 'interview_schedule', 
