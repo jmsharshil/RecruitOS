@@ -1520,9 +1520,11 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         Query params:
         - job_id: UUID
         - approval_status: 'pending', 'approved', or 'rejected'
+        - stage: string (optional, to filter for a specific stage name)
         """
         job_id = request.query_params.get('job_id')
         approval_status = request.query_params.get('approval_status')
+        stage_name = request.query_params.get('stage')
         
         queryset = self.filter_queryset(self.get_queryset())
         
@@ -1543,14 +1545,23 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 Q(manager_review_status='rejected') | Q(interview_schedule__manager_approval_status='rejected')
             )
             
+        from jobs.models import DEFAULT_STAGES
+        if stage_name:
+            # Support multiple comma-separated stages
+            stage_names_list = [s.strip() for s in stage_name.split(',')]
+            queryset = queryset.filter(current_stage__name__in=stage_names_list)
+        else:
+            default_stage_names = [s['name'] for s in DEFAULT_STAGES]
+            queryset = queryset.filter(current_stage__name__in=default_stage_names)
+            
         queryset = queryset.select_related(
             'candidate', 'job', 'interview_schedule', 
             'current_stage', 'created_by', 'candidate__uploaded_by'
         ).order_by('-created_at')
         
-        # Enforce 20 items per page for this specific view
+        # Enforce 50 items per page for this specific view
         if hasattr(self, 'paginator') and hasattr(self.paginator, 'page_size'):
-            self.paginator.page_size = 20
+            self.paginator.page_size = 50
             
         page = self.paginate_queryset(queryset)
         apps_to_serialize = page if page is not None else queryset
