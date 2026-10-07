@@ -1528,6 +1528,17 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         
         queryset = self.filter_queryset(self.get_queryset())
         
+        # Exclude deleted jobs to match dashboard counts
+        queryset = queryset.filter(job__is_deleted=False)
+        
+        # Apply role-based job visibility (like dashboard)
+        user = request.user
+        from accounts.models import UserRole
+        if user.role == UserRole.MANAGER:
+            queryset = queryset.filter(job__created_by=user)
+        elif user.role == UserRole.RECRUITER:
+            queryset = queryset.filter(job__assigned_recruiters=user)
+        
         from django.db.models import Q
         if job_id:
             queryset = queryset.filter(job_id=job_id)
