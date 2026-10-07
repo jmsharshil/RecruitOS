@@ -103,9 +103,11 @@ class JobViewSet(viewsets.ModelViewSet):
                 'url': url,
                 'plain_message': f"You have been assigned a new job: {job.title}.\nPlease review the job details and begin the required recruitment activity at the earliest.",
             }
+            client_name_suffix = f" - {job.client.name}" if getattr(job, 'client', None) else ""
+            location_suffix = f" - {job.location}" if getattr(job, 'location', None) else ""
             send_org_email(
                 organization=job.organization,
-                subject=f"New Job Assignment: {job.title}",
+                subject=f"New Job Assignment: {job.title}{client_name_suffix}{location_suffix}",
                 template_name='job_assigned',
                 context=context,
                 recipient_list=emails,
@@ -137,9 +139,11 @@ class JobViewSet(viewsets.ModelViewSet):
                         'notification_event': 'job_created',
                         'notification_process': 'job_management',
                     }
+                    client_name_suffix = f" - {job.client.name}" if getattr(job, 'client', None) else ""
+                    location_suffix = f" - {job.location}" if getattr(job, 'location', None) else ""
                     send_org_email(
                         organization=job.organization,
-                        subject=f"New Job Created: {job.title}",
+                        subject=f"New Job Created: {job.title}{client_name_suffix}{location_suffix}",
                         template_name='job_created_unassigned',
                         context=context,
                         recipient_list=emails,
