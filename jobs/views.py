@@ -103,7 +103,7 @@ class JobViewSet(viewsets.ModelViewSet):
                 'url': url,
                 'plain_message': f"You have been assigned a new job: {job.title}.\nPlease review the job details and begin the required recruitment activity at the earliest.",
             }
-            client_name_suffix = f" - {job.client.name}" if getattr(job, 'client', None) else ""
+            client_name_suffix = f" - {job.client.company_name}" if getattr(job, 'client', None) and getattr(job.client, 'company_name', None) else ""
             location_suffix = f" - {job.location}" if getattr(job, 'location', None) else ""
             send_org_email(
                 organization=job.organization,
@@ -139,7 +139,7 @@ class JobViewSet(viewsets.ModelViewSet):
                         'notification_event': 'job_created',
                         'notification_process': 'job_management',
                     }
-                    client_name_suffix = f" - {job.client.name}" if getattr(job, 'client', None) else ""
+                    client_name_suffix = f" - {job.client.company_name}" if getattr(job, 'client', None) and getattr(job.client, 'company_name', None) else ""
                     location_suffix = f" - {job.location}" if getattr(job, 'location', None) else ""
                     send_org_email(
                         organization=job.organization,
