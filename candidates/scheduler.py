@@ -21,7 +21,8 @@ def send_daily_interview_reminders():
             application__is_deleted=False
         ).select_related(
             'application__candidate', 
-            'application__job', 
+            'application__job',
+            'application__job__created_by',
             'application__created_by', 
             'application__candidate__uploaded_by',
             'organization'
@@ -31,16 +32,17 @@ def send_daily_interview_reminders():
             logger.info("No interviews scheduled for today.")
             return
 
-        interviews_by_user = defaultdict(list)
+        interviews_by_user_and_creator = defaultdict(list)
         for interview in interviews_today:
             app = interview.application
             worker = app.created_by or app.candidate.uploaded_by
+            job_creator = app.job.created_by
             if worker and worker.email:
-                interviews_by_user[worker].append(interview)
+                interviews_by_user_and_creator[(worker, job_creator)].append(interview)
 
         frontend_base = getattr(settings, 'FRONTEND_URL', getattr(settings, 'FRONTEND_BASE_URL', 'https://recruitos.jmstech.co'))
 
-        for user, interviews in interviews_by_user.items():
+        for (user, job_creator), interviews in interviews_by_user_and_creator.items():
             try:
                 org = interviews[0].organization
                 
@@ -59,12 +61,15 @@ def send_daily_interview_reminders():
                     'plain_message': f"You have {len(interviews)} interview(s) scheduled for today:\n\n{interview_details}\n\nPlease review your dashboard for full details: {frontend_base}"
                 }
                 
+                from_email = job_creator.email if job_creator and job_creator.email else None
+                
                 send_org_email(
                     organization=org,
                     subject=f"Daily Reminder: You have {len(interviews)} interview(s) today",
                     template_name='generic_email',
                     context=context,
-                    recipient_list=[user.email]
+                    recipient_list=[user.email],
+                    from_email_override=from_email
                 )
                 logger.info(f"Sent reminder to {user.email} for {len(interviews)} interview(s).")
                 
